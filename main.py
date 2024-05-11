@@ -1,5 +1,6 @@
-from configparser import ConfigParser
-from multiprocessing import Process
+import configparser
+import multiprocessing
+import sys
 
 import customtkinter
 
@@ -7,13 +8,13 @@ import jellyfin_rpc
 
 
 def on_connect(
-    process: Process,
+    process: multiprocessing.Process,
     entry1: customtkinter.CTkEntry,
     entry2: customtkinter.CTkEntry,
     entry3: customtkinter.CTkEntry,
     button: customtkinter.CTkButton,
 ):
-    config = ConfigParser()
+    config = configparser.ConfigParser()
     config.read('jellyfin_rpc.ini')
     config.set('DEFAULT', 'JELLYFIN_HOST', entry1.get())
     config.set('DEFAULT', 'API_TOKEN', entry2.get())
@@ -25,13 +26,13 @@ def on_connect(
     process.start()
 
 
-def on_closing(process: Process):
+def on_closing(process: multiprocessing.Process):
     try:
         process.terminate()
         process.join()
     except AttributeError:
         pass
-    exit(0)
+    sys.exit(0)
 
 
 def main():
@@ -44,7 +45,7 @@ def main():
     frame = customtkinter.CTkFrame(master=root)
     frame.pack(pady=20, padx=60, fill='both', expand=True)
 
-    config = ConfigParser()
+    config = configparser.ConfigParser()
     config.read('jellyfin_rpc.ini')
 
     if config['DEFAULT']['JELLYFIN_HOST']:
@@ -95,7 +96,7 @@ def main():
         )
     entry3.pack(pady=12, padx=10)
 
-    process = Process(target=jellyfin_rpc.main)
+    process = multiprocessing.Process(target=jellyfin_rpc.main)
     button = customtkinter.CTkButton(
         master=frame,
         text='Connect to Jellyfin',
@@ -114,4 +115,5 @@ def main():
 
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     main()
