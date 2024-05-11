@@ -1,0 +1,28 @@
+[tool.poetry]
+name = "jellyfin-rpc"
+version = "0.1.0"
+description = "Discord RPC for Jellyfin"
+authors = ["Ken Sible <ksible@outlook.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.13"
+jellyfin-apiclient-python = "^1.9.2"
+pypresence = "^4.3.0"
+
+[tool.poetry.group.gui.dependencies]
+customtkinter = "^5.2.2"
+pyinstaller = "^6.6.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+mypy = "^1.10.0"
+isort = "^5.13.2"
+ruff = "^0.4.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.mypy]
+ignore_missing_imports = true
