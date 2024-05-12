@@ -52,21 +52,26 @@ def get_jellyfin_api(config: configparser.SectionProxy) -> api.API:
 def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10):
     RPC = Presence(CLIENT_ID)
     RPC.connect()
-    flag_1 = flag_2 = False
+    flag_1, last_episode = False, -1
     while True:
         for session in get_jellyfin_api(config).sessions():
-            if config['USERNAME'] == session['UserName']:
-                if 'NowPlayingItem' in session:
-                    if not flag_2:
-                        season = session['NowPlayingItem']['ParentIndexNumber']
-                        episode = session['NowPlayingItem']['IndexNumber']
-                        RPC.update(
-                            state=session['NowPlayingItem']['SeriesName'],
-                            details=f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}',
-                            large_image='large_image',
-                        )
-                        flag_2 = True
-                    flag_1 = True
+            if config['USERNAME'] != session['UserName']:
+                continue
+            if 'NowPlayingItem' in session:
+                season = session['NowPlayingItem']['ParentIndexNumber']
+                episode = session['NowPlayingItem']['IndexNumber']
+                if episode != last_episode:
+                    flag_2 = False
+                if not flag_2:
+                    RPC.update(
+                        state=session['NowPlayingItem']['SeriesName'],
+                        details=f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}',
+                        buttons=[{'label': 'Launch Jellyfin', 'url': config['JELLYFIN_HOST']}],
+                        large_image='large_image',
+                        start=time.time(),
+                    )
+                    flag_2, last_episode = True, episode
+                flag_1 = True
         if not flag_1:
             RPC.clear()
             flag_2 = False

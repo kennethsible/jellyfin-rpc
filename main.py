@@ -1,8 +1,9 @@
 import configparser
 import multiprocessing
-import sys
 
 import customtkinter
+import pystray
+from PIL import Image
 
 import jellyfin_rpc
 
@@ -26,13 +27,17 @@ def on_connect(
     process.start()
 
 
-def on_closing(process: multiprocessing.Process):
-    try:
+def on_closing(
+    process: multiprocessing.Process,
+    icon: pystray.Icon,
+    root: customtkinter.CTk,
+):
+    if process.is_alive():
         process.terminate()
         process.join()
-    except AttributeError:
-        pass
-    sys.exit(0)
+    icon.visible = False
+    icon.stop()
+    root.quit()
 
 
 def main():
@@ -110,7 +115,23 @@ def main():
     ):
         on_connect(process, entry1, entry2, entry3, button)
 
-    root.protocol('WM_DELETE_WINDOW', lambda: on_closing(process))
+    root.withdraw()
+
+    def on_maximize():
+        root.after(0, root.deiconify)
+
+    icon = pystray.Icon(
+        'jellyfin-rpc',
+        Image.open('icon.png'),
+        'Jellyfin RPC',
+        menu=pystray.Menu(
+            pystray.MenuItem('Maximize', on_maximize, default=True),
+            pystray.MenuItem('Quit', lambda: on_closing(process, icon, root)),
+        ),
+    )
+    icon.run_detached()
+
+    root.protocol('WM_DELETE_WINDOW', root.withdraw)
     root.mainloop()
 
 

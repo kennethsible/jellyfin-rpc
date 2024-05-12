@@ -12,6 +12,7 @@ pypresence = "^4.3.0"
 
 [tool.poetry.group.gui.dependencies]
 customtkinter = "^5.2.2"
+pystray = "^0.19.5"
 pyinstaller = "^6.6.0"
 
 [tool.poetry.group.dev.dependencies]
