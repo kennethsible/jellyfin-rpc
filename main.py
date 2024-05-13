@@ -29,7 +29,11 @@ def on_connect(
     process.start()
 
 
-def on_closing(
+def on_maximize(root: customtkinter.CTk):
+    root.after(0, root.deiconify)
+
+
+def on_close(
     process: multiprocessing.Process,
     icon: pystray.Icon,
     root: customtkinter.CTk,
@@ -135,16 +139,13 @@ def main():
 
     root.withdraw()
 
-    def on_maximize():
-        root.after(0, root.deiconify)
-
     icon = pystray.Icon(
         'jellyfin-rpc',
         Image.open('icon.png'),
         'Jellyfin RPC',
         menu=pystray.Menu(
-            pystray.MenuItem('Maximize', on_maximize, default=True),
-            pystray.MenuItem('Quit', lambda: on_closing(process, icon, root)),
+            pystray.MenuItem('Maximize', lambda: on_maximize(root), default=True),
+            pystray.MenuItem('Quit', lambda: on_close(process, icon, root)),
         ),
     )
     icon.run_detached()
