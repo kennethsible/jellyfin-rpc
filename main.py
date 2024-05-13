@@ -13,6 +13,7 @@ def on_connect(
     entry1: customtkinter.CTkEntry,
     entry2: customtkinter.CTkEntry,
     entry3: customtkinter.CTkEntry,
+    entry4: customtkinter.CTkEntry,
     button: customtkinter.CTkButton,
 ):
     config = configparser.ConfigParser()
@@ -20,6 +21,7 @@ def on_connect(
     config.set('DEFAULT', 'JELLYFIN_HOST', entry1.get())
     config.set('DEFAULT', 'API_TOKEN', entry2.get())
     config.set('DEFAULT', 'USERNAME', entry3.get())
+    config.set('DEFAULT', 'TMDB_API_KEY', entry4.get())
     with open('jellyfin_rpc.ini', 'w') as ini_file:
         config.write(ini_file)
     button.configure(text='Connected', state='disabled')
@@ -101,11 +103,27 @@ def main():
         )
     entry3.pack(pady=12, padx=10)
 
+    if config['DEFAULT']['TMDB_API_KEY']:
+        entry4_text = customtkinter.StringVar()
+        entry4 = customtkinter.CTkEntry(
+            master=frame,
+            textvariable=entry4_text,
+            width=265,
+        )
+        entry4_text.set(config['DEFAULT']['TMDB_API_KEY'])
+    else:
+        entry4 = customtkinter.CTkEntry(
+            master=frame,
+            placeholder_text='TMDB API Key (Optional)',
+            width=265,
+        )
+    entry4.pack(pady=12, padx=10)
+
     process = multiprocessing.Process(target=jellyfin_rpc.main)
     button = customtkinter.CTkButton(
         master=frame,
         text='Connect to Jellyfin',
-        command=lambda: on_connect(process, entry1, entry2, entry3, button),
+        command=lambda: on_connect(process, entry1, entry2, entry3, entry4, button),
     )
     button.pack(pady=12, padx=10)
     if (
@@ -113,7 +131,7 @@ def main():
         and config['DEFAULT']['API_TOKEN']
         and config['DEFAULT']['USERNAME']
     ):
-        on_connect(process, entry1, entry2, entry3, button)
+        on_connect(process, entry1, entry2, entry3, entry4, button)
 
     root.withdraw()
 

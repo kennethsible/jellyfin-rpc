@@ -1,5 +1,6 @@
 import argparse
 import configparser
+import json
 import time
 import uuid
 
@@ -49,6 +50,28 @@ def get_jellyfin_api(config: configparser.SectionProxy) -> api.API:
     return client.jellyfin
 
 
+def get_series_poster(api_key: str, imdb_id: str, season: int) -> str:
+    response = requests.get(
+        f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={api_key}&external_source=imdb_id"
+    )
+    tmdb_id = json.loads(response.text)['tv_episode_results'][0]['show_id']
+    response = requests.get(
+        f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}"
+    )
+    return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
+
+
+def get_movie_poster(api_key: str, imdb_id: str) -> str:
+    response = requests.get(
+        f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={api_key}&external_source=imdb_id"
+    )
+    tmdb_id = json.loads(response.text)['movie_results'][0]['id']
+    response = requests.get(
+        f"https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}"
+    )
+    return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
+
+
 def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10):
     RPC = Presence(CLIENT_ID)
     RPC.connect()
@@ -58,15 +81,27 @@ def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10
             if config['USERNAME'] != session['UserName']:
                 continue
             if 'NowPlayingItem' in session:
+                if len(config['tmdb_api_key']) > 0:
+                    imdb_id = next(
+                        external_url['Url']
+                        for external_url in session['NowPlayingItem']['ExternalUrls']
+                        if external_url['Name'] == 'IMDb'
+                    ).split('/')[-1]
+                else:
+                    poster_url = None
                 if session['NowPlayingItem']['Type'] == 'Episode':
                     season = session['NowPlayingItem']['ParentIndexNumber']
                     episode = session['NowPlayingItem']['IndexNumber']
                     state = session['NowPlayingItem']['SeriesName']
                     details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
+                    if len(config['tmdb_api_key']) > 0:
+                        poster_url = get_series_poster(config['tmdb_api_key'], imdb_id, season)
                 elif session['NowPlayingItem']['Type'] == 'Movie':
                     episode = -2
                     state = ', '.join(session['NowPlayingItem']['Genres'])
                     details = session['NowPlayingItem']['Name']
+                    if len(config['tmdb_api_key']) > 0:
+                        poster_url = get_movie_poster(config['tmdb_api_key'], imdb_id)
                 else:
                     continue  # raise NotImplementedError()
                 if episode != last_episode:
@@ -76,7 +111,7 @@ def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10
                         state=state,
                         details=details,
                         start=time.time(),
-                        large_image='large_image',
+                        large_image=poster_url,
                     )
                     flag_2, last_episode = True, episode
                 flag_1 = True
