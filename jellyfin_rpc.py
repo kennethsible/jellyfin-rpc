@@ -58,17 +58,25 @@ def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10
             if config['USERNAME'] != session['UserName']:
                 continue
             if 'NowPlayingItem' in session:
-                season = session['NowPlayingItem']['ParentIndexNumber']
-                episode = session['NowPlayingItem']['IndexNumber']
+                if session['NowPlayingItem']['Type'] == 'Episode':
+                    season = session['NowPlayingItem']['ParentIndexNumber']
+                    episode = session['NowPlayingItem']['IndexNumber']
+                    state = session['NowPlayingItem']['SeriesName']
+                    details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
+                elif session['NowPlayingItem']['Type'] == 'Movie':
+                    episode = -2
+                    state = ', '.join(session['NowPlayingItem']['Genres'])
+                    details = session['NowPlayingItem']['Name']
+                else:
+                    continue  # raise NotImplementedError()
                 if episode != last_episode:
                     flag_2 = False
                 if not flag_2:
                     RPC.update(
-                        state=session['NowPlayingItem']['SeriesName'],
-                        details=f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}',
-                        buttons=[{'label': 'Launch Jellyfin', 'url': config['JELLYFIN_HOST']}],
-                        large_image='large_image',
+                        state=state,
+                        details=details,
                         start=time.time(),
+                        large_image='large_image',
                     )
                     flag_2, last_episode = True, episode
                 flag_1 = True
