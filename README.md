@@ -24,9 +24,9 @@ Note, movie/series posters **require** a [TMDB](https://www.themoviedb.org/?lang
 
 Note, the application will start **minimized** in the system tray.
 
-![jellyfin_rpc_gui](images/jellyfin_rpc_tray.png)
+![jellyfin_rpc_ico](images/jellyfin_rpc_ico.png)
 
 ## Usage (CLI)
 ```
-python jellyfin_rpc.py [-h] [--refresh-rate REFRESH_RATE]
+jellyfin_rpc.py [-h] [--ini-config INI_CONFIG] [--refresh-rate REFRESH_RATE]
 ```

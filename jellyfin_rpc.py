@@ -14,9 +14,9 @@ urllib3.disable_warnings()
 CLIENT_ID = '1238889120672120853'
 
 
-def get_config() -> configparser.SectionProxy:
+def get_config(ini_path: str) -> configparser.SectionProxy:
     config = configparser.ConfigParser()
-    config.read('jellyfin_rpc.ini')
+    config.read(ini_path)
     return config['DEFAULT']
 
 
@@ -72,9 +72,10 @@ def get_movie_poster(api_key: str, imdb_id: str) -> str:
     return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
 
 
-def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10):
+def set_discord_rpc(config_path: str, *, refresh_rate: int = 10):
     RPC = Presence(CLIENT_ID)
     RPC.connect()
+    config = get_config(config_path)
     flag_1, last_episode = False, -1
     while True:
         for session in get_jellyfin_api(config).sessions():
@@ -112,6 +113,7 @@ def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10
                         details=details,
                         start=time.time(),
                         large_image=poster_url,
+                        small_image='jellyfin_icon',
                     )
                     flag_2, last_episode = True, episode
                 flag_1 = True
@@ -124,9 +126,11 @@ def set_discord_rpc(config: configparser.SectionProxy, *, refresh_rate: int = 10
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--ini-config', default='jellyfin_rpc.ini')
     parser.add_argument('--refresh-rate', type=int, default=10)
     args = parser.parse_args()
-    set_discord_rpc(get_config(), refresh_rate=args.refresh_rate)
+
+    set_discord_rpc(get_config(args.ini_config), refresh_rate=args.refresh_rate)
 
 
 if __name__ == '__main__':
