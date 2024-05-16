@@ -72,10 +72,10 @@ def get_movie_poster(api_key: str, imdb_id: str) -> str:
     return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
 
 
-def set_discord_rpc(config_path: str, *, refresh_rate: int = 10):
+def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
     RPC = Presence(CLIENT_ID)
     RPC.connect()
-    config = get_config(config_path)
+    config = get_config(ini_path)
     flag_1, last_episode = False, -1
     while True:
         for session in get_jellyfin_api(config).sessions():
@@ -89,7 +89,7 @@ def set_discord_rpc(config_path: str, *, refresh_rate: int = 10):
                         if external_url['Name'] == 'IMDb'
                     ).split('/')[-1]
                 else:
-                    poster_url = None
+                    poster_url = 'jellyfin_icon'
                 if session['NowPlayingItem']['Type'] == 'Episode':
                     season = session['NowPlayingItem']['ParentIndexNumber']
                     episode = session['NowPlayingItem']['IndexNumber']
@@ -113,7 +113,6 @@ def set_discord_rpc(config_path: str, *, refresh_rate: int = 10):
                         details=details,
                         start=time.time(),
                         large_image=poster_url,
-                        small_image='jellyfin_icon',
                     )
                     flag_2, last_episode = True, episode
                 flag_1 = True
@@ -130,7 +129,7 @@ def main():
     parser.add_argument('--refresh-rate', type=int, default=10)
     args = parser.parse_args()
 
-    set_discord_rpc(get_config(args.ini_config), refresh_rate=args.refresh_rate)
+    set_discord_rpc(args.ini_config, refresh_rate=args.refresh_rate)
 
 
 if __name__ == '__main__':

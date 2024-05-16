@@ -1,6 +1,7 @@
 import configparser
 import multiprocessing
 import os
+import shutil
 import sys
 from typing import Callable
 
@@ -8,7 +9,7 @@ import customtkinter
 import pystray
 from PIL import Image
 
-from jellyfin_rpc import get_config, set_discord_rpc
+import jellyfin_rpc
 
 
 class RPCProcess:
@@ -19,7 +20,7 @@ class RPCProcess:
 
     def start(self):
         self.process = multiprocessing.Process(target=self.target)
-        self.process.join
+        self.process.start()
 
     def stop(self):
         if self.process is None:
@@ -81,7 +82,7 @@ def main():
     customtkinter.set_default_color_theme('dark-blue')
 
     root = customtkinter.CTk()
-    root.title('Jellyfin Discord RPC')
+    root.title('Jellyfin RPC')
 
     frame = customtkinter.CTkFrame(master=root)
     frame.pack(pady=20, padx=60, fill='both', expand=True)
@@ -90,8 +91,11 @@ def main():
     ini_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.ini'))
     png_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
     ico_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
+    if not os.path.isfile('jellyfin_rpc.ini'):
+        shutil.copyfile(ini_path, 'jellyfin_rpc.ini')
+    ini_path = 'jellyfin_rpc.ini'
 
-    config = get_config(ini_path)
+    config = jellyfin_rpc.get_config(ini_path)
 
     if config['JELLYFIN_HOST']:
         entry1_text = customtkinter.StringVar()
@@ -157,7 +161,7 @@ def main():
         )
     entry4.pack(pady=12, padx=10)
 
-    rpc_process = RPCProcess(lambda: set_discord_rpc(ini_path))
+    rpc_process = RPCProcess(jellyfin_rpc.main)
     button = customtkinter.CTkButton(
         master=frame,
         text='Connect',
