@@ -7,7 +7,7 @@ import uuid
 import requests
 import urllib3
 from jellyfin_apiclient_python import JellyfinClient, api
-from pypresence import Presence
+from pypresence import DiscordNotFound, PipeClosed, Presence
 
 urllib3.disable_warnings()
 
@@ -72,54 +72,79 @@ def get_movie_poster(api_key: str, imdb_id: str) -> str:
     return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
 
 
+def await_connection(RPC: Presence, refresh_rate: int):
+    while True:
+        try:
+            RPC.connect()
+        except DiscordNotFound:
+            time.sleep(refresh_rate)
+            continue
+        break
+
+
 def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
     RPC = Presence(CLIENT_ID)
-    RPC.connect()
+    await_connection(RPC, refresh_rate)
     config = get_config(ini_path)
-    flag_1, last_episode = False, -1
+    last_episode = -1
     while True:
-        for session in get_jellyfin_api(config).sessions():
-            if config['USERNAME'] != session['UserName']:
-                continue
-            if 'NowPlayingItem' in session:
+        try:
+            jellyfin_api = get_jellyfin_api(config)
+        except json.JSONDecodeError:
+            time.sleep(refresh_rate)
+            continue
+        try:
+            session = next(
+                session
+                for session in jellyfin_api.sessions()
+                if config['USERNAME'] == session['UserName']
+            )
+        except StopIteration:
+            time.sleep(refresh_rate)
+            continue
+        if 'NowPlayingItem' in session:
+            if len(config['tmdb_api_key']) > 0:
+                imdb_id = next(
+                    external_url['Url']
+                    for external_url in session['NowPlayingItem']['ExternalUrls']
+                    if external_url['Name'] == 'IMDb'
+                ).split('/')[-1]
+            else:
+                poster_url = 'jellyfin_icon'
+            if session['NowPlayingItem']['Type'] == 'Episode':
+                season = session['NowPlayingItem']['ParentIndexNumber']
+                episode = session['NowPlayingItem']['IndexNumber']
+                state = session['NowPlayingItem']['SeriesName']
+                details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
                 if len(config['tmdb_api_key']) > 0:
-                    imdb_id = next(
-                        external_url['Url']
-                        for external_url in session['NowPlayingItem']['ExternalUrls']
-                        if external_url['Name'] == 'IMDb'
-                    ).split('/')[-1]
-                else:
-                    poster_url = 'jellyfin_icon'
-                if session['NowPlayingItem']['Type'] == 'Episode':
-                    season = session['NowPlayingItem']['ParentIndexNumber']
-                    episode = session['NowPlayingItem']['IndexNumber']
-                    state = session['NowPlayingItem']['SeriesName']
-                    details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
-                    if len(config['tmdb_api_key']) > 0:
-                        poster_url = get_series_poster(config['tmdb_api_key'], imdb_id, season)
-                elif session['NowPlayingItem']['Type'] == 'Movie':
-                    episode = -2
-                    state = ', '.join(session['NowPlayingItem']['Genres'])
-                    details = session['NowPlayingItem']['Name']
-                    if len(config['tmdb_api_key']) > 0:
-                        poster_url = get_movie_poster(config['tmdb_api_key'], imdb_id)
-                else:
-                    continue  # raise NotImplementedError()
-                if episode != last_episode:
-                    flag_2 = False
-                if not flag_2:
+                    poster_url = get_series_poster(config['tmdb_api_key'], imdb_id, season)
+            elif session['NowPlayingItem']['Type'] == 'Movie':
+                episode = -2
+                state = ', '.join(session['NowPlayingItem']['Genres'])
+                details = session['NowPlayingItem']['Name']
+                if len(config['tmdb_api_key']) > 0:
+                    poster_url = get_movie_poster(config['tmdb_api_key'], imdb_id)
+            else:
+                continue  # raise NotImplementedError()
+            if episode != last_episode:
+                try:
                     RPC.update(
                         state=state,
                         details=details,
                         start=time.time(),
                         large_image=poster_url,
                     )
-                    flag_2, last_episode = True, episode
-                flag_1 = True
-        if not flag_1:
-            RPC.clear()
-            flag_2 = False
-        flag_1 = False
+                except PipeClosed:
+                    await_connection(RPC, refresh_rate)
+                    continue
+                rpc_active, last_episode = True, episode
+        if not rpc_active:
+            last_episode = -1
+            try:
+                RPC.clear()
+            except PipeClosed:
+                await_connection(RPC, refresh_rate)
+                continue
         time.sleep(refresh_rate)
 
 
