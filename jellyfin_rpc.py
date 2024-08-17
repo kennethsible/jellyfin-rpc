@@ -86,7 +86,7 @@ def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
     RPC = Presence(CLIENT_ID)
     await_connection(RPC, refresh_rate)
     config = get_config(ini_path)
-    last_episode = -1
+    previous_details = ''
     while True:
         try:
             jellyfin_api = get_jellyfin_api(config)
@@ -103,30 +103,39 @@ def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
             time.sleep(refresh_rate)
             continue
         if 'NowPlayingItem' in session:
-            if len(config['tmdb_api_key']) > 0:
-                imdb_id = next(
-                    external_url['Url']
-                    for external_url in session['NowPlayingItem']['ExternalUrls']
-                    if external_url['Name'] == 'IMDb'
-                ).split('/')[-1]
-            else:
-                poster_url = 'jellyfin_icon'
-            if session['NowPlayingItem']['Type'] == 'Episode':
-                season = session['NowPlayingItem']['ParentIndexNumber']
-                episode = session['NowPlayingItem']['IndexNumber']
-                state = session['NowPlayingItem']['SeriesName']
-                details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
-                if len(config['tmdb_api_key']) > 0:
-                    poster_url = get_series_poster(config['tmdb_api_key'], imdb_id, season)
-            elif session['NowPlayingItem']['Type'] == 'Movie':
-                episode = -2
-                state = ', '.join(session['NowPlayingItem']['Genres'])
-                details = session['NowPlayingItem']['Name']
-                if len(config['tmdb_api_key']) > 0:
-                    poster_url = get_movie_poster(config['tmdb_api_key'], imdb_id)
-            else:
-                continue  # raise NotImplementedError()
-            if episode != last_episode:
+            match media_type := session['NowPlayingItem']['Type']:
+                case 'Episode':
+                    season = session['NowPlayingItem']['ParentIndexNumber']
+                    episode = session['NowPlayingItem']['IndexNumber']
+                    state = session['NowPlayingItem']['SeriesName']
+                    details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
+                case 'Movie':
+                    state = ', '.join(session['NowPlayingItem']['Genres'])
+                    details = session['NowPlayingItem']['Name']
+                case 'Audio':
+                    album = session['NowPlayingItem']['Album']
+                    artist = session['NowPlayingItem']['Artists'][0]
+                    state = f'{album} - {artist}'
+                    details = session['NowPlayingItem']['Name']
+                case _:
+                    continue  # raise NotImplementedError()
+            if details != previous_details:
+                if media_type in ('Episode', 'Movie') and len(config['tmdb_api_key']) > 0:
+                    try:
+                        imdb_id = next(
+                            external_url['Url']
+                            for external_url in session['NowPlayingItem']['ExternalUrls']
+                            if external_url['Name'] == 'IMDb'
+                        ).split('/')[-1]
+                    except StopIteration:
+                        poster_url = 'jellyfin_icon'
+                    else:
+                        if session['NowPlayingItem']['Type'] == 'Episode':
+                            poster_url = get_series_poster(config['tmdb_api_key'], imdb_id, season)
+                        elif session['NowPlayingItem']['Type'] == 'Movie':
+                            poster_url = get_movie_poster(config['tmdb_api_key'], imdb_id)
+                else:
+                    poster_url = 'jellyfin_icon'
                 try:
                     RPC.update(
                         state=state,
@@ -137,9 +146,9 @@ def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
                 except PipeClosed:
                     await_connection(RPC, refresh_rate)
                     continue
-                last_episode = episode
+                previous_details = details
         else:
-            last_episode = -1
+            previous_details = ''
             try:
                 RPC.clear()
             except PipeClosed:
