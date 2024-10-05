@@ -3,13 +3,17 @@ import multiprocessing
 import os
 import shutil
 import sys
+import webbrowser
 from typing import Callable
 
 import customtkinter
 import pystray
+import requests
 from PIL import Image
 
 import jellyfin_rpc
+
+__version__ = '1.2.0'
 
 
 class RPCProcess:
@@ -75,6 +79,10 @@ def on_close(
     icon.visible = False
     icon.stop()
     root.quit()
+
+
+def callback(url: str):
+    webbrowser.open_new_tab(url)
 
 
 def main():
@@ -170,6 +178,31 @@ def main():
     button.pack(pady=12, padx=10)
     if config['JELLYFIN_HOST'] and config['API_TOKEN'] and config['USERNAME']:
         on_click(rpc_process, ini_path, entry1, entry2, entry3, entry4, button)
+
+    response = requests.get(
+        'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest'
+    )
+    latest_version = response.json()['tag_name'].lstrip('v')
+    if latest_version == __version__:
+        label1 = customtkinter.CTkLabel(
+            master=frame,
+            text_color='gray',
+            text=f'Current Version ({__version__})',
+        )
+    else:
+        label1 = customtkinter.CTkLabel(
+            master=frame,
+            text_color='red',
+            text=f'Update Available ({__version__} \u2192 {latest_version})',
+            cursor='hand2',
+        )
+        label1.bind(
+            '<Button-1>',
+            lambda e: callback(
+                f'https://github.com/kennethsible/jellyfin-rpc/releases/tag/v{latest_version}'
+            ),
+        )
+    label1.pack(pady=0, padx=10)
 
     root.withdraw()
     icon = pystray.Icon(
