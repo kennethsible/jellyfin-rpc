@@ -58,7 +58,13 @@ def get_series_poster(api_key: str, imdb_id: str, season: int) -> str:
     response = requests.get(
         f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}"
     )
-    return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
+    try:
+        return (
+            'https://image.tmdb.org/t/p/w185/'
+            + json.loads(response.text)['posters'][0]['file_path']
+        )
+    except KeyError:
+        return 'jellyfin_icon'
 
 
 def get_movie_poster(api_key: str, imdb_id: str) -> str:
@@ -69,7 +75,13 @@ def get_movie_poster(api_key: str, imdb_id: str) -> str:
     response = requests.get(
         f"https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}"
     )
-    return 'https://image.tmdb.org/t/p/w185/' + json.loads(response.text)['posters'][0]['file_path']
+    try:
+        return (
+            'https://image.tmdb.org/t/p/w185/'
+            + json.loads(response.text)['posters'][0]['file_path']
+        )
+    except KeyError:
+        return 'jellyfin_icon'
 
 
 def await_connection(RPC: Presence, refresh_rate: int):
@@ -142,6 +154,12 @@ def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
                         details=details,
                         start=time.time(),
                         large_image=poster_url,
+                        buttons=[
+                            {
+                                'label': 'Play on Jellyfin',
+                                'url': f'{config["jellyfin_host"].rstrip("/")}/web/#/details?id={session["Id"]}&serverId={session["ServerId"]}',
+                            }
+                        ],
                     )
                 except PipeClosed:
                     await_connection(RPC, refresh_rate)
