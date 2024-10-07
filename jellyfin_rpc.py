@@ -149,6 +149,9 @@ def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
                 else:
                     poster_url = 'jellyfin_icon'
                 try:
+                    jf_domain = config['jellyfin_host'].rstrip('/')
+                    source_id = session['NowPlayingItem']['Id']
+                    server_id = session['NowPlayingItem']['ServerId']
                     RPC.update(
                         state=state,
                         details=details,
@@ -157,7 +160,7 @@ def set_discord_rpc(ini_path: str, *, refresh_rate: int = 10):
                         buttons=[
                             {
                                 'label': 'Play on Jellyfin',
-                                'url': f'{config["jellyfin_host"].rstrip("/")}/web/#/details?id={session["Id"]}&serverId={session["ServerId"]}',
+                                'url': f'{jf_domain}/web/#/details?id={source_id}&serverId={server_id}',
                             }
                         ],
                     )

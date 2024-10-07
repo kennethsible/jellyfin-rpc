@@ -13,7 +13,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.2.0'
+__version__ = '1.2.1'
 
 
 class RPCProcess:
@@ -66,13 +66,27 @@ def on_click(
     button.update()
 
 
-def on_maximize(root: customtkinter.CTk):
+def on_maximize(root: customtkinter.CTk, label: customtkinter.CTkLabel):
+    response = requests.get(
+        'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest'
+    )
+    latest_ver = response.json()['tag_name'].lstrip('v')
+    if latest_ver == __version__:
+        label.configure(
+            text_color='gray',
+            text=f'Current Version ({__version__})',
+        )
+    else:
+        label.configure(
+            text_color='red',
+            text=f'Update Available ({__version__} \u2192 {latest_ver})',
+        )
     root.after(0, root.deiconify)
 
 
 def on_close(
     rpc_process: RPCProcess,
-    icon: pystray.Icon,
+    icon: pystray._base.Icon,
     root: customtkinter.CTk,
 ):
     rpc_process.stop()
@@ -179,29 +193,10 @@ def main():
     if config['JELLYFIN_HOST'] and config['API_TOKEN'] and config['USERNAME']:
         on_click(rpc_process, ini_path, entry1, entry2, entry3, entry4, button)
 
-    response = requests.get(
-        'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest'
+    label1 = customtkinter.CTkLabel(master=frame, cursor='hand2')
+    label1.bind(
+        '<Button-1>', lambda _: callback('https://github.com/kennethsible/jellyfin-rpc/releases')
     )
-    latest_version = response.json()['tag_name'].lstrip('v')
-    if latest_version == __version__:
-        label1 = customtkinter.CTkLabel(
-            master=frame,
-            text_color='gray',
-            text=f'Current Version ({__version__})',
-        )
-    else:
-        label1 = customtkinter.CTkLabel(
-            master=frame,
-            text_color='red',
-            text=f'Update Available ({__version__} \u2192 {latest_version})',
-            cursor='hand2',
-        )
-        label1.bind(
-            '<Button-1>',
-            lambda e: callback(
-                f'https://github.com/kennethsible/jellyfin-rpc/releases/tag/v{latest_version}'
-            ),
-        )
     label1.pack(pady=0, padx=10)
 
     root.withdraw()
@@ -210,7 +205,7 @@ def main():
         Image.open(png_path),
         'Jellyfin RPC',
         menu=pystray.Menu(
-            pystray.MenuItem('Maximize', lambda: on_maximize(root), default=True),
+            pystray.MenuItem('Maximize', lambda: on_maximize(root, label1), default=True),
             pystray.MenuItem('Quit', lambda: on_close(rpc_process, icon, root)),
         ),
     )
