@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('jellyfin_rpc.ini', '.'), ('images/icon.png', '.'), ('images/icon.ico', '.')],
+    datas=[('jellyfin_rpc.ini', '.'), ('jellyfin_rpc.log', '.'), ('images/icon.png', '.'), ('images/icon.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

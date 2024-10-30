@@ -1,4 +1,5 @@
 import configparser
+import logging
 import multiprocessing
 import os
 import shutil
@@ -13,7 +14,19 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.2.1'
+__version__ = '1.2.2'
+
+logger = logging.getLogger(jellyfin_rpc.__name__)
+
+
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logger.critical('UnhandledException', exc_info=(exc_type, exc_value, exc_traceback))
+
+
+sys.excepthook = handle_exception
 
 
 class RPCProcess:
@@ -111,13 +124,21 @@ def main():
 
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
     ini_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.ini'))
+    log_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.log'))
     png_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
     ico_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
     if not os.path.isfile('jellyfin_rpc.ini'):
         shutil.copyfile(ini_path, 'jellyfin_rpc.ini')
+    if not os.path.isfile('jellyfin_rpc.log'):
+        shutil.copyfile(log_path, 'jellyfin_rpc.log')
     ini_path = 'jellyfin_rpc.ini'
 
     config = jellyfin_rpc.get_config(ini_path)
+    logging.basicConfig(
+        filename='jellyfin_rpc.log',
+        format='%(asctime)s %(levelname)s %(name)s %(message)s',
+    )
+    logging.getLogger().setLevel(config['LOG_LEVEL'])
 
     if config['JELLYFIN_HOST']:
         entry1_text = customtkinter.StringVar()
@@ -213,6 +234,7 @@ def main():
 
     root.iconbitmap(ico_path)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    root.resizable(False, False)
     root.mainloop()
 
 

@@ -9,7 +9,7 @@ import urllib3
 from jellyfin_apiclient_python import JellyfinClient, api
 from pypresence import DiscordNotFound, PipeClosed, Presence
 
-urllib3.disable_warnings()
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CLIENT_ID = '1238889120672120853'
 
