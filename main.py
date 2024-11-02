@@ -1,5 +1,5 @@
 import configparser
-import logging
+import functools
 import multiprocessing
 import os
 import shutil
@@ -14,19 +14,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.2.2'
-
-logger = logging.getLogger(jellyfin_rpc.__name__)
-
-
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logger.critical('UnhandledException', exc_info=(exc_type, exc_value, exc_traceback))
-
-
-sys.excepthook = handle_exception
+__version__ = '1.2.3'
 
 
 class RPCProcess:
@@ -132,13 +120,7 @@ def main():
     if not os.path.isfile('jellyfin_rpc.log'):
         shutil.copyfile(log_path, 'jellyfin_rpc.log')
     ini_path = 'jellyfin_rpc.ini'
-
     config = jellyfin_rpc.get_config(ini_path)
-    logging.basicConfig(
-        filename='jellyfin_rpc.log',
-        format='%(asctime)s %(levelname)s %(name)s %(message)s',
-    )
-    logging.getLogger().setLevel(config['LOG_LEVEL'])
 
     if config['JELLYFIN_HOST']:
         entry1_text = customtkinter.StringVar()
@@ -204,7 +186,7 @@ def main():
         )
     entry4.pack(pady=12, padx=10)
 
-    rpc_process = RPCProcess(jellyfin_rpc.main)
+    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main, log_path=log_path))
     button = customtkinter.CTkButton(
         master=frame,
         text='Connect',
