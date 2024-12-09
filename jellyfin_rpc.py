@@ -160,7 +160,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                     time.sleep(refresh_rate)
                     continue  # raise NotImplementedError()
             if details != previous_details:
-                if media_type in ('Episode', 'Movie') and len(config['tmdb_api_key']) > 0:
+                if media_type in ('Episode', 'Movie') and len(config['TMDB_API_KEY']) > 0:
                     try:
                         imdb_id = next(
                             external_url['Url']
@@ -172,26 +172,23 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                         poster_url = DEFAULT_POSTER_URL
                     else:
                         if session['NowPlayingItem']['Type'] == 'Episode':
-                            poster_url = get_series_poster(config['tmdb_api_key'], imdb_id, season)
+                            poster_url = get_series_poster(config['TMDB_API_KEY'], imdb_id, season)
                         elif session['NowPlayingItem']['Type'] == 'Movie':
-                            poster_url = get_movie_poster(config['tmdb_api_key'], imdb_id)
+                            poster_url = get_movie_poster(config['TMDB_API_KEY'], imdb_id)
                 else:
                     poster_url = DEFAULT_POSTER_URL
                 try:
-                    jf_domain = config['jellyfin_host'].rstrip('/')
-                    source_id = session['NowPlayingItem']['Id']
-                    server_id = session['NowPlayingItem']['ServerId']
+                    # source_id = session['NowPlayingItem']['Id']
+                    # server_id = session['NowPlayingItem']['ServerId']
+                    # url_path = f'web/#/details?id={source_id}&serverId={server_id}'
                     RPC.update(
                         state=state,
                         details=details,
                         start=time.time(),
                         large_image=poster_url,
-                        buttons=[
-                            {
-                                'label': 'Play on Jellyfin',
-                                'url': f'{jf_domain}/web/#/details?id={source_id}&serverId={server_id}',
-                            }
-                        ],
+                        # buttons=[
+                        #     {'label': 'Play on Jellyfin', 'url': config['JELLYFIN_HOST'] + url_path}
+                        # ],
                     )
                     logger.debug(f'RPC Updated: {details}.')
                 except PipeClosed:
