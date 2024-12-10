@@ -124,7 +124,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
     while True:
         try:
             jellyfin_api = get_jellyfin_api(config)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, requests.exceptions.RequestException):
             logger.debug('Connection Failed: Jellyfin. Retrying...')
             connection_failed = True
             time.sleep(refresh_rate)
