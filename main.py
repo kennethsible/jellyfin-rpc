@@ -112,13 +112,10 @@ def main():
 
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
     ini_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.ini'))
-    log_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.log'))
     png_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
     ico_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
     if not os.path.isfile('jellyfin_rpc.ini'):
         shutil.copyfile(ini_path, 'jellyfin_rpc.ini')
-    if not os.path.isfile('jellyfin_rpc.log'):
-        shutil.copyfile(log_path, 'jellyfin_rpc.log')
     ini_path = 'jellyfin_rpc.ini'
     config = jellyfin_rpc.get_config(ini_path)
 
@@ -186,7 +183,7 @@ def main():
         )
     entry4.pack(pady=12, padx=10)
 
-    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main, log_path=log_path))
+    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main))
     button = customtkinter.CTkButton(
         master=frame,
         text='Connect',

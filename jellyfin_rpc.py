@@ -206,18 +206,18 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
         time.sleep(refresh_rate)
 
 
-def main(log_path: str | None = None):
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ini-config', default='jellyfin_rpc.ini')
+    parser.add_argument('--ini-path', default='jellyfin_rpc.ini')
+    parser.add_argument('--log-path', default='jellyfin_rpc.log')
     parser.add_argument('--refresh-rate', type=int, default=10)
     args = parser.parse_args()
 
-    config = get_config(args.ini_config)
+    config = get_config(args.ini_path)
     logger.setLevel(config['LOG_LEVEL'])
-    if log_path is not None:
-        file_hdlr = logging.FileHandler(log_path)
-        file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
-        logger.addHandler(file_hdlr)
+    file_hdlr = logging.FileHandler(args.log_path)
+    file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    logger.addHandler(file_hdlr)
     logger.addHandler(logging.StreamHandler(sys.stdout))
 
     set_discord_rpc(config, refresh_rate=args.refresh_rate)
