@@ -10,23 +10,16 @@ from configparser import ConfigParser, SectionProxy
 import requests
 import urllib3
 from jellyfin_apiclient_python import JellyfinClient, api
+from jellyfin_apiclient_python.exceptions import HTTPException
 from pypresence import DiscordNotFound, PipeClosed, Presence
+from requests.exceptions import RequestException
+from urllib3.exceptions import InsecureRequestWarning
 
 CLIENT_ID = '1238889120672120853'
 DEFAULT_POSTER_URL = 'jellyfin_icon'
 
 logger = logging.getLogger(__name__)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    logger.error('Unhandled Exception:', exc_info=(exc_type, exc_value, exc_traceback))
-
-
-sys.excepthook = handle_exception
+urllib3.disable_warnings(InsecureRequestWarning)
 
 
 def get_config(ini_path: str) -> SectionProxy:
@@ -42,27 +35,34 @@ def get_user_id(config: SectionProxy) -> str:
     for user in user_data.json():
         if config['USERNAME'] in user['Name']:
             return user['Id']
-    raise ValueError(f'{config["USERNAME"]} not found.')
+    raise ValueError(f'{config["USERNAME"]} Not Found.')
 
 
-def get_jellyfin_api(config: SectionProxy) -> api.API:
-    client = JellyfinClient()
-    client.config.app('jellyfin-rpc', '0.1.0', 'Discord RPC', uuid.uuid4())
-    client.config.data['auth.ssl'] = True
-    client.authenticate(
-        {
-            'Servers': [
+def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
+    while True:
+        try:
+            client = JellyfinClient()
+            client.config.app('jellyfin-rpc', '0.1.0', 'Discord RPC', uuid.uuid4())
+            client.config.data['auth.ssl'] = True
+            client.authenticate(
                 {
-                    'address': config['JELLYFIN_HOST'],
-                    'AccessToken': config['API_TOKEN'],
-                    'UserId': get_user_id(config),
-                    'DateLastAccessed': 0,
-                }
-            ]
-        },
-        discover=False,
-    )
-    return client.jellyfin
+                    'Servers': [
+                        {
+                            'address': config['JELLYFIN_HOST'],
+                            'AccessToken': config['API_TOKEN'],
+                            'UserId': get_user_id(config),
+                            'DateLastAccessed': 0,
+                        }
+                    ]
+                },
+                discover=False,
+            )
+            logger.info('Connection Established: Jellyfin.')
+        except (RequestException, json.JSONDecodeError):
+            logger.error('Connection Failed: Jellyfin. Retrying...')
+            time.sleep(refresh_rate)
+            continue
+        return client.jellyfin
 
 
 def get_series_poster(api_key: str, imdb_id: str, season: int) -> str:
@@ -79,7 +79,7 @@ def get_series_poster(api_key: str, imdb_id: str, season: int) -> str:
             + json.loads(response.text)['posters'][0]['file_path']
         )
     except KeyError:
-        logger.debug('Connection Failed: TMDB. Skipping...')
+        logger.warning('No Poster Available on TMDB. Skipping...')
         return DEFAULT_POSTER_URL
 
 
@@ -97,41 +97,28 @@ def get_movie_poster(api_key: str, imdb_id: str) -> str:
             + json.loads(response.text)['posters'][0]['file_path']
         )
     except KeyError:
-        logger.debug('Connection Failed: TMDB. Skipping...')
+        logger.warning('Connection Failed: TMDB. Skipping...')
         return DEFAULT_POSTER_URL
 
 
-def await_connection(RPC: Presence, refresh_rate: int):
-    connection_failed = False
+def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
-            RPC.connect()
+            discord_rpc.connect()
+            logger.info('Connection Established: Discord.')
         except DiscordNotFound:
-            logger.debug('Connection Failed: Discord. Retrying...')
-            connection_failed = True
+            logger.error('Connection Failed: Discord. Retrying...')
             time.sleep(refresh_rate)
             continue
         break
-    if connection_failed:
-        logger.debug('Connection Reestablished: Discord.')
-        connection_failed = False
 
 
 def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
-    RPC = Presence(CLIENT_ID)
-    await_connection(RPC, refresh_rate)
-    previous_details, connection_failed = '', False
+    discord_rpc = Presence(CLIENT_ID)
+    await_connection(discord_rpc, refresh_rate)
+    jellyfin_api = get_jellyfin_api(config, refresh_rate)
+    previous_details = ''
     while True:
-        try:
-            jellyfin_api = get_jellyfin_api(config)
-        except (json.JSONDecodeError, requests.exceptions.RequestException):
-            logger.debug('Connection Failed: Jellyfin. Retrying...')
-            connection_failed = True
-            time.sleep(refresh_rate)
-            continue
-        if connection_failed:
-            logger.debug('Connection Reestablished: Jellyfin.')
-            connection_failed = False
         try:
             session = next(
                 session
@@ -140,6 +127,9 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
             )
         except StopIteration:
             session = None
+        except HTTPException:
+            jellyfin_api = get_jellyfin_api(config, refresh_rate)
+            continue
         if session is not None and 'NowPlayingItem' in session:
             match media_type := session['NowPlayingItem']['Type']:
                 case 'Episode':
@@ -156,10 +146,11 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                     state = f'{album} - {artist}'
                     details = session['NowPlayingItem']['Name']
                 case _:
-                    logger.info(f'Unsupported Media Type: {media_type}. Ignoring...')
+                    logger.warning(f'Unsupported Media Type: {media_type}. Ignoring...')
                     time.sleep(refresh_rate)
                     continue  # raise NotImplementedError()
             if details != previous_details:
+                poster_url = DEFAULT_POSTER_URL
                 if media_type in ('Episode', 'Movie') and len(config['TMDB_API_KEY']) > 0:
                     try:
                         imdb_id = next(
@@ -168,20 +159,22 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                             if external_url['Name'] == 'IMDb'
                         ).split('/')[-1]
                     except StopIteration:
-                        logger.debug('No IMDb ID Found. Skipping...')
-                        poster_url = DEFAULT_POSTER_URL
+                        logger.warning('No IMDb ID Found. Skipping...')
                     else:
-                        if session['NowPlayingItem']['Type'] == 'Episode':
-                            poster_url = get_series_poster(config['TMDB_API_KEY'], imdb_id, season)
-                        elif session['NowPlayingItem']['Type'] == 'Movie':
-                            poster_url = get_movie_poster(config['TMDB_API_KEY'], imdb_id)
-                else:
-                    poster_url = DEFAULT_POSTER_URL
+                        try:
+                            if session['NowPlayingItem']['Type'] == 'Episode':
+                                poster_url = get_series_poster(
+                                    config['TMDB_API_KEY'], imdb_id, season
+                                )
+                            elif session['NowPlayingItem']['Type'] == 'Movie':
+                                poster_url = get_movie_poster(config['TMDB_API_KEY'], imdb_id)
+                        except RequestException:
+                            logger.warning('Connection Failed: TMDB. Skipping...')
                 try:
                     # source_id = session['NowPlayingItem']['Id']
                     # server_id = session['NowPlayingItem']['ServerId']
                     # url_path = f'web/#/details?id={source_id}&serverId={server_id}'
-                    RPC.update(
+                    discord_rpc.update(
                         state=state,
                         details=details,
                         start=time.time(),
@@ -190,18 +183,18 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                         #     {'label': 'Play on Jellyfin', 'url': config['JELLYFIN_HOST'] + url_path}
                         # ],
                     )
-                    logger.debug(f'RPC Updated: {details}.')
+                    logger.info(f'Discord RPC Updated: {details}.')
                 except PipeClosed:
-                    await_connection(RPC, refresh_rate)
+                    await_connection(discord_rpc, refresh_rate)
                     continue
                 previous_details = details
         elif previous_details:
             try:
-                RPC.clear()
+                discord_rpc.clear()
             except PipeClosed:
-                await_connection(RPC, refresh_rate)
+                await_connection(discord_rpc, refresh_rate)
                 continue
-            logger.debug(f'RPC Cleared: {previous_details}.')
+            logger.info(f'Discord RPC Cleared: {previous_details}.')
             previous_details = ''
         time.sleep(refresh_rate)
 
