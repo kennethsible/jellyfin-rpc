@@ -101,6 +101,15 @@ def get_movie_poster(api_key: str, imdb_id: str) -> str:
         return DEFAULT_POSTER_URL
 
 
+def get_album_cover(musicbrainz_id: str) -> str:
+    response = requests.get(f'https://coverartarchive.org/release/{musicbrainz_id}')
+    try:
+        return json.loads(response.text)['images'][0]['image']
+    except KeyError:
+        logger.warning('Connection Failed: MusicBrainz. Skipping...')
+        return DEFAULT_POSTER_URL
+
+
 def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
@@ -186,10 +195,22 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                                 poster_url = get_movie_poster(config['TMDB_API_KEY'], imdb_id)
                         except RequestException:
                             logger.warning('Connection Failed: TMDB. Skipping...')
+                elif media_type == 'Audio':
+                    try:
+                        album = jellyfin_api.get_item(session['NowPlayingItem']['AlbumId'])
+                        musicbrainz_id = album['ProviderIds']['MusicBrainzAlbum']
+                    except KeyError:
+                        logger.warning('No MusicBrainz ID Found. Skipping...')
+                    try:
+                        poster_url = get_album_cover(musicbrainz_id)
+                    except RequestException:
+                        logger.warning('Connection Failed: MusicBrainz. Skipping...')
                 try:
                     # source_id = session['NowPlayingItem']['Id']
                     # server_id = session['NowPlayingItem']['ServerId']
                     # url_path = f'web/#/details?id={source_id}&serverId={server_id}'
+                    if len(details) < 2:  # e.g., Chinese characters
+                        details += ' '
                     discord_rpc.update(
                         state=state,
                         details=details,
@@ -224,7 +245,7 @@ def main():
 
     config = get_config(args.ini_path)
     logger.setLevel(config['LOG_LEVEL'])
-    file_hdlr = logging.FileHandler(args.log_path)
+    file_hdlr = logging.FileHandler(args.log_path, encoding='utf-8')
     file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
     logger.addHandler(file_hdlr)
     logger.addHandler(logging.StreamHandler(sys.stdout))
