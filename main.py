@@ -14,7 +14,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.2.5'
+__version__ = '1.3.0'
 
 
 class RPCProcess:
@@ -42,29 +42,40 @@ def on_click(
     entry2: customtkinter.CTkEntry,
     entry3: customtkinter.CTkEntry,
     entry4: customtkinter.CTkEntry,
-    button: customtkinter.CTkButton,
+    checkbox1: customtkinter.CTkCheckBox,
+    checkbox2: customtkinter.CTkCheckBox,
+    checkbox3: customtkinter.CTkCheckBox,
+    button1: customtkinter.CTkButton,
 ):
-    if button._text == 'Connect':
+    if button1._text == 'Connect':
         config = configparser.ConfigParser()
         config.read(ini_path)
         config.set('DEFAULT', 'JELLYFIN_HOST', entry1.get())
         config.set('DEFAULT', 'API_TOKEN', entry2.get())
         config.set('DEFAULT', 'USERNAME', entry3.get())
         config.set('DEFAULT', 'TMDB_API_KEY', entry4.get())
+        media_types = []
+        if checkbox1._variable.get():
+            media_types.append('Movies')
+        if checkbox2._variable.get():
+            media_types.append('Shows')
+        if checkbox3._variable.get():
+            media_types.append('Music')
+        config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
         with open(ini_path, 'w') as ini_file:
             config.write(ini_file)
         rpc_process.start()
-        for entry in (entry1, entry2, entry3, entry4):
+        for entry in (entry1, entry2, entry3, entry4, checkbox1, checkbox2, checkbox3):
             entry.configure(state='readonly')
             entry.update()
-        button.configure(text='Disconnect')
+        button1.configure(text='Disconnect')
     else:
         rpc_process.stop()
-        for entry in (entry1, entry2, entry3, entry4):
+        for entry in (entry1, entry2, entry3, entry4, checkbox1, checkbox2, checkbox3):
             entry.configure(state='normal')
             entry.update()
-        button.configure(text='Connect')
-    button.update()
+        button1.configure(text='Connect')
+    button1.update()
 
 
 def on_maximize(root: customtkinter.CTk, label: customtkinter.CTkLabel):
@@ -108,7 +119,7 @@ def main():
     root.title('Jellyfin RPC')
 
     frame = customtkinter.CTkFrame(master=root)
-    frame.pack(pady=20, padx=60, fill='both', expand=True)
+    frame.pack(fill='both', expand=True)
 
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
     ini_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.ini'))
@@ -118,6 +129,12 @@ def main():
         shutil.copyfile(ini_path, 'jellyfin_rpc.ini')
     ini_path = 'jellyfin_rpc.ini'
     config = jellyfin_rpc.get_config(ini_path)
+
+    label1 = customtkinter.CTkLabel(master=frame, cursor='hand2')
+    label1.bind(
+        '<Button-1>', lambda _: callback('https://github.com/kennethsible/jellyfin-rpc/releases')
+    )
+    label1.pack(pady=0, padx=10)
 
     if config['JELLYFIN_HOST']:
         entry1_text = customtkinter.StringVar()
@@ -133,7 +150,7 @@ def main():
             placeholder_text='Jellyfin Host',
             width=265,
         )
-    entry1.pack(pady=12, padx=10)
+    entry1.pack(pady=(0, 5), padx=10)
 
     if config['API_TOKEN']:
         entry2_text = customtkinter.StringVar()
@@ -149,7 +166,7 @@ def main():
             placeholder_text='API Token',
             width=265,
         )
-    entry2.pack(pady=12, padx=10)
+    entry2.pack(pady=5, padx=10)
 
     if config['USERNAME']:
         entry3_text = customtkinter.StringVar()
@@ -165,7 +182,7 @@ def main():
             placeholder_text='Username',
             width=265,
         )
-    entry3.pack(pady=12, padx=10)
+    entry3.pack(pady=5, padx=10)
 
     if config['TMDB_API_KEY']:
         entry4_text = customtkinter.StringVar()
@@ -181,23 +198,52 @@ def main():
             placeholder_text='TMDB API Key (Optional)',
             width=265,
         )
-    entry4.pack(pady=12, padx=10)
+    entry4.pack(pady=5, padx=10)
+
+    media_types = config['MEDIA_TYPES'].split(',')
+    checkbox1_var = customtkinter.IntVar(value=int('Movies' in media_types))
+    checkbox1 = customtkinter.CTkCheckBox(master=frame, text='Movies', variable=checkbox1_var)
+    checkbox1.pack(pady=5, padx=10)
+
+    checkbox2_var = customtkinter.IntVar(value=int('Shows' in media_types))
+    checkbox2 = customtkinter.CTkCheckBox(master=frame, text='Shows', variable=checkbox2_var)
+    checkbox2.pack(pady=5, padx=10)
+
+    checkbox3_var = customtkinter.IntVar(value=int('Music' in media_types))
+    checkbox3 = customtkinter.CTkCheckBox(master=frame, text='Music', variable=checkbox3_var)
+    checkbox3.pack(pady=5, padx=10)
 
     rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main))
-    button = customtkinter.CTkButton(
+    button1 = customtkinter.CTkButton(
         master=frame,
         text='Connect',
-        command=lambda: on_click(rpc_process, ini_path, entry1, entry2, entry3, entry4, button),
+        command=lambda: on_click(
+            rpc_process,
+            ini_path,
+            entry1,
+            entry2,
+            entry3,
+            entry4,
+            checkbox1,
+            checkbox2,
+            checkbox3,
+            button1,
+        ),
     )
-    button.pack(pady=12, padx=10)
+    button1.pack(pady=(5, 10), padx=10)
     if config['JELLYFIN_HOST'] and config['API_TOKEN'] and config['USERNAME']:
-        on_click(rpc_process, ini_path, entry1, entry2, entry3, entry4, button)
-
-    label1 = customtkinter.CTkLabel(master=frame, cursor='hand2')
-    label1.bind(
-        '<Button-1>', lambda _: callback('https://github.com/kennethsible/jellyfin-rpc/releases')
-    )
-    label1.pack(pady=0, padx=10)
+        on_click(
+            rpc_process,
+            ini_path,
+            entry1,
+            entry2,
+            entry3,
+            entry4,
+            checkbox1,
+            checkbox2,
+            checkbox3,
+            button1,
+        )
 
     root.withdraw()
     icon = pystray.Icon(

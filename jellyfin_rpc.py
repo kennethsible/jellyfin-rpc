@@ -57,7 +57,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
                 },
                 discover=False,
             )
-            logger.info('Connection Established: Jellyfin.')
+            logger.debug('Connection Established: Jellyfin.')
         except (RequestException, json.JSONDecodeError):
             logger.error('Connection Failed: Jellyfin. Retrying...')
             time.sleep(refresh_rate)
@@ -105,7 +105,7 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
             discord_rpc.connect()
-            logger.info('Connection Established: Discord.')
+            logger.debug('Connection Established: Discord.')
         except DiscordNotFound:
             logger.error('Connection Failed: Discord. Retrying...')
             time.sleep(refresh_rate)
@@ -131,19 +131,35 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
             jellyfin_api = get_jellyfin_api(config, refresh_rate)
             continue
         if session is not None and 'NowPlayingItem' in session:
+            media_types = config['MEDIA_TYPES'].split(',')
             match media_type := session['NowPlayingItem']['Type']:
                 case 'Episode':
+                    if 'Shows' not in media_types:
+                        time.sleep(refresh_rate)
+                        continue
                     season = session['NowPlayingItem']['ParentIndexNumber']
                     episode = session['NowPlayingItem']['IndexNumber']
-                    state = session['NowPlayingItem']['SeriesName']
+                    state = ''
+                    if 'SeriesName' in session['NowPlayingItem']:
+                        state += session['NowPlayingItem']['SeriesName']
                     details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
                 case 'Movie':
-                    state = ', '.join(session['NowPlayingItem']['Genres'])
+                    if 'Movies' not in media_types:
+                        time.sleep(refresh_rate)
+                        continue
+                    state = ''
+                    if 'Genres' in session['NowPlayingItem']:
+                        state += ', '.join(session['NowPlayingItem']['Genres'])
                     details = session['NowPlayingItem']['Name']
                 case 'Audio':
-                    album = session['NowPlayingItem']['Album']
-                    artist = session['NowPlayingItem']['Artists'][0]
-                    state = f'{album} - {artist}'
+                    if 'Music' not in media_types:
+                        time.sleep(refresh_rate)
+                        continue
+                    state = ''
+                    if 'Artists' in session['NowPlayingItem']:
+                        state += ', '.join(session['NowPlayingItem']['Artists'])
+                    if 'Album' in session['NowPlayingItem']:
+                        state += ' - ' + session['NowPlayingItem']['Album']
                     details = session['NowPlayingItem']['Name']
                 case _:
                     logger.warning(f'Unsupported Media Type: {media_type}. Ignoring...')
@@ -183,7 +199,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                         #     {'label': 'Play on Jellyfin', 'url': config['JELLYFIN_HOST'] + url_path}
                         # ],
                     )
-                    logger.info(f'Discord RPC Updated: {details}.')
+                    logger.info(f'RPC Updated: {details}.')
                 except PipeClosed:
                     await_connection(discord_rpc, refresh_rate)
                     continue
@@ -194,7 +210,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
             except PipeClosed:
                 await_connection(discord_rpc, refresh_rate)
                 continue
-            logger.info(f'Discord RPC Cleared: {previous_details}.')
+            logger.info(f'RPC Cleared: {previous_details}.')
             previous_details = ''
         time.sleep(refresh_rate)
 
