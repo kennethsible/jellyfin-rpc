@@ -1,7 +1,6 @@
 import argparse
 import json
 import logging
-import logging.handlers
 import sys
 import time
 import uuid
@@ -65,14 +64,8 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
         return client.jellyfin
 
 
-def get_series_poster(api_key: str, imdb_id: str, season: int) -> str:
-    response = requests.get(
-        f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={api_key}&external_source=imdb_id"
-    )
-    tmdb_id = json.loads(response.text)['tv_episode_results'][0]['show_id']
-    response = requests.get(
-        f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}"
-    )
+def get_series_poster(api_key: str, tmdb_id: str) -> str:
+    response = requests.get(f'https://api.themoviedb.org/3/tv/{tmdb_id}/images?api_key={api_key}')
     try:
         return (
             'https://image.tmdb.org/t/p/w185/'
@@ -83,13 +76,9 @@ def get_series_poster(api_key: str, imdb_id: str, season: int) -> str:
         return DEFAULT_POSTER_URL
 
 
-def get_movie_poster(api_key: str, imdb_id: str) -> str:
+def get_movie_poster(api_key: str, tmdb_id: str) -> str:
     response = requests.get(
-        f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={api_key}&external_source=imdb_id"
-    )
-    tmdb_id = json.loads(response.text)['movie_results'][0]['id']
-    response = requests.get(
-        f"https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}"
+        f'https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}'
     )
     try:
         return (
@@ -174,25 +163,29 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                     logger.warning(f'Unsupported Media Type: {media_type}. Ignoring...')
                     time.sleep(refresh_rate)
                     continue  # raise NotImplementedError()
+            if len(details) < 2:  # e.g., Chinese characters
+                details += ' '
             if details != previous_details:
                 poster_url = DEFAULT_POSTER_URL
-                if media_type in ('Episode', 'Movie') and len(config['TMDB_API_KEY']) > 0:
+                if media_type == 'Episode' and len(config['TMDB_API_KEY']) > 0:
                     try:
-                        imdb_id = next(
-                            external_url['Url']
-                            for external_url in session['NowPlayingItem']['ExternalUrls']
-                            if external_url['Name'] == 'IMDb'
-                        ).split('/')[-1]
-                    except StopIteration:
-                        logger.warning('No IMDb ID Found. Skipping...')
+                        series = jellyfin_api.get_item(session['NowPlayingItem']['SeriesId'])
+                        tmdb_id = series['ProviderIds']['Tmdb']
+                    except KeyError:
+                        logger.warning('No TVDB ID Found. Skipping...')
                     else:
                         try:
-                            if session['NowPlayingItem']['Type'] == 'Episode':
-                                poster_url = get_series_poster(
-                                    config['TMDB_API_KEY'], imdb_id, season
-                                )
-                            elif session['NowPlayingItem']['Type'] == 'Movie':
-                                poster_url = get_movie_poster(config['TMDB_API_KEY'], imdb_id)
+                            poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id)
+                        except RequestException:
+                            logger.warning('Connection Failed: TMDB. Skipping...')
+                elif media_type == 'Movie' and len(config['TMDB_API_KEY']) > 0:
+                    try:
+                        tmdb_id = session['NowPlayingItem']['ProviderIds']['Tmdb']
+                    except StopIteration:
+                        logger.warning('No TMDB ID Found. Skipping...')
+                    else:
+                        try:
+                            poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id)
                         except RequestException:
                             logger.warning('Connection Failed: TMDB. Skipping...')
                 elif media_type == 'Audio':
@@ -209,8 +202,6 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                     # source_id = session['NowPlayingItem']['Id']
                     # server_id = session['NowPlayingItem']['ServerId']
                     # url_path = f'web/#/details?id={source_id}&serverId={server_id}'
-                    if len(details) < 2:  # e.g., Chinese characters
-                        details += ' '
                     discord_rpc.update(
                         state=state,
                         details=details,
@@ -220,7 +211,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                         #     {'label': 'Play on Jellyfin', 'url': config['JELLYFIN_HOST'] + url_path}
                         # ],
                     )
-                    logger.info(f'RPC Updated: {details}.')
+                    logger.info(f'Status Updated: {details}.')
                 except PipeClosed:
                     await_connection(discord_rpc, refresh_rate)
                     continue
@@ -231,7 +222,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
             except PipeClosed:
                 await_connection(discord_rpc, refresh_rate)
                 continue
-            logger.info(f'RPC Cleared: {previous_details}.')
+            logger.info('Status Cleared.')
             previous_details = ''
         time.sleep(refresh_rate)
 
