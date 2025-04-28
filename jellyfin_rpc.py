@@ -5,6 +5,8 @@ import sys
 import time
 import uuid
 from configparser import ConfigParser, SectionProxy
+from logging import handlers
+from multiprocessing.queues import Queue
 
 import requests
 import urllib3
@@ -56,7 +58,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
                 },
                 discover=False,
             )
-            logger.debug('Connection Established: Jellyfin.')
+            logger.info('Connection Established: Jellyfin.')
         except (RequestException, json.JSONDecodeError):
             logger.error('Connection Failed: Jellyfin. Retrying...')
             time.sleep(refresh_rate)
@@ -103,7 +105,7 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
             discord_rpc.connect()
-            logger.debug('Connection Established: Discord.')
+            logger.info('Connection Established: Discord.')
         except DiscordNotFound:
             logger.error('Connection Failed: Discord. Retrying...')
             time.sleep(refresh_rate)
@@ -227,7 +229,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
         time.sleep(refresh_rate)
 
 
-def main():
+def main(log_queue: Queue | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--ini-path', default='jellyfin_rpc.ini')
     parser.add_argument('--log-path', default='jellyfin_rpc.log')
@@ -240,6 +242,8 @@ def main():
     file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
     logger.addHandler(file_hdlr)
     logger.addHandler(logging.StreamHandler(sys.stdout))
+    if log_queue is not None:
+        logger.addHandler(handlers.QueueHandler(log_queue))
 
     set_discord_rpc(config, refresh_rate=args.refresh_rate)
 

@@ -5,6 +5,8 @@ import os
 import shutil
 import sys
 import webbrowser
+from logging import LogRecord
+from multiprocessing.queues import Queue
 from typing import Callable
 
 import customtkinter
@@ -14,17 +16,18 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.3.1'
+__version__ = '1.3.2'
 
 
 class RPCProcess:
 
-    def __init__(self, target: Callable):
+    def __init__(self, target: Callable, log_queue: Queue):
         self.target = target
+        self.log_queue = log_queue
         self.process: multiprocessing.Process | None = None
 
     def start(self):
-        self.process = multiprocessing.Process(target=self.target)
+        self.process = multiprocessing.Process(target=self.target, args=(self.log_queue,))
         self.process.start()
 
     def stop(self):
@@ -33,6 +36,34 @@ class RPCProcess:
         if self.process.is_alive():
             self.process.terminate()
             self.process.join()
+
+
+class RPCLogger:
+
+    def __init__(
+        self,
+        frame: customtkinter.CTkFrame,
+        log_queue: multiprocessing.Queue,
+        text_widget: customtkinter.CTkTextbox,
+    ):
+        self.frame = frame
+        self.log_queue = log_queue
+        self.text_widget = text_widget
+        self.frame.after(100, self.poll_log_queue)
+
+    def poll_log_queue(self):
+        while not self.log_queue.empty():
+            record = self.log_queue.get_nowait()
+            self.display_record(record)
+        self.frame.after(100, self.poll_log_queue)
+
+    def display_record(self, record: LogRecord):
+        message = self.format_log_record(record)
+        self.text_widget.insert(customtkinter.END, message)
+        self.text_widget.see(customtkinter.END)
+
+    def format_log_record(self, record: LogRecord):
+        return f'{record.levelname}: {record.getMessage()}\n'
 
 
 def on_click(
@@ -200,6 +231,11 @@ def main():
         )
     entry4.pack(pady=5, padx=10)
 
+    textbox1 = customtkinter.CTkTextbox(master=frame, width=265, height=100)
+    textbox1.pack(pady=5, padx=10)
+    log_queue = multiprocessing.Queue()
+    RPCLogger(frame, log_queue, textbox1)
+
     media_types = config['MEDIA_TYPES'].split(',')
     checkbox1_var = customtkinter.IntVar(value=int('Movies' in media_types))
     checkbox1 = customtkinter.CTkCheckBox(master=frame, text='Movies', variable=checkbox1_var)
@@ -213,7 +249,7 @@ def main():
     checkbox3 = customtkinter.CTkCheckBox(master=frame, text='Music', variable=checkbox3_var)
     checkbox3.pack(pady=5, padx=10)
 
-    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main))
+    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main), log_queue)
     button1 = customtkinter.CTkButton(
         master=frame,
         text='Connect',
