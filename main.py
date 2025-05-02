@@ -16,7 +16,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.3.2'
+__version__ = '1.3.3'
 
 
 class RPCProcess:

@@ -5,6 +5,7 @@ import sys
 import time
 import uuid
 from configparser import ConfigParser, SectionProxy
+from json.decoder import JSONDecodeError
 from logging import handlers
 from multiprocessing.queues import Queue
 
@@ -59,7 +60,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
                 discover=False,
             )
             logger.info('Connection Established: Jellyfin.')
-        except (RequestException, json.JSONDecodeError):
+        except (RequestException, JSONDecodeError):
             logger.error('Connection Failed: Jellyfin. Retrying...')
             time.sleep(refresh_rate)
             continue
@@ -73,7 +74,7 @@ def get_series_poster(api_key: str, tmdb_id: str) -> str:
             'https://image.tmdb.org/t/p/w185/'
             + json.loads(response.text)['posters'][0]['file_path']
         )
-    except KeyError:
+    except (KeyError, JSONDecodeError):
         logger.warning('No Poster Available on TMDB. Skipping...')
         return DEFAULT_POSTER_URL
 
@@ -87,7 +88,7 @@ def get_movie_poster(api_key: str, tmdb_id: str) -> str:
             'https://image.tmdb.org/t/p/w185/'
             + json.loads(response.text)['posters'][0]['file_path']
         )
-    except KeyError:
+    except (KeyError, JSONDecodeError):
         logger.warning('Connection Failed: TMDB. Skipping...')
         return DEFAULT_POSTER_URL
 
@@ -96,7 +97,7 @@ def get_album_cover(musicbrainz_id: str) -> str:
     response = requests.get(f'https://coverartarchive.org/release/{musicbrainz_id}')
     try:
         return json.loads(response.text)['images'][0]['image']
-    except KeyError:
+    except (KeyError, JSONDecodeError):
         logger.warning('Connection Failed: MusicBrainz. Skipping...')
         return DEFAULT_POSTER_URL
 
@@ -196,10 +197,11 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                         musicbrainz_id = album['ProviderIds']['MusicBrainzAlbum']
                     except KeyError:
                         logger.warning('No MusicBrainz ID Found. Skipping...')
-                    try:
-                        poster_url = get_album_cover(musicbrainz_id)
-                    except RequestException:
-                        logger.warning('Connection Failed: MusicBrainz. Skipping...')
+                    else:
+                        try:
+                            poster_url = get_album_cover(musicbrainz_id)
+                        except RequestException:
+                            logger.warning('Connection Failed: MusicBrainz. Skipping...')
                 try:
                     # source_id = session['NowPlayingItem']['Id']
                     # server_id = session['NowPlayingItem']['ServerId']
