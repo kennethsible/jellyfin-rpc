@@ -67,16 +67,27 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
         return client.jellyfin
 
 
-def get_series_poster(api_key: str, tmdb_id: str) -> str:
-    response = requests.get(f'https://api.themoviedb.org/3/tv/{tmdb_id}/images?api_key={api_key}')
+def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
+    response = requests.get(
+        f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}"
+    )
     try:
         return (
             'https://image.tmdb.org/t/p/w185/'
             + json.loads(response.text)['posters'][0]['file_path']
         )
     except (KeyError, JSONDecodeError):
-        logger.warning('No Poster Available on TMDB. Skipping...')
-        return DEFAULT_POSTER_URL
+        response = requests.get(
+            f'https://api.themoviedb.org/3/tv/{tmdb_id}/images?api_key={api_key}'
+        )
+        try:
+            return (
+                'https://image.tmdb.org/t/p/w185/'
+                + json.loads(response.text)['posters'][0]['file_path']
+            )
+        except (KeyError, JSONDecodeError):
+            logger.warning('No Poster Available on TMDB. Skipping...')
+            return DEFAULT_POSTER_URL
 
 
 def get_movie_poster(api_key: str, tmdb_id: str) -> str:
@@ -178,7 +189,7 @@ def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
                         logger.warning('No TVDB ID Found. Skipping...')
                     else:
                         try:
-                            poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id)
+                            poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id, season)
                         except RequestException:
                             logger.warning('Connection Failed: TMDB. Skipping...')
                 elif media_type == 'Movie' and len(config['TMDB_API_KEY']) > 0:
