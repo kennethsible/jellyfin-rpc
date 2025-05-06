@@ -125,7 +125,7 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
         break
 
 
-def set_discord_rpc(config: SectionProxy, *, refresh_rate: int = 10):
+def set_discord_rpc(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
     jellyfin_api = get_jellyfin_api(config, refresh_rate)
@@ -246,7 +246,7 @@ def main(log_queue: Queue | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--ini-path', default='jellyfin_rpc.ini')
     parser.add_argument('--log-path', default='jellyfin_rpc.log')
-    parser.add_argument('--refresh-rate', type=int, default=10)
+    parser.add_argument('--refresh-rate', type=int, default=5)
     args = parser.parse_args()
 
     config = get_config(args.ini_path)
