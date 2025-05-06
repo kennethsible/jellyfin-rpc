@@ -197,6 +197,7 @@ def main():
     ini_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.ini'))
     png_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
     ico_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
+    os.chdir(os.path.dirname(get_executable_path()))
     if not os.path.isfile('jellyfin_rpc.ini'):
         shutil.copyfile(ini_path, 'jellyfin_rpc.ini')
     ini_path = 'jellyfin_rpc.ini'
