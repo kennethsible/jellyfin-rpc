@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import webbrowser
+import winreg
 from logging import LogRecord
 from multiprocessing.queues import Queue
 from typing import Callable
@@ -16,7 +17,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.3.3'
+__version__ = '1.4.0'
 
 
 class RPCProcess:
@@ -142,6 +143,46 @@ def callback(url: str):
     webbrowser.open_new_tab(url)
 
 
+def get_executable_path():
+    if getattr(sys, 'frozen', False):
+        return sys.executable
+    else:
+        return os.path.abspath(__file__)
+
+
+def set_startup_status(enabled: bool):
+    key = winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        r'Software\Microsoft\Windows\CurrentVersion\Run',
+        0,
+        winreg.KEY_SET_VALUE,
+    )
+    if enabled:
+        exe_path = get_executable_path()
+        winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, exe_path)
+    else:
+        try:
+            winreg.DeleteValue(key, 'Jellyfin RPC')
+        except FileNotFoundError:
+            pass
+    winreg.CloseKey(key)
+
+
+def get_startup_status():
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Run',
+            0,
+            winreg.KEY_READ,
+        )
+        _, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
+        winreg.CloseKey(key)
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def main():
     customtkinter.set_appearance_mode('system')
     customtkinter.set_default_color_theme('dark-blue')
@@ -230,6 +271,15 @@ def main():
             width=265,
         )
     entry4.pack(pady=5, padx=10)
+
+    checkbox4_var = customtkinter.IntVar(value=int(get_startup_status()))
+    checkbox4 = customtkinter.CTkCheckBox(
+        master=frame,
+        text='Run on Windows Startup',
+        variable=checkbox4_var,
+        command=lambda: set_startup_status(checkbox4_var.get()),
+    )
+    checkbox4.pack(pady=5, padx=10)
 
     textbox1 = customtkinter.CTkTextbox(master=frame, width=265, height=100)
     textbox1.pack(pady=5, padx=10)
