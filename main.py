@@ -17,7 +17,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.4.0'
+__version__ = '1.4.1'
 
 
 class RPCProcess:
@@ -114,16 +114,12 @@ def on_maximize(root: customtkinter.CTk, label: customtkinter.CTkLabel):
     response = requests.get(
         'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest'
     )
-    latest_ver = response.json()['tag_name'].lstrip('v')
-    if latest_ver == __version__:
-        label.configure(
-            text_color='gray',
-            text=f'Current Version ({__version__})',
-        )
+    release = response.json()['tag_name'].lstrip('v')
+    if __version__ == release:
+        label.configure(text=f'Current Version ({__version__})')
     else:
         label.configure(
-            text_color='red',
-            text=f'Update Available ({__version__} \u2192 {latest_ver})',
+            text=f'Update Available ({__version__} \u2192 {release})', text_color='yellow'
         )
     root.after(0, root.deiconify)
 
@@ -346,7 +342,6 @@ def main():
 
     root.iconbitmap(ico_path)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)
-    root.resizable(False, False)
     root.mainloop()
 
 

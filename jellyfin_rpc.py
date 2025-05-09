@@ -100,16 +100,20 @@ def get_movie_poster(api_key: str, tmdb_id: str) -> str:
             + json.loads(response.text)['posters'][0]['file_path']
         )
     except (KeyError, JSONDecodeError):
-        logger.warning('Connection Failed: TMDB. Skipping...')
+        logger.warning('No Poster Available on TMDB. Skipping...')
         return DEFAULT_POSTER_URL
 
 
-def get_album_cover(musicbrainz_id: str) -> str:
-    response = requests.get(f'https://coverartarchive.org/release/{musicbrainz_id}')
+def get_album_cover(album_id: str, group_id: str) -> str:
+    response = requests.get(f'https://coverartarchive.org/release/{album_id}')
     try:
         return json.loads(response.text)['images'][0]['image']
     except (KeyError, JSONDecodeError):
-        logger.warning('Connection Failed: MusicBrainz. Skipping...')
+        response = requests.get(f'https://coverartarchive.org/release-group/{group_id}')
+        try:
+            return json.loads(response.text)['images'][0]['image']
+        except (KeyError, JSONDecodeError):
+            logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
         return DEFAULT_POSTER_URL
 
 
@@ -205,26 +209,18 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                 elif media_type == 'Audio':
                     try:
                         album = jellyfin_api.get_item(session['NowPlayingItem']['AlbumId'])
-                        musicbrainz_id = album['ProviderIds']['MusicBrainzAlbum']
+                        group_id = album['ProviderIds']['MusicBrainzReleaseGroup']
+                        album_id = album['ProviderIds']['MusicBrainzAlbum']
                     except KeyError:
                         logger.warning('No MusicBrainz ID Found. Skipping...')
                     else:
                         try:
-                            poster_url = get_album_cover(musicbrainz_id)
+                            poster_url = get_album_cover(album_id, group_id)
                         except RequestException:
                             logger.warning('Connection Failed: MusicBrainz. Skipping...')
                 try:
-                    # source_id = session['NowPlayingItem']['Id']
-                    # server_id = session['NowPlayingItem']['ServerId']
-                    # url_path = f'web/#/details?id={source_id}&serverId={server_id}'
                     discord_rpc.update(
-                        state=state,
-                        details=details,
-                        start=time.time(),
-                        large_image=poster_url,
-                        # buttons=[
-                        #     {'label': 'Play on Jellyfin', 'url': config['JELLYFIN_HOST'] + url_path}
-                        # ],
+                        state=state, details=details, start=time.time(), large_image=poster_url
                     )
                     logger.info(f'Status Updated: {details}.')
                 except PipeClosed:
