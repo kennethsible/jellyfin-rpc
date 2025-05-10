@@ -41,6 +41,7 @@ def get_user_id(config: SectionProxy) -> str:
 
 
 def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
+    initial_attempt = True
     while True:
         try:
             client = JellyfinClient()
@@ -61,7 +62,9 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
             )
             logger.info('Connection Established: Jellyfin.')
         except (RequestException, JSONDecodeError):
-            logger.error('Connection Failed: Jellyfin. Retrying...')
+            if initial_attempt:
+                logger.error('Connection Failed: Jellyfin. Retrying...')
+            initial_attempt = False
             time.sleep(refresh_rate)
             continue
         return client.jellyfin
@@ -118,12 +121,15 @@ def get_album_cover(album_id: str, group_id: str) -> str:
 
 
 def await_connection(discord_rpc: Presence, refresh_rate: int):
+    initial_attempt = True
     while True:
         try:
             discord_rpc.connect()
             logger.info('Connection Established: Discord.')
-        except DiscordNotFound:
-            logger.error('Connection Failed: Discord. Retrying...')
+        except (DiscordNotFound, ConnectionRefusedError):
+            if initial_attempt:
+                logger.error('Connection Failed: Discord. Retrying...')
+            initial_attempt = False
             time.sleep(refresh_rate)
             continue
         break

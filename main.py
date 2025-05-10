@@ -110,25 +110,26 @@ def on_click(
     button1.update()
 
 
-def on_maximize(root: customtkinter.CTk, label: customtkinter.CTkLabel):
+def on_maximize(label: customtkinter.CTkLabel, root: customtkinter.CTk | None = None):
     response = requests.get(
         'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest'
     )
     release = response.json()['tag_name'].lstrip('v')
     if __version__ == release:
-        label.configure(text=f'Current Version ({__version__})')
+        label.configure(
+            text=f'Current Version ({__version__})',
+            text_color='gray',
+        )
     else:
         label.configure(
-            text=f'Update Available ({__version__} \u2192 {release})', text_color='yellow'
+            text=f'Update Available ({__version__} \u2192 {release})',
+            text_color='cyan',
         )
-    root.after(0, root.deiconify)
+    if root is not None:
+        root.after(0, root.deiconify)
 
 
-def on_close(
-    rpc_process: RPCProcess,
-    icon: pystray._base.Icon,
-    root: customtkinter.CTk,
-):
+def on_close(rpc_process: RPCProcess, icon: pystray._base.Icon, root: customtkinter.CTk):
     rpc_process.stop()
     icon.visible = False
     icon.stop()
@@ -139,7 +140,7 @@ def callback(url: str):
     webbrowser.open_new_tab(url)
 
 
-def get_executable_path():
+def get_executable_path() -> str:
     if getattr(sys, 'frozen', False):
         return sys.executable
     else:
@@ -164,7 +165,7 @@ def set_startup_status(enabled: bool):
     winreg.CloseKey(key)
 
 
-def get_startup_status():
+def get_startup_status() -> bool:
     try:
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
@@ -182,6 +183,7 @@ def get_startup_status():
 def main():
     customtkinter.set_appearance_mode('system')
     customtkinter.set_default_color_theme('dark-blue')
+    customtkinter.deactivate_automatic_dpi_awareness()
 
     root = customtkinter.CTk()
     root.title('Jellyfin RPC')
@@ -204,6 +206,7 @@ def main():
         '<Button-1>', lambda _: callback('https://github.com/kennethsible/jellyfin-rpc/releases')
     )
     label1.pack(pady=0, padx=10)
+    on_maximize(label1)
 
     if config['JELLYFIN_HOST']:
         entry1_text = customtkinter.StringVar()
@@ -327,14 +330,15 @@ def main():
             checkbox3,
             button1,
         )
+        if button1._text == 'Disconnect':
+            root.withdraw()
 
-    root.withdraw()
     icon = pystray.Icon(
         'jellyfin-rpc',
         Image.open(png_path),
         'Jellyfin RPC',
         menu=pystray.Menu(
-            pystray.MenuItem('Maximize', lambda: on_maximize(root, label1), default=True),
+            pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
             pystray.MenuItem('Quit', lambda: on_close(rpc_process, icon, root)),
         ),
     )
@@ -342,6 +346,7 @@ def main():
 
     root.iconbitmap(ico_path)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    root.resizable(False, False)
     root.mainloop()
 
 
