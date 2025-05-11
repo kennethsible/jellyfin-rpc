@@ -17,7 +17,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.4.1'
+__version__ = '1.4.2'
 
 
 class RPCProcess:
@@ -94,6 +94,8 @@ def on_click(
         if checkbox3._variable.get():
             media_types.append('Music')
         config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
+        if not config.get('DEFAULT', 'LOG_LEVEL', fallback=None):
+            config.set('DEFAULT', 'LOG_LEVEL', 'INFO')
         with open(ini_path, 'w') as ini_file:
             config.write(ini_file)
         rpc_process.start()
@@ -208,68 +210,40 @@ def main():
     label1.pack(pady=0, padx=10)
     on_maximize(label1)
 
-    if config['JELLYFIN_HOST']:
-        entry1_text = customtkinter.StringVar()
-        entry1 = customtkinter.CTkEntry(
-            master=frame,
-            textvariable=entry1_text,
-            width=265,
-        )
-        entry1_text.set(config['JELLYFIN_HOST'])
-    else:
-        entry1 = customtkinter.CTkEntry(
-            master=frame,
-            placeholder_text='Jellyfin Host',
-            width=265,
-        )
+    entry1_text = customtkinter.StringVar(value=config.get('JELLYFIN_HOST'))
+    entry1 = customtkinter.CTkEntry(
+        master=frame,
+        textvariable=entry1_text if entry1_text.get() else None,
+        placeholder_text='Jellyfin Host',
+        width=265,
+    )
     entry1.pack(pady=(0, 5), padx=10)
 
-    if config['API_TOKEN']:
-        entry2_text = customtkinter.StringVar()
-        entry2 = customtkinter.CTkEntry(
-            master=frame,
-            textvariable=entry2_text,
-            width=265,
-        )
-        entry2_text.set(config['API_TOKEN'])
-    else:
-        entry2 = customtkinter.CTkEntry(
-            master=frame,
-            placeholder_text='API Token',
-            width=265,
-        )
+    entry2_text = customtkinter.StringVar(value=config.get('API_TOKEN'))
+    entry2 = customtkinter.CTkEntry(
+        master=frame,
+        textvariable=entry2_text if entry2_text.get() else None,
+        placeholder_text='API Token',
+        width=265,
+    )
     entry2.pack(pady=5, padx=10)
 
-    if config['USERNAME']:
-        entry3_text = customtkinter.StringVar()
-        entry3 = customtkinter.CTkEntry(
-            master=frame,
-            textvariable=entry3_text,
-            width=265,
-        )
-        entry3_text.set(config['USERNAME'])
-    else:
-        entry3 = customtkinter.CTkEntry(
-            master=frame,
-            placeholder_text='Username',
-            width=265,
-        )
+    entry3_text = customtkinter.StringVar(value=config.get('USERNAME'))
+    entry3 = customtkinter.CTkEntry(
+        master=frame,
+        textvariable=entry3_text if entry3_text.get() else None,
+        placeholder_text='Username',
+        width=265,
+    )
     entry3.pack(pady=5, padx=10)
 
-    if config['TMDB_API_KEY']:
-        entry4_text = customtkinter.StringVar()
-        entry4 = customtkinter.CTkEntry(
-            master=frame,
-            textvariable=entry4_text,
-            width=265,
-        )
-        entry4_text.set(config['TMDB_API_KEY'])
-    else:
-        entry4 = customtkinter.CTkEntry(
-            master=frame,
-            placeholder_text='TMDB API Key (Optional)',
-            width=265,
-        )
+    entry4_text = customtkinter.StringVar(value=config.get('TMDB_API_KEY'))
+    entry4 = customtkinter.CTkEntry(
+        master=frame,
+        textvariable=entry4_text if entry4_text.get() else None,
+        placeholder_text='TMDB API Key (Optional)',
+        width=265,
+    )
     entry4.pack(pady=5, padx=10)
 
     checkbox4_var = customtkinter.IntVar(value=int(get_startup_status()))
@@ -286,7 +260,7 @@ def main():
     log_queue = multiprocessing.Queue()
     RPCLogger(frame, log_queue, textbox1)
 
-    media_types = config['MEDIA_TYPES'].split(',')
+    media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music').split(',')
     checkbox1_var = customtkinter.IntVar(value=int('Movies' in media_types))
     checkbox1 = customtkinter.CTkCheckBox(master=frame, text='Movies', variable=checkbox1_var)
     checkbox1.pack(pady=5, padx=10)
@@ -317,7 +291,7 @@ def main():
         ),
     )
     button1.pack(pady=(5, 10), padx=10)
-    if config['JELLYFIN_HOST'] and config['API_TOKEN'] and config['USERNAME']:
+    if config.get('JELLYFIN_HOST') and config.get('API_TOKEN') and config.get('USERNAME'):
         on_click(
             rpc_process,
             ini_path,
