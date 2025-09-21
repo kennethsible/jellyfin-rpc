@@ -1,29 +1,31 @@
-[tool.poetry]
+[project]
 name = "jellyfin-rpc"
-version = "0.1.0"
+version = "1.4.3"
 description = "Discord RPC for Jellyfin"
-authors = ["Ken Sible <ksible@outlook.com>"]
 readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Ken Sible", email = "ksible@outlook.com" }]
+requires-python = ">=3.12,<3.13"
+dependencies = ["jellyfin-apiclient-python>=1.11.0", "pypresence>=4.3.0"]
 
-[tool.poetry.dependencies]
-python = ">=3.12,<3.13"
-jellyfin-apiclient-python = "^1.9.2"
-pypresence = "^4.3.0"
+[project.optional-dependencies]
+gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.6.0"]
 
-[tool.poetry.group.gui.dependencies]
-customtkinter = "^5.2.2"
-pystray = "^0.19.5"
-pyinstaller = "^6.6.0"
+[dependency-groups]
+dev = ["ruff>=0.13.1", "mypy>=1.18.2", "pytest>=8.4.2"]
 
-[tool.poetry.group.dev.dependencies]
-black = "^24.4.2"
-mypy = "^1.10.0"
-isort = "^5.13.2"
-ruff = "^0.4.4"
+[tool.ruff]
+line-length = 100
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.format]
+quote-style = "single"
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
