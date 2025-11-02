@@ -139,7 +139,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
     jellyfin_api = get_jellyfin_api(config, refresh_rate)
-    previous_details, previous_status = '', False
+    previous_activity, previous_playstate = '', False
     while True:
         try:
             session = next(
@@ -158,7 +158,6 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             match media_type := media_dict['Type']:
                 case 'Episode':
                     activity_type = ActivityType.WATCHING
-                    status_display_type = StatusDisplayType.DETAILS
                     if 'Shows' not in media_types:
                         time.sleep(refresh_rate)
                         continue
@@ -166,18 +165,18 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     episode = media_dict['IndexNumber']
                     state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
                     details = media_dict['SeriesName']
-                    large_text = f'Season {season}'
+                    large_text = None
+                    activity = state
                 case 'Movie':
                     activity_type = ActivityType.WATCHING
-                    status_display_type = StatusDisplayType.DETAILS
                     if 'Movies' not in media_types:
                         time.sleep(refresh_rate)
                         continue
                     details = media_dict['Name']
                     state = large_text = None
+                    activity = details
                 case 'Audio':
                     activity_type = ActivityType.LISTENING
-                    status_display_type = StatusDisplayType.STATE
                     if 'Music' not in media_types:
                         time.sleep(refresh_rate)
                         continue
@@ -188,6 +187,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     large_text = None
                     if 'Album' in media_dict:
                         large_text = media_dict['Album']
+                    activity = details
                 case _:
                     logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
                     time.sleep(refresh_rate)
@@ -195,7 +195,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
             is_paused = session['PlayState']['IsPaused']
-            if details != previous_details or previous_status != is_paused:
+            if previous_activity != activity or previous_playstate != is_paused:
                 poster_url = DEFAULT_POSTER_URL
                 if media_type == 'Episode' and len(config['TMDB_API_KEY']) > 0:
                     try:
@@ -257,7 +257,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         end_time = start_time + runtime_ticks / 10_000_000
                     discord_rpc.update(
                         activity_type=activity_type,
-                        status_display_type=status_display_type,
+                        status_display_type=StatusDisplayType.DETAILS,
                         state=state,
                         state_url=state_url,
                         details=details,
@@ -268,23 +268,25 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         large_text=large_text,
                         large_url=large_url,
                     )
-                    if details != previous_details:
-                        logger.info(f'RPC Updated for "{details}"')
+                    if not previous_activity:
+                        logger.info(f'RPC Set for "{activity}"')
+                    elif previous_activity != activity:
+                        logger.info(f'RPC Updated for "{activity}"')
                     else:
-                        play_state = 'Paused' if is_paused else 'Resumed'
-                        logger.info(f'PlayState Updated for "{details}" ({play_state})')
+                        playstate = 'Paused' if is_paused else 'Resumed'
+                        logger.info(f'PlayState Updated for "{activity}" ({playstate})')
                 except PipeClosed:
                     await_connection(discord_rpc, refresh_rate)
                     continue
-                previous_details, previous_status = details, is_paused
-        elif previous_details:
+                previous_activity, previous_playstate = activity, is_paused
+        elif previous_activity:
             try:
                 discord_rpc.clear()
             except PipeClosed:
                 await_connection(discord_rpc, refresh_rate)
                 continue
-            logger.info(f'RPC Cleared for "{details}"')
-            previous_details, previous_status = '', False
+            logger.info(f'RPC Cleared for "{activity}"')
+            previous_activity, previous_playstate = '', False
         time.sleep(refresh_rate)
 
 
