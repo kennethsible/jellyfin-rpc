@@ -1,12 +1,13 @@
 import configparser
 import functools
+import logging
 import multiprocessing
 import os
 import shutil
 import sys
 import webbrowser
 import winreg
-from logging import LogRecord
+from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from typing import Callable
 
@@ -17,7 +18,9 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.5.2'
+__version__ = '1.5.3'
+
+logger = logging.getLogger(__name__)
 
 
 class RPCProcess:
@@ -36,6 +39,19 @@ class RPCProcess:
         if self.process.is_alive():
             self.process.terminate()
             self.process.join()
+
+    def has_failed(self) -> bool:
+        if self.process is None:
+            return False
+        if self.process.exitcode is None:
+            return False
+        if self.process.exitcode in (0, -15):
+            logger.info('RPC Process Exited Normally.')
+            self.process = None
+            return False
+        logger.error('RPC Process Exited Unexpectedly. Reconnect Manually.')
+        self.process = None
+        return True
 
 
 class RPCLogger:
@@ -77,6 +93,7 @@ def on_click(
     checkbox3: customtkinter.CTkCheckBox,
     checkbox4: customtkinter.CTkCheckBox,
     button1: customtkinter.CTkButton,
+    icon: pystray._base.Icon | None = None,
 ):
     global button1_text
     if button1_text == 'Connect':
@@ -112,6 +129,8 @@ def on_click(
             entry.update()
         button1_text = 'Connect'
         button1.configure(text=button1_text)
+    if icon:
+        icon.update_menu()
     button1.update()
 
 
@@ -185,6 +204,56 @@ def get_startup_status() -> bool:
         return False
 
 
+def monitor_process_status(
+    rpc_process: RPCProcess,
+    ini_path: str,
+    entry1: customtkinter.CTkEntry,
+    entry2: customtkinter.CTkEntry,
+    entry3: customtkinter.CTkEntry,
+    entry4: customtkinter.CTkEntry,
+    checkbox1: customtkinter.CTkCheckBox,
+    checkbox2: customtkinter.CTkCheckBox,
+    checkbox3: customtkinter.CTkCheckBox,
+    checkbox4: customtkinter.CTkCheckBox,
+    button1: customtkinter.CTkButton,
+    icon,
+    root: customtkinter.CTk,
+):
+    if rpc_process.has_failed():
+        on_click(
+            rpc_process,
+            ini_path,
+            entry1,
+            entry2,
+            entry3,
+            entry4,
+            checkbox1,
+            checkbox2,
+            checkbox3,
+            checkbox4,
+            button1,
+            icon,
+        )
+    root.after(
+        1000,
+        lambda: monitor_process_status(
+            rpc_process,
+            ini_path,
+            entry1,
+            entry2,
+            entry3,
+            entry4,
+            checkbox1,
+            checkbox2,
+            checkbox3,
+            checkbox4,
+            button1,
+            icon,
+            root,
+        ),
+    )
+
+
 def main():
     customtkinter.set_appearance_mode('system')
     customtkinter.set_default_color_theme('dark-blue')
@@ -249,26 +318,40 @@ def main():
     )
     entry4.pack(pady=5, padx=10)
 
+    checkbox_container = customtkinter.CTkFrame(master=frame, fg_color='transparent')
+    checkbox_container.pack(pady=10)
+
+    checkbox4_frame = customtkinter.CTkFrame(master=checkbox_container, fg_color='transparent')
+    checkbox4_frame.pack(pady=5, fill='x')
     checkbox4_var = customtkinter.IntVar(value=int(config.get('SERVER_NAME', 0)))
     checkbox4 = customtkinter.CTkCheckBox(
-        master=frame,
+        master=checkbox4_frame,
         text='Use Jellyfin Server Name',
         variable=checkbox4_var,
     )
-    checkbox4.pack(pady=5, padx=10)
+    checkbox4.pack(anchor='w')
 
+    checkbox5_frame = customtkinter.CTkFrame(master=checkbox_container, fg_color='transparent')
+    checkbox5_frame.pack(pady=5, fill='x')
     checkbox5_var = customtkinter.IntVar(value=int(get_startup_status()))
     checkbox5 = customtkinter.CTkCheckBox(
-        master=frame,
+        master=checkbox5_frame,
         text='Run on Windows Startup',
         variable=checkbox5_var,
-        command=lambda: set_startup_status(checkbox5_var.get()),
+        command=lambda: set_startup_status(bool(checkbox5_var.get())),
     )
-    checkbox5.pack(pady=5, padx=10)
+    checkbox5.pack(anchor='w')
 
     textbox1 = customtkinter.CTkTextbox(master=frame, width=265, height=100)
     textbox1.pack(pady=5, padx=10)
+
+    logger.setLevel(config['LOG_LEVEL'])
+    file_hdlr = logging.FileHandler('jellyfin_rpc.log', encoding='utf-8')
+    file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    logger.addHandler(file_hdlr)
+    logger.addHandler(logging.StreamHandler(sys.stdout))
     log_queue = multiprocessing.Queue()
+    logger.addHandler(handlers.QueueHandler(log_queue))
     RPCLogger(frame, log_queue, textbox1)
 
     media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music').split(',')
@@ -283,6 +366,33 @@ def main():
     checkbox3_var = customtkinter.IntVar(value=int('Music' in media_types))
     checkbox3 = customtkinter.CTkCheckBox(master=frame, text='Music', variable=checkbox3_var)
     checkbox3.pack(pady=5, padx=10)
+
+    icon = pystray.Icon(
+        'jellyfin-rpc',
+        Image.open(png_path),
+        'Jellyfin RPC',
+        menu=pystray.Menu(
+            pystray.MenuItem(
+                lambda _: button1_text,
+                lambda: on_click(
+                    rpc_process,
+                    ini_path,
+                    entry1,
+                    entry2,
+                    entry3,
+                    entry4,
+                    checkbox1,
+                    checkbox2,
+                    checkbox3,
+                    checkbox4,
+                    button1,
+                ),
+            ),
+            pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
+            pystray.MenuItem('Quit', lambda: on_close(rpc_process, icon, root)),
+        ),
+    )
+    icon.run_detached()
 
     rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main), log_queue)
     global button1_text
@@ -302,6 +412,7 @@ def main():
             checkbox3,
             checkbox4,
             button1,
+            icon,
         ),
     )
     button1.pack(pady=(5, 10), padx=10)
@@ -318,35 +429,25 @@ def main():
             checkbox3,
             checkbox4,
             button1,
+            icon,
         )
         if button1_text == 'Disconnect':
             root.withdraw()
-
-    icon = pystray.Icon(
-        'jellyfin-rpc',
-        Image.open(png_path),
-        'Jellyfin RPC',
-        menu=pystray.Menu(
-            pystray.MenuItem(
-                lambda _: button1_text,
-                lambda: on_click(
-                    rpc_process,
-                    ini_path,
-                    entry1,
-                    entry2,
-                    entry3,
-                    entry4,
-                    checkbox1,
-                    checkbox2,
-                    checkbox3,
-                    button1,
-                ),
-            ),
-            pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
-            pystray.MenuItem('Quit', lambda: on_close(rpc_process, icon, root)),
-        ),
+    monitor_process_status(
+        rpc_process,
+        ini_path,
+        entry1,
+        entry2,
+        entry3,
+        entry4,
+        checkbox1,
+        checkbox2,
+        checkbox3,
+        checkbox4,
+        button1,
+        icon,
+        root,
     )
-    icon.run_detached()
 
     root.iconbitmap(ico_path)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)

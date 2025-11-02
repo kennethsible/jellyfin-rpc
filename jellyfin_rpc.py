@@ -13,7 +13,9 @@ import requests
 import urllib3
 from jellyfin_apiclient_python import JellyfinClient, api
 from jellyfin_apiclient_python.exceptions import HTTPException
-from pypresence import ActivityType, DiscordNotFound, PipeClosed, Presence, StatusDisplayType
+from pypresence import DiscordNotFound, PipeClosed
+from pypresence.presence import Presence
+from pypresence.types import ActivityType, StatusDisplayType
 from requests.exceptions import RequestException
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -63,9 +65,9 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
             server_name = None
             if int(config['SERVER_NAME']):
                 server_name = client.jellyfin.get_system_info().get('ServerName')
-                logger.info(f'Connection to {server_name} Established')
+                logger.info(f'Connected to {server_name}')
             else:
-                logger.info('Connection to Jellyfin Established')
+                logger.info('Connected to Jellyfin')
         except (RequestException, JSONDecodeError):
             if initial_attempt:
                 logger.error('Connection to Jellyfin Failed. Retrying...')
@@ -130,7 +132,7 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
             discord_rpc.connect()
-            logger.info('Connection to Discord Established')
+            logger.info('Connected to Discord')
         except (DiscordNotFound, ConnectionRefusedError):
             if initial_attempt:
                 logger.error('Connection to Discord Failed. Retrying...')
@@ -144,7 +146,8 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
     jellyfin_api, server_name = get_jellyfin_api(config, refresh_rate)
-    previous_activity, previous_playstate = '', False
+    activity, previous_activity, previous_playstate = None, None, False
+
     while True:
         try:
             session = next(
@@ -155,9 +158,10 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
         except StopIteration:
             session = None
         except (HTTPException, KeyError):
-            jellyfin_api = get_jellyfin_api(config, refresh_rate)
+            jellyfin_api, server_name = get_jellyfin_api(config, refresh_rate)
             continue
-        if session is not None and 'NowPlayingItem' in session:
+
+        if session and 'NowPlayingItem' in session:
             media_dict = session['NowPlayingItem']
             media_types = config['MEDIA_TYPES'].split(',')
             match media_type := media_dict['Type']:
@@ -199,9 +203,12 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     continue  # raise NotImplementedError()
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
-            is_paused = session['PlayState']['IsPaused']
-            if previous_activity != activity or previous_playstate != is_paused:
+
+            session_paused = session['PlayState']['IsPaused']
+            if previous_activity != activity or previous_playstate != session_paused:
                 poster_url = DEFAULT_POSTER_URL
+                state_url = large_url = details_url = None
+
                 if media_type == 'Episode' and len(config['TMDB_API_KEY']) > 0:
                     try:
                         series = jellyfin_api.get_item(media_dict['SeriesId'])
@@ -209,6 +216,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     except KeyError:
                         logger.warning('No TVDB ID Found. Skipping...')
                     else:
+                        season = media_dict['ParentIndexNumber']
                         try:
                             poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id, season)
                         except RequestException:
@@ -218,6 +226,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         large_url = f'{details_url}/season/{season}'
                         episode = media_dict['IndexNumber']
                         state_url = f'{details_url}/season/{season}/episode/{episode}'
+
                 elif media_type == 'Movie' and len(config['TMDB_API_KEY']) > 0:
                     try:
                         tmdb_id = media_dict['ProviderIds']['Tmdb']
@@ -230,7 +239,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                             logger.warning('Connection to TMDB Failed. Skipping...')
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
                         large_url = details_url
-                        state_url = None
+
                 elif media_type == 'Audio':
                     try:
                         group_id = media_dict['ProviderIds']['MusicBrainzReleaseGroup']
@@ -242,24 +251,23 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                             poster_url = get_album_cover(album_id, group_id)
                         except RequestException:
                             logger.warning('Connection to MusicBrainz Failed. Skipping...')
-                        details_url = None
                         if 'MusicBrainzTrack' in media_dict['ProviderIds']:
                             track_id = media_dict['ProviderIds']['MusicBrainzTrack']
                             details_url = f'https://musicbrainz.org/track/{track_id}'
                         large_url = f'https://musicbrainz.org/release/{album_id}'
-                        state_url = None
                         if 'MusicBrainzAlbumArtist' in media_dict['ProviderIds']:
                             artist_id = media_dict['ProviderIds']['MusicBrainzAlbumArtist']
                             state_url = f'https://musicbrainz.org/artist/{artist_id}'
+
+                if session_paused:
+                    start_time, end_time = time.time(), None
+                else:
+                    current_time = time.time()
+                    position_ticks = session['PlayState']['PositionTicks']
+                    start_time = current_time - position_ticks / 10_000_000
+                    runtime_ticks = media_dict['RunTimeTicks']
+                    end_time = start_time + runtime_ticks / 10_000_000
                 try:
-                    if is_paused:
-                        start_time, end_time = time.time(), None
-                    else:
-                        current_time = time.time()
-                        position_ticks = session['PlayState']['PositionTicks']
-                        start_time = current_time - position_ticks / 10_000_000
-                        runtime_ticks = media_dict['RunTimeTicks']
-                        end_time = start_time + runtime_ticks / 10_000_000
                     discord_rpc.update(
                         activity_type=activity_type,
                         status_display_type=StatusDisplayType.DETAILS,
@@ -274,17 +282,19 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         large_text=large_text,
                         large_url=large_url,
                     )
-                    if not previous_activity:
-                        logger.info(f'RPC Set for "{activity}"')
-                    elif previous_activity != activity:
-                        logger.info(f'RPC Updated for "{activity}"')
-                    else:
-                        playstate = 'Paused' if is_paused else 'Resumed'
-                        logger.info(f'PlayState Updated for "{activity}" ({playstate})')
                 except PipeClosed:
                     await_connection(discord_rpc, refresh_rate)
                     continue
-                previous_activity, previous_playstate = activity, is_paused
+
+                if not previous_activity:
+                    logger.info(f'RPC Set for "{activity}"')
+                elif previous_activity != activity:
+                    logger.info(f'RPC Updated for "{activity}"')
+                else:
+                    playstate = 'Paused' if session_paused else 'Resumed'
+                    logger.info(f'PlayState Updated for "{activity}" ({playstate})')
+                previous_activity, previous_playstate = activity, session_paused
+
         elif previous_activity:
             try:
                 discord_rpc.clear()
@@ -292,7 +302,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                 await_connection(discord_rpc, refresh_rate)
                 continue
             logger.info(f'RPC Cleared for "{activity}"')
-            previous_activity, previous_playstate = '', False
+            previous_activity, previous_playstate = None, False
         time.sleep(refresh_rate)
 
 
@@ -309,7 +319,7 @@ def main(log_queue: Queue | None = None):
     file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
     logger.addHandler(file_hdlr)
     logger.addHandler(logging.StreamHandler(sys.stdout))
-    if log_queue is not None:
+    if log_queue:
         logger.addHandler(handlers.QueueHandler(log_queue))
 
     set_discord_rpc(config, refresh_rate=args.refresh_rate)

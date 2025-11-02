@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.5.2"
+version = "1.5.3"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.6.0"]
+gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.16.0"]
 
 [dependency-groups]
 dev = ["ruff>=0.14.3", "mypy>=1.18.2", "pytest>=8.4.2"]

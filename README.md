@@ -1,5 +1,7 @@
 # Discord RPC for Jellyfin
 
+Jellyfin RPC updates your Discord status with what you're watching or listening to on your Jellyfin server. Make sure your Discord client is open while using Jellyfin RPC.
+
 ![jellyfin_rpc_series](images/jellyfin_rpc_series.png)
 ![jellyfin_rpc_movie](images/jellyfin_rpc_music.png)
 
@@ -21,14 +23,14 @@ Use GUI or `jellyfin_rpc.ini`
 - TMDB API Key (Optional)
 
 > [!IMPORTANT]
-> You need a [TMDB API key](https://developer.themoviedb.org/docs/getting-started) to fetch posters for movies and series.
+> You need a [TMDB API key](https://developer.themoviedb.org/docs/getting-started) to fetch posters for movies/series.
 
 ## Usage (GUI)
 
 ![jellyfin_rpc_gui](images/jellyfin_rpc_gui.png)
 
 > [!NOTE]
-> The Jellyfin RPC GUI opens **minimized** in the system tray.
+> The Jellyfin RPC GUI starts **minimized** in the system tray.
 
 ![jellyfin_rpc_ico](images/jellyfin_rpc_ico.png)
 
