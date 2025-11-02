@@ -40,7 +40,7 @@ def get_user_id(config: SectionProxy) -> str:
     raise ValueError(f'{config["USERNAME"]} Not Found')
 
 
-def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
+def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
     initial_attempt = True
     while True:
         try:
@@ -60,14 +60,19 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
                 },
                 discover=False,
             )
-            logger.info('Connection to Jellyfin Established')
+            server_name = None
+            if int(config['SERVER_NAME']):
+                server_name = client.jellyfin.get_system_info().get('ServerName')
+                logger.info(f'Connection to {server_name} Established')
+            else:
+                logger.info('Connection to Jellyfin Established')
         except (RequestException, JSONDecodeError):
             if initial_attempt:
                 logger.error('Connection to Jellyfin Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
             continue
-        return client.jellyfin
+        return client.jellyfin, server_name
 
 
 def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
@@ -138,7 +143,7 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
 def set_discord_rpc(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
-    jellyfin_api = get_jellyfin_api(config, refresh_rate)
+    jellyfin_api, server_name = get_jellyfin_api(config, refresh_rate)
     previous_activity, previous_playstate = '', False
     while True:
         try:
@@ -262,6 +267,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         state_url=state_url,
                         details=details,
                         details_url=details_url,
+                        name=server_name,
                         start=start_time,
                         end=end_time,
                         large_image=poster_url,

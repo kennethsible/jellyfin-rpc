@@ -17,7 +17,7 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.5.1'
+__version__ = '1.5.2'
 
 
 class RPCProcess:
@@ -75,6 +75,7 @@ def on_click(
     checkbox1: customtkinter.CTkCheckBox,
     checkbox2: customtkinter.CTkCheckBox,
     checkbox3: customtkinter.CTkCheckBox,
+    checkbox4: customtkinter.CTkCheckBox,
     button1: customtkinter.CTkButton,
 ):
     global button1_text
@@ -85,6 +86,7 @@ def on_click(
         config.set('DEFAULT', 'API_TOKEN', entry2.get())
         config.set('DEFAULT', 'USERNAME', entry3.get())
         config.set('DEFAULT', 'TMDB_API_KEY', entry4.get())
+        config.set('DEFAULT', 'SERVER_NAME', str(checkbox4._variable.get()))
         media_types = []
         if checkbox1._variable.get():
             media_types.append('Movies')
@@ -247,14 +249,22 @@ def main():
     )
     entry4.pack(pady=5, padx=10)
 
-    checkbox4_var = customtkinter.IntVar(value=int(get_startup_status()))
+    checkbox4_var = customtkinter.IntVar(value=int(config.get('SERVER_NAME', 0)))
     checkbox4 = customtkinter.CTkCheckBox(
         master=frame,
-        text='Run on Windows Startup',
+        text='Use Jellyfin Server Name',
         variable=checkbox4_var,
-        command=lambda: set_startup_status(checkbox4_var.get()),
     )
     checkbox4.pack(pady=5, padx=10)
+
+    checkbox5_var = customtkinter.IntVar(value=int(get_startup_status()))
+    checkbox5 = customtkinter.CTkCheckBox(
+        master=frame,
+        text='Run on Windows Startup',
+        variable=checkbox5_var,
+        command=lambda: set_startup_status(checkbox5_var.get()),
+    )
+    checkbox5.pack(pady=5, padx=10)
 
     textbox1 = customtkinter.CTkTextbox(master=frame, width=265, height=100)
     textbox1.pack(pady=5, padx=10)
@@ -290,6 +300,7 @@ def main():
             checkbox1,
             checkbox2,
             checkbox3,
+            checkbox4,
             button1,
         ),
     )
@@ -305,6 +316,7 @@ def main():
             checkbox1,
             checkbox2,
             checkbox3,
+            checkbox4,
             button1,
         )
         if button1_text == 'Disconnect':
