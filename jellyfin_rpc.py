@@ -13,7 +13,7 @@ import requests
 import urllib3
 from jellyfin_apiclient_python import JellyfinClient, api
 from jellyfin_apiclient_python.exceptions import HTTPException
-from pypresence import DiscordNotFound, PipeClosed, Presence
+from pypresence import ActivityType, DiscordNotFound, PipeClosed, Presence, StatusDisplayType
 from requests.exceptions import RequestException
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -37,7 +37,7 @@ def get_user_id(config: SectionProxy) -> str:
     for user in user_data.json():
         if config['USERNAME'] in user['Name']:
             return user['Id']
-    raise ValueError(f'{config["USERNAME"]} Not Found.')
+    raise ValueError(f'{config["USERNAME"]} Not Found')
 
 
 def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
@@ -60,10 +60,10 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
                 },
                 discover=False,
             )
-            logger.info('Connection Established: Jellyfin.')
+            logger.info('Connection to Jellyfin Established')
         except (RequestException, JSONDecodeError):
             if initial_attempt:
-                logger.error('Connection Failed: Jellyfin. Retrying...')
+                logger.error('Connection to Jellyfin Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
             continue
@@ -72,7 +72,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> api.API:
 
 def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
     response = requests.get(
-        f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}"
+        f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}'
     )
     try:
         return (
@@ -125,10 +125,10 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
             discord_rpc.connect()
-            logger.info('Connection Established: Discord.')
+            logger.info('Connection to Discord Established')
         except (DiscordNotFound, ConnectionRefusedError):
             if initial_attempt:
-                logger.error('Connection Failed: Discord. Retrying...')
+                logger.error('Connection to Discord Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
             continue
@@ -139,7 +139,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
     jellyfin_api = get_jellyfin_api(config, refresh_rate)
-    previous_details = ''
+    previous_details, previous_status = '', False
     while True:
         try:
             session = next(
@@ -149,51 +149,57 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             )
         except StopIteration:
             session = None
-        except HTTPException:
+        except (HTTPException, KeyError):
             jellyfin_api = get_jellyfin_api(config, refresh_rate)
             continue
         if session is not None and 'NowPlayingItem' in session:
+            media_dict = session['NowPlayingItem']
             media_types = config['MEDIA_TYPES'].split(',')
-            match media_type := session['NowPlayingItem']['Type']:
+            match media_type := media_dict['Type']:
                 case 'Episode':
+                    activity_type = ActivityType.WATCHING
+                    status_display_type = StatusDisplayType.DETAILS
                     if 'Shows' not in media_types:
                         time.sleep(refresh_rate)
                         continue
-                    season = session['NowPlayingItem']['ParentIndexNumber']
-                    episode = session['NowPlayingItem']['IndexNumber']
-                    state = ''
-                    if 'SeriesName' in session['NowPlayingItem']:
-                        state += session['NowPlayingItem']['SeriesName']
-                    details = f'{f"S{season}:E{episode}"} - {session["NowPlayingItem"]["Name"]}'
+                    season = media_dict['ParentIndexNumber']
+                    episode = media_dict['IndexNumber']
+                    state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
+                    details = media_dict['SeriesName']
+                    large_text = f'Season {season}'
                 case 'Movie':
+                    activity_type = ActivityType.WATCHING
+                    status_display_type = StatusDisplayType.DETAILS
                     if 'Movies' not in media_types:
                         time.sleep(refresh_rate)
                         continue
-                    state = ''
-                    if 'Genres' in session['NowPlayingItem']:
-                        state += ', '.join(session['NowPlayingItem']['Genres'])
-                    details = session['NowPlayingItem']['Name']
+                    details = media_dict['Name']
+                    state = large_text = None
                 case 'Audio':
+                    activity_type = ActivityType.LISTENING
+                    status_display_type = StatusDisplayType.STATE
                     if 'Music' not in media_types:
                         time.sleep(refresh_rate)
                         continue
-                    state = ''
-                    if 'Artists' in session['NowPlayingItem']:
-                        state += ', '.join(session['NowPlayingItem']['Artists'])
-                    if 'Album' in session['NowPlayingItem']:
-                        state += ' - ' + session['NowPlayingItem']['Album']
-                    details = session['NowPlayingItem']['Name']
+                    state = None
+                    if 'Artists' in media_dict:
+                        state = ', '.join(media_dict['Artists'])
+                    details = media_dict['Name']
+                    large_text = None
+                    if 'Album' in media_dict:
+                        large_text = media_dict['Album']
                 case _:
-                    logger.warning(f'Unsupported Media Type: {media_type}. Ignoring...')
+                    logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
                     time.sleep(refresh_rate)
                     continue  # raise NotImplementedError()
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
-            if details != previous_details:
+            is_paused = session['PlayState']['IsPaused']
+            if details != previous_details or previous_status != is_paused:
                 poster_url = DEFAULT_POSTER_URL
                 if media_type == 'Episode' and len(config['TMDB_API_KEY']) > 0:
                     try:
-                        series = jellyfin_api.get_item(session['NowPlayingItem']['SeriesId'])
+                        series = jellyfin_api.get_item(media_dict['SeriesId'])
                         tmdb_id = series['ProviderIds']['Tmdb']
                     except KeyError:
                         logger.warning('No TVDB ID Found. Skipping...')
@@ -201,46 +207,84 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         try:
                             poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id, season)
                         except RequestException:
-                            logger.warning('Connection Failed: TMDB. Skipping...')
+                            logger.warning('Connection to TMDB Failed. Skipping...')
+                        details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
+                        season = media_dict['ParentIndexNumber']
+                        large_url = f'{details_url}/season/{season}'
+                        episode = media_dict['IndexNumber']
+                        state_url = f'{details_url}/season/{season}/episode/{episode}'
                 elif media_type == 'Movie' and len(config['TMDB_API_KEY']) > 0:
                     try:
-                        tmdb_id = session['NowPlayingItem']['ProviderIds']['Tmdb']
+                        tmdb_id = media_dict['ProviderIds']['Tmdb']
                     except StopIteration:
                         logger.warning('No TMDB ID Found. Skipping...')
                     else:
                         try:
                             poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id)
                         except RequestException:
-                            logger.warning('Connection Failed: TMDB. Skipping...')
+                            logger.warning('Connection to TMDB Failed. Skipping...')
+                        details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
+                        large_url = details_url
+                        state_url = None
                 elif media_type == 'Audio':
                     try:
-                        album = jellyfin_api.get_item(session['NowPlayingItem']['AlbumId'])
-                        group_id = album['ProviderIds']['MusicBrainzReleaseGroup']
-                        album_id = album['ProviderIds']['MusicBrainzAlbum']
+                        group_id = media_dict['ProviderIds']['MusicBrainzReleaseGroup']
+                        album_id = media_dict['ProviderIds']['MusicBrainzAlbum']
                     except KeyError:
                         logger.warning('No MusicBrainz ID Found. Skipping...')
                     else:
                         try:
                             poster_url = get_album_cover(album_id, group_id)
                         except RequestException:
-                            logger.warning('Connection Failed: MusicBrainz. Skipping...')
+                            logger.warning('Connection to MusicBrainz Failed. Skipping...')
+                        details_url = None
+                        if 'MusicBrainzTrack' in media_dict['ProviderIds']:
+                            track_id = media_dict['ProviderIds']['MusicBrainzTrack']
+                            details_url = f'https://musicbrainz.org/track/{track_id}'
+                        large_url = f'https://musicbrainz.org/release/{album_id}'
+                        state_url = None
+                        if 'MusicBrainzAlbumArtist' in media_dict['ProviderIds']:
+                            artist_id = media_dict['ProviderIds']['MusicBrainzAlbumArtist']
+                            state_url = f'https://musicbrainz.org/artist/{artist_id}'
                 try:
+                    if is_paused:
+                        start_time, end_time = time.time(), None
+                    else:
+                        current_time = time.time()
+                        position_ticks = session['PlayState']['PositionTicks']
+                        start_time = current_time - position_ticks / 10_000_000
+                        runtime_ticks = media_dict['RunTimeTicks']
+                        end_time = start_time + runtime_ticks / 10_000_000
                     discord_rpc.update(
-                        state=state, details=details, start=time.time(), large_image=poster_url
+                        activity_type=activity_type,
+                        status_display_type=status_display_type,
+                        state=state,
+                        state_url=state_url,
+                        details=details,
+                        details_url=details_url,
+                        start=start_time,
+                        end=end_time,
+                        large_image=poster_url,
+                        large_text=large_text,
+                        large_url=large_url,
                     )
-                    logger.info(f'Status Updated: {details}.')
+                    if details != previous_details:
+                        logger.info(f'RPC Updated for "{details}"')
+                    else:
+                        play_state = 'Paused' if is_paused else 'Resumed'
+                        logger.info(f'PlayState Updated for "{details}" ({play_state})')
                 except PipeClosed:
                     await_connection(discord_rpc, refresh_rate)
                     continue
-                previous_details = details
+                previous_details, previous_status = details, is_paused
         elif previous_details:
             try:
                 discord_rpc.clear()
             except PipeClosed:
                 await_connection(discord_rpc, refresh_rate)
                 continue
-            logger.info('Status Cleared.')
-            previous_details = ''
+            logger.info(f'RPC Cleared for "{details}"')
+            previous_details, previous_status = '', False
         time.sleep(refresh_rate)
 
 

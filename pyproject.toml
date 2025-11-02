@@ -1,18 +1,21 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.4.3"
+version = "1.5.0"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Ken Sible", email = "ksible@outlook.com" }]
 requires-python = ">=3.12,<3.13"
-dependencies = ["jellyfin-apiclient-python>=1.11.0", "pypresence>=4.3.0"]
+dependencies = [
+    "jellyfin-apiclient-python>=1.11.0",
+    "pypresence@git+https://github.com/qwertyquerty/pypresence",
+]
 
 [project.optional-dependencies]
 gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.6.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.13.1", "mypy>=1.18.2", "pytest>=8.4.2"]
+dev = ["ruff>=0.14.3", "mypy>=1.18.2", "pytest>=8.4.2"]
 
 [tool.ruff]
 line-length = 100
@@ -25,6 +28,9 @@ quote-style = "single"
 
 [tool.mypy]
 ignore_missing_imports = true
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [build-system]
 requires = ["hatchling>=1.26"]

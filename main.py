@@ -17,11 +17,10 @@ from PIL import Image
 
 import jellyfin_rpc
 
-__version__ = '1.4.3'
+__version__ = '1.5.0'
 
 
 class RPCProcess:
-
     def __init__(self, target: Callable, log_queue: Queue):
         self.target = target
         self.log_queue = log_queue
@@ -40,7 +39,6 @@ class RPCProcess:
 
 
 class RPCLogger:
-
     def __init__(
         self,
         frame: customtkinter.CTkFrame,
@@ -79,7 +77,8 @@ def on_click(
     checkbox3: customtkinter.CTkCheckBox,
     button1: customtkinter.CTkButton,
 ):
-    if button1._text == 'Connect':
+    global button1_text
+    if button1_text == 'Connect':
         config = configparser.ConfigParser()
         config.read(ini_path)
         config.set('DEFAULT', 'JELLYFIN_HOST', entry1.get())
@@ -102,13 +101,15 @@ def on_click(
         for entry in (entry1, entry2, entry3, entry4, checkbox1, checkbox2, checkbox3):
             entry.configure(state='readonly')
             entry.update()
-        button1.configure(text='Disconnect')
+        button1_text = 'Disconnect'
+        button1.configure(text=button1_text)
     else:
         rpc_process.stop()
         for entry in (entry1, entry2, entry3, entry4, checkbox1, checkbox2, checkbox3):
             entry.configure(state='normal')
             entry.update()
-        button1.configure(text='Connect')
+        button1_text = 'Connect'
+        button1.configure(text=button1_text)
     button1.update()
 
 
@@ -274,9 +275,11 @@ def main():
     checkbox3.pack(pady=5, padx=10)
 
     rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main), log_queue)
+    global button1_text
+    button1_text = 'Connect'
     button1 = customtkinter.CTkButton(
         master=frame,
-        text='Connect',
+        text=button1_text,
         command=lambda: on_click(
             rpc_process,
             ini_path,
@@ -304,7 +307,7 @@ def main():
             checkbox3,
             button1,
         )
-        if button1._text == 'Disconnect':
+        if button1_text == 'Disconnect':
             root.withdraw()
 
     icon = pystray.Icon(
@@ -312,6 +315,21 @@ def main():
         Image.open(png_path),
         'Jellyfin RPC',
         menu=pystray.Menu(
+            pystray.MenuItem(
+                lambda _: button1_text,
+                lambda: on_click(
+                    rpc_process,
+                    ini_path,
+                    entry1,
+                    entry2,
+                    entry3,
+                    entry4,
+                    checkbox1,
+                    checkbox2,
+                    checkbox3,
+                    button1,
+                ),
+            ),
             pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
             pystray.MenuItem('Quit', lambda: on_close(rpc_process, icon, root)),
         ),
