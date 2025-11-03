@@ -32,14 +32,12 @@ def get_config(ini_path: str) -> SectionProxy:
 def get_user_id(config: SectionProxy) -> str:
     url = config['JELLYFIN_HOST'] + '/Users'
     headers = {'Accept': 'application/json', 'X-Emby-Token': config['API_TOKEN']}
-    try:
-        user_data = requests.get(url, headers=headers, verify=True)
-        for user in user_data.json():
-            if config['USERNAME'] in user['Name']:
-                return user['Id']
-    except (RequestException, JSONDecodeError):
-        logger.error(f'Failed to Fetch ID for "{config["USERNAME"]}"')
-    raise ValueError(f'{config["USERNAME"]} Not Found')
+    user_data = requests.get(url, headers=headers, verify=True)
+    user_data.raise_for_status()
+    for user in user_data.json():
+        if config['USERNAME'] in user['Name']:
+            return user['Id']
+    raise ValueError(config['USERNAME'])
 
 
 def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
@@ -68,7 +66,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
                 logger.info(f'Connected to {server_name}')
             else:
                 logger.info('Connected to Jellyfin')
-        except (RequestException, JSONDecodeError):
+        except (RequestException, JSONDecodeError, ValueError):
             if initial_attempt:
                 logger.error('Connection to Jellyfin Failed. Retrying...')
             initial_attempt = False
@@ -81,6 +79,7 @@ def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
     response = requests.get(
         f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}'
     )
+    response.raise_for_status()
     try:
         return (
             'https://image.tmdb.org/t/p/w185/'
@@ -104,6 +103,7 @@ def get_movie_poster(api_key: str, tmdb_id: str) -> str:
     response = requests.get(
         f'https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}'
     )
+    response.raise_for_status()
     try:
         return (
             'https://image.tmdb.org/t/p/w185/'
@@ -116,6 +116,7 @@ def get_movie_poster(api_key: str, tmdb_id: str) -> str:
 
 def get_album_cover(album_id: str, group_id: str) -> str:
     response = requests.get(f'https://coverartarchive.org/release/{album_id}')
+    response.raise_for_status()
     try:
         return json.loads(response.text)['images'][0]['image']
     except (KeyError, JSONDecodeError):
@@ -214,7 +215,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         series = jellyfin_api.get_item(media_dict['SeriesId'])
                         tmdb_id = series['ProviderIds']['Tmdb']
                     except KeyError:
-                        logger.warning('No TVDB ID Found. Skipping...')
+                        logger.warning('No TMDB ID Found. Skipping...')
                     else:
                         season = media_dict['ParentIndexNumber']
                         try:

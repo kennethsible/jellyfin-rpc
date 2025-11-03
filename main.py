@@ -5,8 +5,10 @@ import multiprocessing
 import os
 import shutil
 import sys
+import threading
 import webbrowser
 import winreg
+from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from typing import Callable
@@ -15,6 +17,7 @@ import customtkinter
 import pystray
 import requests
 from PIL import Image
+from requests.exceptions import RequestException
 
 import jellyfin_rpc
 
@@ -46,10 +49,10 @@ class RPCProcess:
         if self.process.exitcode is None:
             return False
         if self.process.exitcode in (0, -15):
-            logger.info('RPC Process Exited Normally.')
+            logger.info('RPC Process Stopped')
             self.process = None
             return False
-        logger.error('RPC Process Exited Unexpectedly. Reconnect Manually.')
+        logger.error('RPC Process Exited Unexpectedly')
         self.process = None
         return True
 
@@ -135,22 +138,34 @@ def on_click(
 
 
 def on_maximize(label: customtkinter.CTkLabel, root: customtkinter.CTk | None = None):
-    response = requests.get(
-        'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest'
-    )
-    release = response.json()['tag_name'].lstrip('v')
-    if __version__ == release:
+    threading.Thread(target=check_version, args=(label,), daemon=True).start()
+    if root is not None:
+        root.after(0, root.deiconify)
+
+
+def check_version(label: customtkinter.CTkLabel):
+    try:
+        response = requests.get(
+            'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
+        )
+        response.raise_for_status()
+        release = response.json()['tag_name'].lstrip('v')
+        if __version__ == release:
+            label.configure(
+                text=f'Latest Version ({__version__})',
+                text_color='gray',
+            )
+        else:
+            label.configure(
+                text=f'Update Available ({__version__} \u2192 {release})',
+                text_color='cyan',
+            )
+    except (RequestException, JSONDecodeError, KeyError):
+        logger.warning('Connection to GitHub Failed')
         label.configure(
             text=f'Current Version ({__version__})',
             text_color='gray',
         )
-    else:
-        label.configure(
-            text=f'Update Available ({__version__} \u2192 {release})',
-            text_color='cyan',
-        )
-    if root is not None:
-        root.after(0, root.deiconify)
 
 
 def on_close(rpc_process: RPCProcess, icon: pystray._base.Icon, root: customtkinter.CTk):
@@ -233,7 +248,7 @@ def main():
     ini_path = 'jellyfin_rpc.ini'
     config = jellyfin_rpc.get_config(ini_path)
 
-    label1 = customtkinter.CTkLabel(master=frame, cursor='hand2')
+    label1 = customtkinter.CTkLabel(master=frame, text='Checking for Update...', cursor='hand2')
     label1.bind(
         '<Button-1>', lambda _: callback('https://github.com/kennethsible/jellyfin-rpc/releases')
     )
