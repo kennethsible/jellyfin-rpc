@@ -180,7 +180,7 @@ def set_startup_status(enabled: bool):
     )
     if enabled:
         exe_path = get_executable_path()
-        winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, exe_path)
+        winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
     else:
         try:
             winreg.DeleteValue(key, 'Jellyfin RPC')
@@ -205,53 +205,11 @@ def get_startup_status() -> bool:
 
 
 def monitor_process_status(
-    rpc_process: RPCProcess,
-    ini_path: str,
-    entry1: customtkinter.CTkEntry,
-    entry2: customtkinter.CTkEntry,
-    entry3: customtkinter.CTkEntry,
-    entry4: customtkinter.CTkEntry,
-    checkbox1: customtkinter.CTkCheckBox,
-    checkbox2: customtkinter.CTkCheckBox,
-    checkbox3: customtkinter.CTkCheckBox,
-    checkbox4: customtkinter.CTkCheckBox,
-    button1: customtkinter.CTkButton,
-    icon,
-    root: customtkinter.CTk,
+    rpc_process: RPCProcess, on_click_partial: Callable, root: customtkinter.CTk
 ):
     if rpc_process.has_failed():
-        on_click(
-            rpc_process,
-            ini_path,
-            entry1,
-            entry2,
-            entry3,
-            entry4,
-            checkbox1,
-            checkbox2,
-            checkbox3,
-            checkbox4,
-            button1,
-            icon,
-        )
-    root.after(
-        1000,
-        lambda: monitor_process_status(
-            rpc_process,
-            ini_path,
-            entry1,
-            entry2,
-            entry3,
-            entry4,
-            checkbox1,
-            checkbox2,
-            checkbox3,
-            checkbox4,
-            button1,
-            icon,
-            root,
-        ),
-    )
+        on_click_partial()
+    root.after(1000, lambda: monitor_process_status(rpc_process, on_click_partial, root))
 
 
 def main():
@@ -323,7 +281,7 @@ def main():
 
     checkbox4_frame = customtkinter.CTkFrame(master=checkbox_container, fg_color='transparent')
     checkbox4_frame.pack(pady=5, fill='x')
-    checkbox4_var = customtkinter.IntVar(value=int(config.get('SERVER_NAME', 0)))
+    checkbox4_var = customtkinter.IntVar(value=config.getint('SERVER_NAME', 0))
     checkbox4 = customtkinter.CTkCheckBox(
         master=checkbox4_frame,
         text='Use Jellyfin Server Name',
@@ -416,24 +374,8 @@ def main():
         ),
     )
     button1.pack(pady=(5, 10), padx=10)
-    if config.get('JELLYFIN_HOST') and config.get('API_TOKEN') and config.get('USERNAME'):
-        on_click(
-            rpc_process,
-            ini_path,
-            entry1,
-            entry2,
-            entry3,
-            entry4,
-            checkbox1,
-            checkbox2,
-            checkbox3,
-            checkbox4,
-            button1,
-            icon,
-        )
-        if button1_text == 'Disconnect':
-            root.withdraw()
-    monitor_process_status(
+    on_click_partial = functools.partial(
+        on_click,
         rpc_process,
         ini_path,
         entry1,
@@ -446,8 +388,12 @@ def main():
         checkbox4,
         button1,
         icon,
-        root,
     )
+    if config.get('JELLYFIN_HOST') and config.get('API_TOKEN') and config.get('USERNAME'):
+        on_click_partial()
+        if button1_text == 'Disconnect':
+            root.withdraw()
+    monitor_process_status(rpc_process, on_click_partial, root)
 
     root.iconbitmap(ico_path)
     root.protocol('WM_DELETE_WINDOW', root.withdraw)

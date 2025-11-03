@@ -10,20 +10,17 @@ from logging import handlers
 from multiprocessing.queues import Queue
 
 import requests
-import urllib3
 from jellyfin_apiclient_python import JellyfinClient, api
 from jellyfin_apiclient_python.exceptions import HTTPException
 from pypresence import DiscordNotFound, PipeClosed
 from pypresence.presence import Presence
 from pypresence.types import ActivityType, StatusDisplayType
 from requests.exceptions import RequestException
-from urllib3.exceptions import InsecureRequestWarning
 
 CLIENT_ID = '1238889120672120853'
 DEFAULT_POSTER_URL = 'jellyfin_icon'
 
 logger = logging.getLogger(__name__)
-urllib3.disable_warnings(InsecureRequestWarning)
 
 
 def get_config(ini_path: str) -> SectionProxy:
@@ -35,10 +32,13 @@ def get_config(ini_path: str) -> SectionProxy:
 def get_user_id(config: SectionProxy) -> str:
     url = config['JELLYFIN_HOST'] + '/Users'
     headers = {'Accept': 'application/json', 'X-Emby-Token': config['API_TOKEN']}
-    user_data = requests.request('GET', url, headers=headers, verify=False)
-    for user in user_data.json():
-        if config['USERNAME'] in user['Name']:
-            return user['Id']
+    try:
+        user_data = requests.get(url, headers=headers, verify=True)
+        for user in user_data.json():
+            if config['USERNAME'] in user['Name']:
+                return user['Id']
+    except (RequestException, JSONDecodeError):
+        logger.error(f'Failed to Fetch ID for "{config["USERNAME"]}"')
     raise ValueError(f'{config["USERNAME"]} Not Found')
 
 
@@ -63,7 +63,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
                 discover=False,
             )
             server_name = None
-            if int(config['SERVER_NAME']):
+            if config.getboolean('SERVER_NAME', False):
                 server_name = client.jellyfin.get_system_info().get('ServerName')
                 logger.info(f'Connected to {server_name}')
             else:
@@ -209,7 +209,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                 poster_url = DEFAULT_POSTER_URL
                 state_url = large_url = details_url = None
 
-                if media_type == 'Episode' and len(config['TMDB_API_KEY']) > 0:
+                if media_type == 'Episode' and config.get('TMDB_API_KEY'):
                     try:
                         series = jellyfin_api.get_item(media_dict['SeriesId'])
                         tmdb_id = series['ProviderIds']['Tmdb']
@@ -227,10 +227,10 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         episode = media_dict['IndexNumber']
                         state_url = f'{details_url}/season/{season}/episode/{episode}'
 
-                elif media_type == 'Movie' and len(config['TMDB_API_KEY']) > 0:
+                elif media_type == 'Movie' and config.get('TMDB_API_KEY'):
                     try:
                         tmdb_id = media_dict['ProviderIds']['Tmdb']
-                    except StopIteration:
+                    except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
                     else:
                         try:
@@ -314,7 +314,7 @@ def main(log_queue: Queue | None = None):
     args = parser.parse_args()
 
     config = get_config(args.ini_path)
-    logger.setLevel(config['LOG_LEVEL'])
+    logger.setLevel(config.get('LOG_LEVEL', 'INFO'))
     file_hdlr = logging.FileHandler(args.log_path, encoding='utf-8')
     file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
     logger.addHandler(file_hdlr)
