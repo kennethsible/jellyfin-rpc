@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+import platform
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('jellyfin_rpc.ini', '.'), ('images/icon.png', '.'), ('images/icon.ico', '.')],
+    datas=[
+        ('jellyfin_rpc.ini', '.'),
+        ('images/icon.png', '.'),
+        ('images/icon.ico', '.'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -37,3 +41,20 @@ exe = EXE(
     entitlements_file=None,
     icon=['images/icon.ico'],
 )
+
+if platform.system() == 'Darwin':
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='Jellyfin RPC',
+    )
+    app = BUNDLE(
+        coll,
+        name='Jellyfin RPC.app',
+        icon='images/icon.icns',
+        bundle_identifier=None,
+    )

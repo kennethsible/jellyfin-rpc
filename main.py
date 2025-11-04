@@ -3,11 +3,11 @@ import functools
 import logging
 import multiprocessing
 import os
+import platform
 import shutil
 import sys
 import threading
 import webbrowser
-import winreg
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
@@ -168,10 +168,13 @@ def check_version(label: customtkinter.CTkLabel):
         )
 
 
-def on_close(rpc_process: RPCProcess, icon: pystray._base.Icon, root: customtkinter.CTk):
+def on_close(
+    rpc_process: RPCProcess, root: customtkinter.CTk, icon: pystray._base.Icon | None = None
+):
     rpc_process.stop()
-    icon.visible = False
-    icon.stop()
+    if icon:
+        icon.visible = False
+        icon.stop()
     root.quit()
 
 
@@ -186,37 +189,39 @@ def get_executable_path() -> str:
         return os.path.abspath(__file__)
 
 
-def set_startup_status(enabled: bool):
-    key = winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER,
-        r'Software\Microsoft\Windows\CurrentVersion\Run',
-        0,
-        winreg.KEY_SET_VALUE,
-    )
-    if enabled:
-        exe_path = get_executable_path()
-        winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
-    else:
-        try:
-            winreg.DeleteValue(key, 'Jellyfin RPC')
-        except FileNotFoundError:
-            pass
-    winreg.CloseKey(key)
+if platform.system() == 'Windows':
+    import winreg
 
-
-def get_startup_status() -> bool:
-    try:
+    def set_startup_status(enabled: bool):
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r'Software\Microsoft\Windows\CurrentVersion\Run',
             0,
-            winreg.KEY_READ,
+            winreg.KEY_SET_VALUE,
         )
-        _, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
+        if enabled:
+            exe_path = get_executable_path()
+            winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
+        else:
+            try:
+                winreg.DeleteValue(key, 'Jellyfin RPC')
+            except FileNotFoundError:
+                pass
         winreg.CloseKey(key)
-        return True
-    except FileNotFoundError:
-        return False
+
+    def get_startup_status() -> bool:
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Run',
+                0,
+                winreg.KEY_READ,
+            )
+            _, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
+            winreg.CloseKey(key)
+            return True
+        except FileNotFoundError:
+            return False
 
 
 def monitor_process_status(
@@ -304,16 +309,17 @@ def main():
     )
     checkbox4.pack(anchor='w')
 
-    checkbox5_frame = customtkinter.CTkFrame(master=checkbox_container, fg_color='transparent')
-    checkbox5_frame.pack(pady=5, fill='x')
-    checkbox5_var = customtkinter.IntVar(value=int(get_startup_status()))
-    checkbox5 = customtkinter.CTkCheckBox(
-        master=checkbox5_frame,
-        text='Run on Windows Startup',
-        variable=checkbox5_var,
-        command=lambda: set_startup_status(bool(checkbox5_var.get())),
-    )
-    checkbox5.pack(anchor='w')
+    if platform.system() == 'Windows':
+        checkbox5_frame = customtkinter.CTkFrame(master=checkbox_container, fg_color='transparent')
+        checkbox5_frame.pack(pady=5, fill='x')
+        checkbox5_var = customtkinter.IntVar(value=int(get_startup_status()))
+        checkbox5 = customtkinter.CTkCheckBox(
+            master=checkbox5_frame,
+            text='Run on Windows Startup',
+            variable=checkbox5_var,
+            command=lambda: set_startup_status(bool(checkbox5_var.get())),
+        )
+        checkbox5.pack(anchor='w')
 
     textbox1 = customtkinter.CTkTextbox(master=frame, width=265, height=100)
     textbox1.pack(pady=5, padx=10)
@@ -340,32 +346,34 @@ def main():
     checkbox3 = customtkinter.CTkCheckBox(master=frame, text='Music', variable=checkbox3_var)
     checkbox3.pack(pady=5, padx=10)
 
-    icon = pystray.Icon(
-        'jellyfin-rpc',
-        Image.open(png_path),
-        'Jellyfin RPC',
-        menu=pystray.Menu(
-            pystray.MenuItem(
-                lambda _: button1_text,
-                lambda: on_click(
-                    rpc_process,
-                    ini_path,
-                    entry1,
-                    entry2,
-                    entry3,
-                    entry4,
-                    checkbox1,
-                    checkbox2,
-                    checkbox3,
-                    checkbox4,
-                    button1,
+    icon = None
+    if platform.system() == 'Windows':
+        icon = pystray.Icon(
+            'jellyfin-rpc',
+            Image.open(png_path),
+            'Jellyfin RPC',
+            menu=pystray.Menu(
+                pystray.MenuItem(
+                    lambda _: button1_text,
+                    lambda: on_click(
+                        rpc_process,
+                        ini_path,
+                        entry1,
+                        entry2,
+                        entry3,
+                        entry4,
+                        checkbox1,
+                        checkbox2,
+                        checkbox3,
+                        checkbox4,
+                        button1,
+                    ),
                 ),
+                pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
+                pystray.MenuItem('Quit', lambda: on_close(rpc_process, root, icon)),
             ),
-            pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
-            pystray.MenuItem('Quit', lambda: on_close(rpc_process, icon, root)),
-        ),
-    )
-    icon.run_detached()
+        )
+        icon.run_detached()
 
     rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main), log_queue)
     global button1_text
@@ -410,8 +418,11 @@ def main():
             root.withdraw()
     monitor_process_status(rpc_process, on_click_partial, root)
 
-    root.iconbitmap(ico_path)
-    root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    if platform.system() == 'Windows':
+        root.iconbitmap(ico_path)
+        root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    else:
+        root.protocol('WM_DELETE_WINDOW', lambda: on_close(rpc_process, root))
     root.resizable(False, False)
     root.mainloop()
 
