@@ -50,7 +50,7 @@ if platform.system() == 'Darwin':
         strip=False,
         upx=True,
         upx_exclude=[],
-        name='Jellyfin RPC',
+        name='Jellyfin_RPC',
     )
     app = BUNDLE(
         coll,

@@ -168,13 +168,10 @@ def check_version(label: customtkinter.CTkLabel):
         )
 
 
-def on_close(
-    rpc_process: RPCProcess, root: customtkinter.CTk, icon: pystray._base.Icon | None = None
-):
+def on_close(rpc_process: RPCProcess, icon: pystray._base.Icon, root: customtkinter.CTk):
     rpc_process.stop()
-    if icon:
-        icon.visible = False
-        icon.stop()
+    icon.visible = False
+    icon.stop()
     root.quit()
 
 
@@ -346,8 +343,10 @@ def main():
     checkbox3 = customtkinter.CTkCheckBox(master=frame, text='Music', variable=checkbox3_var)
     checkbox3.pack(pady=5, padx=10)
 
-    icon = None
-    if platform.system() == 'Windows':
+    if platform.system() == 'Darwin':
+        icon = None
+        root.createcommand('::tk::mac::ReopenApplication', lambda: on_maximize(label1, root))
+    else:
         icon = pystray.Icon(
             'jellyfin-rpc',
             Image.open(png_path),
@@ -420,9 +419,7 @@ def main():
 
     if platform.system() == 'Windows':
         root.iconbitmap(ico_path)
-        root.protocol('WM_DELETE_WINDOW', root.withdraw)
-    else:
-        root.protocol('WM_DELETE_WINDOW', lambda: on_close(rpc_process, root))
+    root.protocol('WM_DELETE_WINDOW', root.withdraw)
     root.resizable(False, False)
     root.mainloop()
 
