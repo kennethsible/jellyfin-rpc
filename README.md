@@ -8,29 +8,29 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 ## Installation
 
 - Download [Latest Release](https://github.com/kennethsible/jellyfin-rpc/releases) (**Recommended**)
-- Build from Source (for Development)
-   1. Install [Python](https://www.python.org/downloads/) and [uv](https://docs.astral.sh/uv/getting-started/installation/)
-   2. Create Python Environment<br>`uv sync --extra gui`
-   3. Build Executable<br>`uv run pyinstaller main.spec`
+- Build from Source
+   1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+   2. Install Python<br>`uv install python`
+   3. Create Python Environment<br>`uv sync --extra gui`
+   4. Build Standalone Executable<br>`uv run pyinstaller main.spec`
 
 ## Configuration
 
-Use GUI or `jellyfin_rpc.ini`
+To generate a Jellyfin API key, go to the server dashboard and select **API Keys** under **Advanced**.
 
 - Jellyfin Host
-- API Token
-- Username
+- Jellyfin API Key
+- Jellyfin Username
 - TMDB API Key (Optional)
 
+If you prefer to use the CLI over the GUI (or you're on Linux), fill out the included [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you run into any issues, please change `log_level` in the INI to `DEBUG` and include the output in your GitHub Issue.
+
 > [!IMPORTANT]
-> You need a [TMDB API key](https://developer.themoviedb.org/docs/getting-started) to fetch posters for movies/series.
+> TMDB is used to fetch posters for movies/shows. You need to create an account to generate an [API key](https://developer.themoviedb.org/docs/getting-started).
 
 ## Usage (GUI)
 
 ![jellyfin_rpc_gui](images/jellyfin_rpc_gui.png)
-
-> [!NOTE]
-> The Jellyfin RPC GUI starts **minimized** in the system tray.
 
 ![jellyfin_rpc_ico](images/jellyfin_rpc_ico.png)
 

@@ -31,13 +31,13 @@ def get_config(ini_path: str) -> SectionProxy:
 
 def get_user_id(config: SectionProxy) -> str:
     url = config['JELLYFIN_HOST'] + '/Users'
-    headers = {'Accept': 'application/json', 'X-Emby-Token': config['API_TOKEN']}
+    headers = {'Accept': 'application/json', 'X-Emby-Token': config['JELLYFIN_API_KEY']}
     user_data = requests.get(url, headers=headers, verify=True)
     user_data.raise_for_status()
     for user in user_data.json():
-        if config['USERNAME'] in user['Name']:
+        if config['JELLYFIN_USERNAME'] in user['Name']:
             return user['Id']
-    raise ValueError(config['USERNAME'])
+    raise ValueError(config['JELLYFIN_USERNAME'])
 
 
 def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
@@ -52,7 +52,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
                     'Servers': [
                         {
                             'address': config['JELLYFIN_HOST'],
-                            'AccessToken': config['API_TOKEN'],
+                            'AccessToken': config['JELLYFIN_API_KEY'],
                             'UserId': get_user_id(config),
                             'DateLastAccessed': 0,
                         }
@@ -61,7 +61,7 @@ def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
                 discover=False,
             )
             server_name = None
-            if config.getboolean('SERVER_NAME', False):
+            if config.getboolean('SHOW_SERVER_NAME', False):
                 server_name = client.jellyfin.get_system_info().get('ServerName')
                 logger.info(f'Connected to {server_name}')
             else:
@@ -154,7 +154,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             session = next(
                 session
                 for session in jellyfin_api.sessions()
-                if config['USERNAME'] == session['UserName']
+                if config['JELLYFIN_USERNAME'] == session['UserName']
             )
         except StopIteration:
             session = None
@@ -163,6 +163,19 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             continue
 
         if session and 'NowPlayingItem' in session:
+            session_paused = session['PlayState']['IsPaused']
+            if session_paused and not config.getboolean('SHOW_WHEN_PAUSED', True):
+                if previous_activity:
+                    try:
+                        discord_rpc.clear()
+                    except PipeClosed:
+                        await_connection(discord_rpc, refresh_rate)
+                        continue
+                    logger.info(f'RPC Cleared for "{activity}"')
+                    previous_activity, previous_playstate = None, False
+                time.sleep(refresh_rate)
+                continue
+
             media_dict = session['NowPlayingItem']
             media_types = config['MEDIA_TYPES'].split(',')
             match media_type := media_dict['Type']:
@@ -205,7 +218,6 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
 
-            session_paused = session['PlayState']['IsPaused']
             if previous_activity != activity or previous_playstate != session_paused:
                 poster_url = DEFAULT_POSTER_URL
                 state_url = large_url = details_url = None
@@ -268,6 +280,9 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     start_time = current_time - position_ticks / 10_000_000
                     runtime_ticks = media_dict['RunTimeTicks']
                     end_time = start_time + runtime_ticks / 10_000_000
+                small_image = (
+                    DEFAULT_POSTER_URL if config.getboolean('SHOW_JELLYFIN_ICON', False) else None
+                )
                 try:
                     discord_rpc.update(
                         activity_type=activity_type,
@@ -282,6 +297,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         large_image=poster_url,
                         large_text=large_text,
                         large_url=large_url,
+                        small_image=small_image,
                     )
                 except PipeClosed:
                     await_connection(discord_rpc, refresh_rate)
