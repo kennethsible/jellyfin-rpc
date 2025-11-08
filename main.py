@@ -1,4 +1,3 @@
-import configparser
 import functools
 import logging
 import multiprocessing
@@ -9,6 +8,7 @@ import shutil
 import sys
 import threading
 import webbrowser
+from configparser import ConfigParser
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
@@ -24,7 +24,7 @@ import jellyfin_rpc
 
 __version__ = '1.6.0'
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('GUI')
 
 
 class RPCProcess:
@@ -84,96 +84,71 @@ class RPCLogger:
         return f'{record.levelname}: {record.getMessage()}\n'
 
 
+def set_config(ini_path: str, entries: list[ctk.CTkEntry], checkboxes: list[ctk.CTkCheckBox]):
+    config = ConfigParser()
+    config.read(ini_path)
+
+    config.set('DEFAULT', 'JELLYFIN_HOST', entries[0].get())
+    config.set('DEFAULT', 'JELLYFIN_API_KEY', entries[1].get())
+    config.set('DEFAULT', 'JELLYFIN_USERNAME', entries[2].get())
+    config.set('DEFAULT', 'TMDB_API_KEY', entries[3].get())
+    config.set('DEFAULT', 'START_MINIMIZED', str(checkboxes[4]._variable.get()))
+    config.set('DEFAULT', 'MINIMIZE_ON_CLOSE', str(checkboxes[5]._variable.get()))
+    config.set('DEFAULT', 'SHOW_WHEN_PAUSED', str(checkboxes[6]._variable.get()))
+    config.set('DEFAULT', 'SHOW_SERVER_NAME', str(checkboxes[7]._variable.get()))
+    config.set('DEFAULT', 'SHOW_JELLYFIN_ICON', str(checkboxes[8]._variable.get()))
+
+    if not config.get('DEFAULT', 'LOG_LEVEL'):
+        config.set('DEFAULT', 'LOG_LEVEL', 'INFO')
+
+    media_types = []
+    if checkboxes[0]._variable.get():
+        media_types.append('Movies')
+    if checkboxes[1]._variable.get():
+        media_types.append('Shows')
+    if checkboxes[2]._variable.get():
+        media_types.append('Music')
+    config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
+
+    with open(ini_path, 'w') as ini_file:
+        config.write(ini_file)
+
+
 def on_click(
-    rpc_process: RPCProcess,
-    ini_path: str,
     root: ctk.CTk,
-    entry1: ctk.CTkEntry,
-    entry2: ctk.CTkEntry,
-    entry3: ctk.CTkEntry,
-    entry4: ctk.CTkEntry,
-    checkbox1: ctk.CTkCheckBox,
-    checkbox2: ctk.CTkCheckBox,
-    checkbox3: ctk.CTkCheckBox,
-    checkbox5: ctk.CTkCheckBox,
-    checkbox6: ctk.CTkCheckBox,
-    checkbox7: ctk.CTkCheckBox,
-    checkbox8: ctk.CTkCheckBox,
-    checkbox9: ctk.CTkCheckBox,
-    button1: ctk.CTkButton,
+    ini_path: str,
+    rpc_process: RPCProcess,
+    entries: list[ctk.CTkEntry],
+    checkboxes: list[ctk.CTkCheckBox],
+    button: ctk.CTkButton,
     icon: pystray._base.Icon | None = None,
 ):
-    global button1_text
-    if button1_text == 'Connect':
-        config = configparser.ConfigParser()
-        config.read(ini_path)
-        config.set('DEFAULT', 'JELLYFIN_HOST', entry1.get())
-        config.set('DEFAULT', 'JELLYFIN_API_KEY', entry2.get())
-        config.set('DEFAULT', 'JELLYFIN_USERNAME', entry3.get())
-        config.set('DEFAULT', 'TMDB_API_KEY', entry4.get())
-        config.set('DEFAULT', 'START_MINIMIZED', str(checkbox5._variable.get()))
-        config.set('DEFAULT', 'MINIMIZE_ON_CLOSE', str(checkbox6._variable.get()))
-        config.set('DEFAULT', 'SHOW_SERVER_NAME', str(checkbox7._variable.get()))
-        config.set('DEFAULT', 'SHOW_WHEN_PAUSED', str(checkbox8._variable.get()))
-        config.set('DEFAULT', 'SHOW_JELLYFIN_ICON', str(checkbox9._variable.get()))
-        if not config.get('DEFAULT', 'LOG_LEVEL', fallback=None):
-            config.set('DEFAULT', 'LOG_LEVEL', 'INFO')
-        media_types = []
-        if checkbox1._variable.get():
-            media_types.append('Movies')
-        if checkbox2._variable.get():
-            media_types.append('Shows')
-        if checkbox3._variable.get():
-            media_types.append('Music')
-        config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
-        with open(ini_path, 'w') as ini_file:
-            config.write(ini_file)
+    global button_text
+    if button_text == 'Connect':
+        set_config(ini_path, entries, checkboxes)
         rpc_process.start()
-        for entry in (
-            entry1,
-            entry2,
-            entry3,
-            entry4,
-            checkbox1,
-            checkbox2,
-            checkbox3,
-            checkbox5,
-            checkbox6,
-            checkbox7,
-            checkbox8,
-            checkbox9,
-        ):
-            entry.configure(state='readonly')
-            entry.update()
-        button1_text = 'Disconnect'
-        button1.configure(text=button1_text)
-        if checkbox6._variable.get():
+        for component in entries + checkboxes:
+            component.configure(state='readonly')
+            component.update()
+        button_text = 'Disconnect'
+        button.configure(text=button_text)
+        if checkboxes[5]._variable.get():
             root.protocol('WM_DELETE_WINDOW', root.withdraw)
         else:
-            root.protocol('WM_DELETE_WINDOW', lambda: on_close(rpc_process, root, icon))
+            root.protocol(
+                'WM_DELETE_WINDOW',
+                lambda: on_close(root, ini_path, rpc_process, entries, checkboxes, icon),
+            )
     else:
         rpc_process.stop()
-        for entry in (
-            entry1,
-            entry2,
-            entry3,
-            entry4,
-            checkbox1,
-            checkbox2,
-            checkbox3,
-            checkbox5,
-            checkbox6,
-            checkbox7,
-            checkbox8,
-            checkbox9,
-        ):
-            entry.configure(state='normal')
-            entry.update()
-        button1_text = 'Connect'
-        button1.configure(text=button1_text)
+        for component in entries + checkboxes:
+            component.configure(state='normal')
+            component.update()
+        button_text = 'Connect'
+        button.configure(text=button_text)
     if icon:
         icon.update_menu()
-    button1.update()
+    button.update()
 
 
 def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None):
@@ -182,36 +157,23 @@ def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None):
         root.after(0, root.deiconify)
 
 
-def check_version(label: ctk.CTkLabel):
+def on_close(
+    root: ctk.CTk,
+    ini_path: str,
+    rpc_process: RPCProcess,
+    entries: list[ctk.CTkEntry],
+    checkboxes: list[ctk.CTkCheckBox],
+    icon: pystray._base.Icon | None = None,
+):
     try:
-        response = requests.get(
-            'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
-        )
-        response.raise_for_status()
-        release = response.json()['tag_name'].lstrip('v')
-        if __version__ == release:
-            label_text = f'Latest Version ({__version__})'
-            label_color = 'gray'
-        else:
-            label_text = f'Update Available ({__version__} \u2192 {release})'
-            label_color = 'white'
-    except (RequestException, JSONDecodeError, KeyError):
-        logger.warning('Connection to GitHub Failed')
-        label_text = f'Current Version ({__version__})'
-        label_color = 'gray'
-    label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
-
-
-def on_close(rpc_process: RPCProcess, root: ctk.CTk, icon: pystray._base.Icon | None = None):
+        set_config(ini_path, entries, checkboxes)
+    except Exception:
+        logger.exception('Error Writing Config')
     rpc_process.stop()
     if icon is not None:
         icon.visible = False
         icon.stop()
     root.quit()
-
-
-def callback(url: str):
-    webbrowser.open_new_tab(url)
 
 
 def get_executable_path() -> str:
@@ -256,10 +218,24 @@ if platform.system() == 'Windows':
             return False
 
 
-def monitor_process_status(rpc_process: RPCProcess, on_click_partial: Callable, root: ctk.CTk):
-    if rpc_process.has_failed():
-        on_click_partial()
-    root.after(1000, lambda: monitor_process_status(rpc_process, on_click_partial, root))
+def check_version(label: ctk.CTkLabel):
+    try:
+        response = requests.get(
+            'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
+        )
+        response.raise_for_status()
+        release = response.json()['tag_name'].lstrip('v')
+        if __version__ == release:
+            label_text = f'Latest Version ({__version__})'
+            label_color = 'gray'
+        else:
+            label_text = f'Update Available ({__version__} \u2192 {release})'
+            label_color = 'white'
+    except (RequestException, JSONDecodeError, KeyError):
+        logger.warning('Connection to GitHub Failed')
+        label_text = f'Current Version ({__version__})'
+        label_color = 'gray'
+    label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
 
 
 def main():
@@ -276,20 +252,30 @@ def main():
     main_frame.pack(fill='both', expand=True)
     font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
 
+    ini_file, log_file = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
-    ini_path = os.path.abspath(os.path.join(bundle_dir, 'jellyfin_rpc.ini'))
+    ini_path = os.path.abspath(os.path.join(bundle_dir, ini_file))
     png_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
     ico_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
     os.chdir(os.path.dirname(get_executable_path()))
 
-    if not os.path.isfile('jellyfin_rpc.ini'):
-        shutil.copyfile(ini_path, 'jellyfin_rpc.ini')
-    ini_path = 'jellyfin_rpc.ini'
+    if not os.path.isfile(ini_path):
+        shutil.copyfile(ini_path, ini_file)
+
     config = jellyfin_rpc.get_config(ini_path)
+    jf_host = config.get('JELLYFIN_HOST')
+    jf_api_key = config.get('JELLYFIN_API_KEY')
+    jf_username = config.get('JELLYFIN_USERNAME')
+    start_minimized = config.getboolean('START_MINIMIZED', True)
+    minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
+    show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
+    show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
+    show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
 
     label1 = ctk.CTkLabel(master=main_frame, text='Checking for Update...', cursor='hand2')
     label1.bind(
-        '<Button-1>', lambda _: callback('https://github.com/kennethsible/jellyfin-rpc/releases')
+        '<Button-1>',
+        lambda _: webbrowser.open_new_tab('https://github.com/kennethsible/jellyfin-rpc/releases'),
     )
     label1.pack(pady=(10, 0), padx=10)
     on_maximize(label1)
@@ -297,7 +283,7 @@ def main():
     scroll_frame = ctk.CTkScrollableFrame(master=main_frame, fg_color=main_frame.cget('fg_color'))
     scroll_frame.pack(fill='both', expand=True)
 
-    entry1_text = ctk.StringVar(value=config.get('JELLYFIN_HOST'))
+    entry1_text = ctk.StringVar(value=jf_host)
     entry1 = ctk.CTkEntry(
         master=scroll_frame,
         textvariable=entry1_text if entry1_text.get() else None,
@@ -306,7 +292,7 @@ def main():
     )
     entry1.pack(pady=(0, 5), padx=10)
 
-    entry2_text = ctk.StringVar(value=config.get('JELLYFIN_API_KEY'))
+    entry2_text = ctk.StringVar(value=jf_api_key)
     entry2 = ctk.CTkEntry(
         master=scroll_frame,
         textvariable=entry2_text if entry2_text.get() else None,
@@ -315,7 +301,7 @@ def main():
     )
     entry2.pack(pady=5, padx=10)
 
-    entry3_text = ctk.StringVar(value=config.get('JELLYFIN_USERNAME'))
+    entry3_text = ctk.StringVar(value=jf_username)
     entry3 = ctk.CTkEntry(
         master=scroll_frame,
         textvariable=entry3_text if entry3_text.get() else None,
@@ -337,13 +323,16 @@ def main():
     textbox1.configure(state='disabled')
     textbox1.pack(pady=5, padx=10)
 
-    logger.setLevel(config['LOG_LEVEL'])
-    file_hdlr = logging.FileHandler('jellyfin_rpc.log', encoding='utf-8')
-    file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
-    logger.addHandler(file_hdlr)
-    logger.addHandler(logging.StreamHandler(sys.stdout))
     log_queue = multiprocessing.Queue()
-    logger.addHandler(handlers.QueueHandler(log_queue))
+    logger.setLevel(config['LOG_LEVEL'])
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    file_hdlr = logging.FileHandler(log_file, encoding='utf-8')
+    file_hdlr.setFormatter(formatter)
+    stream_hdlr = logging.StreamHandler(sys.stdout)
+    stream_hdlr.setFormatter(formatter)
+    queue_hdlr = handlers.QueueHandler(log_queue)
+    for hdlr in (file_hdlr, stream_hdlr, queue_hdlr):
+        logger.addHandler(hdlr)
     RPCLogger(main_frame, log_queue, textbox1)
 
     checkbox_container1 = ctk.CTkFrame(master=scroll_frame, fg_color='transparent')
@@ -352,6 +341,7 @@ def main():
     label2 = ctk.CTkLabel(master=checkbox_container1, text='System Settings', font=font)
     label2.pack(pady=(5, 0), padx=10)
 
+    checkbox4 = None
     if platform.system() == 'Windows':
         checkbox4_var = ctk.IntVar(value=int(get_startup_status()))
         checkbox4 = ctk.CTkCheckBox(
@@ -362,14 +352,14 @@ def main():
         )
         checkbox4.pack(anchor='w', pady=5)
 
-    checkbox5_var = ctk.IntVar(value=config.getboolean('START_MINIMIZED', True))
+    checkbox5_var = ctk.IntVar(value=start_minimized)
     checkbox5 = ctk.CTkCheckBox(
         master=checkbox_container1, text='Start Minimized (If Connected)', variable=checkbox5_var
     )
     checkbox5.pack(anchor='w', pady=5)
 
     background_type = 'Dock' if platform.system() == 'Darwin' else 'Tray'
-    checkbox6_var = ctk.IntVar(value=config.getboolean('MINIMIZE_ON_CLOSE', True))
+    checkbox6_var = ctk.IntVar(value=minimize_on_close)
     checkbox6 = ctk.CTkCheckBox(
         master=checkbox_container1,
         text=f'Close Button Minimizes to {background_type}',
@@ -402,54 +392,50 @@ def main():
     label4 = ctk.CTkLabel(master=checkbox_container1, text='Activity Settings', font=font)
     label4.pack(pady=(5, 0), padx=10)
 
-    checkbox7_var = ctk.IntVar(value=config.getboolean('SHOW_WHEN_PAUSED', True))
+    checkbox7_var = ctk.IntVar(value=show_when_paused)
     checkbox7 = ctk.CTkCheckBox(
         master=checkbox_container1, text='Show Activity When Paused', variable=checkbox7_var
     )
     checkbox7.pack(anchor='w', pady=5)
 
-    checkbox8_var = ctk.IntVar(value=config.getboolean('SHOW_SERVER_NAME', False))
+    checkbox8_var = ctk.IntVar(value=show_server_name)
     checkbox8 = ctk.CTkCheckBox(
         master=checkbox_container1, text='Show Server Name in Activity', variable=checkbox8_var
     )
     checkbox8.pack(anchor='w', pady=5)
 
-    checkbox9_var = ctk.IntVar(value=config.getboolean('SHOW_JELLYFIN_ICON', False))
+    checkbox9_var = ctk.IntVar(value=show_jf_icon)
     checkbox9 = ctk.CTkCheckBox(
         master=checkbox_container1, text='Show Jellyfin Icon in Activity', variable=checkbox9_var
     )
     checkbox9.pack(anchor='w', pady=5)
 
     rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main), log_queue)
-    global button1_text
-    button1_text = 'Connect'
+    global button_text
+    button_text = 'Connect'
 
     class AppContext(TypedDict):
-        button1: Optional[ctk.CTkButton]
+        button: Optional[ctk.CTkButton]
         icon: Optional[pystray._base.Icon]
 
-    context: AppContext = {'button1': None, 'icon': None}
+    context: AppContext = {'button': None, 'icon': None}
+    entries = [entry1, entry2, entry3, entry4]
+    checkboxes = [
+        checkbox1,
+        checkbox2,
+        checkbox3,
+        checkbox4,
+        checkbox5,
+        checkbox6,
+        checkbox7,
+        checkbox8,
+        checkbox9,
+    ]
 
     def on_click_callback():
-        assert context['button1'] is not None, 'button1 is not initialized'
+        assert context['button'] is not None, 'button is not initialized'
         on_click(
-            rpc_process,
-            ini_path,
-            root,
-            entry1,
-            entry2,
-            entry3,
-            entry4,
-            checkbox1,
-            checkbox2,
-            checkbox3,
-            checkbox5,
-            checkbox6,
-            checkbox7,
-            checkbox8,
-            checkbox9,
-            context['button1'],
-            context['icon'],
+            root, ini_path, rpc_process, entries, checkboxes, context['button'], context['icon']
         )
 
     if platform.system() == 'Darwin':
@@ -461,7 +447,7 @@ def main():
             Image.open(png_path),
             'Jellyfin RPC',
             menu=pystray.Menu(
-                pystray.MenuItem(lambda _: button1_text, lambda: gui_queue.put('CONNECT')),
+                pystray.MenuItem(lambda _: button_text, lambda: gui_queue.put('CONNECT')),
                 pystray.MenuItem('Maximize', lambda: gui_queue.put('MAXIMIZE'), default=True),
                 pystray.MenuItem('Quit', lambda: gui_queue.put('QUIT')),
             ),
@@ -469,40 +455,22 @@ def main():
         icon.run_detached()
     context['icon'] = icon
 
-    button1 = ctk.CTkButton(master=main_frame, text=button1_text, command=on_click_callback)
-    button1.pack(side='bottom', pady=(5, 10), padx=10)
-    context['button1'] = button1
-    on_click_partial = functools.partial(
-        on_click,
-        rpc_process,
-        ini_path,
-        root,
-        entry1,
-        entry2,
-        entry3,
-        entry4,
-        checkbox1,
-        checkbox2,
-        checkbox3,
-        checkbox5,
-        checkbox6,
-        checkbox7,
-        checkbox8,
-        checkbox9,
-        button1,
-        icon,
-    )
-    if (
-        config.get('JELLYFIN_HOST')
-        and config.get('JELLYFIN_API_KEY')
-        and config.get('JELLYFIN_USERNAME')
-    ):
-        on_click_partial()
-        if button1_text == 'Disconnect' and config.getboolean('START_MINIMIZED', True):  # TODO
+    button = ctk.CTkButton(master=main_frame, text=button_text, command=on_click_callback)
+    button.pack(side='bottom', pady=(5, 10), padx=10)
+    context['button'] = button
+    if jf_host and jf_api_key and jf_username:
+        on_click_callback()
+        if start_minimized and button_text == 'Disconnect':
             root.withdraw()
     else:
         logger.info('Awaiting Configuration')
-    monitor_process_status(rpc_process, on_click_partial, root)
+
+    def poll_process_status():
+        if rpc_process.has_failed():
+            on_click_callback()
+        root.after(1000, lambda: poll_process_status())
+
+    poll_process_status()
 
     def poll_gui_queue():
         try:
@@ -512,7 +480,7 @@ def main():
                 case 'MAXIMIZE':
                     on_maximize(label1, root)
                 case 'QUIT':
-                    on_close(rpc_process, root, context['icon'])
+                    on_close(root, ini_path, rpc_process, entries, checkboxes, icon)
         except queue.Empty:
             pass
         finally:
@@ -523,10 +491,13 @@ def main():
     if platform.system() == 'Windows':
         root.iconbitmap(ico_path)
     root.resizable(False, False)
-    if config.getboolean('MINIMIZE_ON_CLOSE', True):
+    if minimize_on_close:
         root.protocol('WM_DELETE_WINDOW', root.withdraw)
     else:
-        root.protocol('WM_DELETE_WINDOW', lambda: on_close(rpc_process, root, icon))
+        root.protocol(
+            'WM_DELETE_WINDOW',
+            lambda: on_close(root, ini_path, rpc_process, entries, checkboxes, icon),
+        )
     root.mainloop()
 
 

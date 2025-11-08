@@ -20,7 +20,7 @@ from requests.exceptions import RequestException
 CLIENT_ID = '1238889120672120853'
 DEFAULT_POSTER_URL = 'jellyfin_icon'
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('RPC')
 
 
 def get_config(ini_path: str) -> SectionProxy:
@@ -40,7 +40,7 @@ def get_user_id(config: SectionProxy) -> str:
     raise ValueError(config['JELLYFIN_USERNAME'])
 
 
-def get_jellyfin_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
+def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
     initial_attempt = True
     while True:
         try:
@@ -146,25 +146,27 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
 def set_discord_rpc(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
-    jellyfin_api, server_name = get_jellyfin_api(config, refresh_rate)
+    jf_api, server_name = get_jf_api(config, refresh_rate)
     activity, previous_activity, previous_playstate = None, None, False
+    show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
+    show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
 
     while True:
         try:
             session = next(
                 session
-                for session in jellyfin_api.sessions()
+                for session in jf_api.sessions()
                 if config['JELLYFIN_USERNAME'] == session['UserName']
             )
         except StopIteration:
             session = None
         except (HTTPException, KeyError):
-            jellyfin_api, server_name = get_jellyfin_api(config, refresh_rate)
+            jf_api, server_name = get_jf_api(config, refresh_rate)
             continue
 
         if session and 'NowPlayingItem' in session:
             session_paused = session['PlayState']['IsPaused']
-            if session_paused and not config.getboolean('SHOW_WHEN_PAUSED', True):
+            if session_paused and not show_when_paused:
                 if previous_activity:
                     try:
                         discord_rpc.clear()
@@ -224,7 +226,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
 
                 if media_type == 'Episode' and config.get('TMDB_API_KEY'):
                     try:
-                        series = jellyfin_api.get_item(media_dict['SeriesId'])
+                        series = jf_api.get_item(media_dict['SeriesId'])
                         tmdb_id = series['ProviderIds']['Tmdb']
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
@@ -280,9 +282,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     start_time = current_time - position_ticks / 10_000_000
                     runtime_ticks = media_dict['RunTimeTicks']
                     end_time = start_time + runtime_ticks / 10_000_000
-                small_image = (
-                    DEFAULT_POSTER_URL if config.getboolean('SHOW_JELLYFIN_ICON', False) else None
-                )
+                small_image = DEFAULT_POSTER_URL if show_jf_icon else None
                 try:
                     discord_rpc.update(
                         activity_type=activity_type,
@@ -332,12 +332,16 @@ def main(log_queue: Queue | None = None):
 
     config = get_config(args.ini_path)
     logger.setLevel(config.get('LOG_LEVEL', 'INFO'))
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     file_hdlr = logging.FileHandler(args.log_path, encoding='utf-8')
-    file_hdlr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    file_hdlr.setFormatter(formatter)
     logger.addHandler(file_hdlr)
-    logger.addHandler(logging.StreamHandler(sys.stdout))
-    if log_queue:
-        logger.addHandler(handlers.QueueHandler(log_queue))
+    stream_hdlr = logging.StreamHandler(sys.stdout)
+    stream_hdlr.setFormatter(formatter)
+    logger.addHandler(stream_hdlr)
+    if log_queue is not None:
+        queue_hdlr = handlers.QueueHandler(log_queue)
+        logger.addHandler(queue_hdlr)
 
     set_discord_rpc(config, refresh_rate=args.refresh_rate)
 
