@@ -18,7 +18,7 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 To generate a Jellyfin API key, go to the server dashboard and select **API Keys** under **Advanced**.
 
-- Jellyfin Host
+- Jellyfin Host (e.g., <https://jellyfin.example.com>)
 - Jellyfin API Key
 - Jellyfin Username
 - TMDB API Key (Optional)
@@ -31,6 +31,7 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 ## Usage (GUI)
 
 ![jellyfin_rpc_gui](images/jellyfin_rpc_gui.png)
+![jellyfin_rpc_gui_2](images/jellyfin_rpc_gui_2.png)
 
 ![jellyfin_rpc_ico](images/jellyfin_rpc_ico.png)
 
