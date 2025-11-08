@@ -26,6 +26,12 @@ logger = logging.getLogger('RPC')
 def get_config(ini_path: str) -> SectionProxy:
     config = ConfigParser()
     config.read(ini_path)
+    if config.get('DEFAULT', 'API_TOKEN', fallback=None):
+        jf_api_key = config.get('DEFAULT', 'API_TOKEN')
+        config.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
+    if config.get('DEFAULT', 'USERNAME', fallback=None):
+        jf_username = config.get('DEFAULT', 'USERNAME')
+        config.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
     return config['DEFAULT']
 
 

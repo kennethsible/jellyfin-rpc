@@ -92,13 +92,13 @@ def set_config(ini_path: str, entries: list[ctk.CTkEntry], checkboxes: list[ctk.
     config.set('DEFAULT', 'JELLYFIN_API_KEY', entries[1].get())
     config.set('DEFAULT', 'JELLYFIN_USERNAME', entries[2].get())
     config.set('DEFAULT', 'TMDB_API_KEY', entries[3].get())
-    config.set('DEFAULT', 'START_MINIMIZED', str(checkboxes[4]._variable.get()))
-    config.set('DEFAULT', 'MINIMIZE_ON_CLOSE', str(checkboxes[5]._variable.get()))
-    config.set('DEFAULT', 'SHOW_WHEN_PAUSED', str(checkboxes[6]._variable.get()))
-    config.set('DEFAULT', 'SHOW_SERVER_NAME', str(checkboxes[7]._variable.get()))
-    config.set('DEFAULT', 'SHOW_JELLYFIN_ICON', str(checkboxes[8]._variable.get()))
+    config.set('DEFAULT', 'START_MINIMIZED', str(checkboxes[3]._variable.get()))
+    config.set('DEFAULT', 'MINIMIZE_ON_CLOSE', str(checkboxes[4]._variable.get()))
+    config.set('DEFAULT', 'SHOW_WHEN_PAUSED', str(checkboxes[5]._variable.get()))
+    config.set('DEFAULT', 'SHOW_SERVER_NAME', str(checkboxes[6]._variable.get()))
+    config.set('DEFAULT', 'SHOW_JELLYFIN_ICON', str(checkboxes[7]._variable.get()))
 
-    if not config.get('DEFAULT', 'LOG_LEVEL'):
+    if not config.get('DEFAULT', 'LOG_LEVEL', fallback=None):
         config.set('DEFAULT', 'LOG_LEVEL', 'INFO')
 
     media_types = []
@@ -252,15 +252,15 @@ def main():
     main_frame.pack(fill='both', expand=True)
     font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
 
-    ini_file, log_file = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
+    ini_path, log_path = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
-    ini_path = os.path.abspath(os.path.join(bundle_dir, ini_file))
-    png_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
-    ico_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
+    ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_path))
+    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
+    ico_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
     os.chdir(os.path.dirname(get_executable_path()))
 
     if not os.path.isfile(ini_path):
-        shutil.copyfile(ini_path, ini_file)
+        shutil.copyfile(ini_bundle_path, ini_path)
 
     config = jellyfin_rpc.get_config(ini_path)
     jf_host = config.get('JELLYFIN_HOST')
@@ -326,7 +326,7 @@ def main():
     log_queue = multiprocessing.Queue()
     logger.setLevel(config['LOG_LEVEL'])
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-    file_hdlr = logging.FileHandler(log_file, encoding='utf-8')
+    file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
     file_hdlr.setFormatter(formatter)
     stream_hdlr = logging.StreamHandler(sys.stdout)
     stream_hdlr.setFormatter(formatter)
@@ -341,7 +341,6 @@ def main():
     label2 = ctk.CTkLabel(master=checkbox_container1, text='System Settings', font=font)
     label2.pack(pady=(5, 0), padx=10)
 
-    checkbox4 = None
     if platform.system() == 'Windows':
         checkbox4_var = ctk.IntVar(value=int(get_startup_status()))
         checkbox4 = ctk.CTkCheckBox(
@@ -424,7 +423,6 @@ def main():
         checkbox1,
         checkbox2,
         checkbox3,
-        checkbox4,
         checkbox5,
         checkbox6,
         checkbox7,
@@ -444,7 +442,7 @@ def main():
     else:
         icon = pystray.Icon(
             'jellyfin-rpc',
-            Image.open(png_path),
+            Image.open(png_bundle_path),
             'Jellyfin RPC',
             menu=pystray.Menu(
                 pystray.MenuItem(lambda _: button_text, lambda: gui_queue.put('CONNECT')),
@@ -489,7 +487,7 @@ def main():
     poll_gui_queue()
 
     if platform.system() == 'Windows':
-        root.iconbitmap(ico_path)
+        root.iconbitmap(ico_bundle_path)
     root.resizable(False, False)
     if minimize_on_close:
         root.protocol('WM_DELETE_WINDOW', root.withdraw)
