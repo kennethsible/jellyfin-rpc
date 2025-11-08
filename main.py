@@ -4,6 +4,7 @@ import logging
 import multiprocessing
 import os
 import platform
+import queue
 import shutil
 import sys
 import threading
@@ -189,21 +190,16 @@ def check_version(label: ctk.CTkLabel):
         response.raise_for_status()
         release = response.json()['tag_name'].lstrip('v')
         if __version__ == release:
-            label.configure(
-                text=f'Latest Version ({__version__})',
-                text_color='gray',
-            )
+            label_text = f'Latest Version ({__version__})'
+            label_color = 'gray'
         else:
-            label.configure(
-                text=f'Update Available ({__version__} \u2192 {release})',
-                text_color='white',
-            )
+            label_text = f'Update Available ({__version__} \u2192 {release})'
+            label_color = 'white'
     except (RequestException, JSONDecodeError, KeyError):
         logger.warning('Connection to GitHub Failed')
-        label.configure(
-            text=f'Current Version ({__version__})',
-            text_color='gray',
-        )
+        label_text = f'Current Version ({__version__})'
+        label_color = 'gray'
+    label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
 
 
 def on_close(rpc_process: RPCProcess, root: ctk.CTk, icon: pystray._base.Icon | None = None):
@@ -274,6 +270,7 @@ def main():
     root = ctk.CTk()
     root.title('Jellyfin RPC')
     root.geometry('285x488')
+    gui_queue = queue.Queue()
 
     main_frame = ctk.CTkFrame(master=root)
     main_frame.pack(fill='both', expand=True)
@@ -464,29 +461,9 @@ def main():
             Image.open(png_path),
             'Jellyfin RPC',
             menu=pystray.Menu(
-                pystray.MenuItem(
-                    lambda _: button1_text,
-                    lambda: on_click(
-                        rpc_process,
-                        ini_path,
-                        root,
-                        entry1,
-                        entry2,
-                        entry3,
-                        entry4,
-                        checkbox1,
-                        checkbox2,
-                        checkbox3,
-                        checkbox5,
-                        checkbox6,
-                        checkbox7,
-                        checkbox8,
-                        checkbox9,
-                        button1,
-                    ),
-                ),
-                pystray.MenuItem('Maximize', lambda: on_maximize(label1, root), default=True),
-                pystray.MenuItem('Quit', lambda: on_close(rpc_process, root, context['icon'])),
+                pystray.MenuItem(lambda _: button1_text, lambda: gui_queue.put('CONNECT')),
+                pystray.MenuItem('Maximize', lambda: gui_queue.put('MAXIMIZE'), default=True),
+                pystray.MenuItem('Quit', lambda: gui_queue.put('QUIT')),
             ),
         )
         icon.run_detached()
@@ -521,15 +498,35 @@ def main():
         and config.get('JELLYFIN_USERNAME')
     ):
         on_click_partial()
-        if button1_text == 'Disconnect' and config.getboolean('START_MINIMIZED', True):
+        if button1_text == 'Disconnect' and config.getboolean('START_MINIMIZED', True):  # TODO
             root.withdraw()
     else:
         logger.info('Awaiting Configuration')
     monitor_process_status(rpc_process, on_click_partial, root)
 
+    def poll_gui_queue():
+        try:
+            match gui_queue.get_nowait():
+                case 'CONNECT':
+                    on_click_callback()
+                case 'MAXIMIZE':
+                    on_maximize(label1, root)
+                case 'QUIT':
+                    on_close(rpc_process, root, context['icon'])
+        except queue.Empty:
+            pass
+        finally:
+            root.after(100, lambda: poll_gui_queue())
+
+    poll_gui_queue()
+
     if platform.system() == 'Windows':
         root.iconbitmap(ico_path)
     root.resizable(False, False)
+    if config.getboolean('MINIMIZE_ON_CLOSE', True):
+        root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    else:
+        root.protocol('WM_DELETE_WINDOW', lambda: on_close(rpc_process, root, icon))
     root.mainloop()
 
 
