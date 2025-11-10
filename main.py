@@ -22,7 +22,7 @@ from requests.exceptions import RequestException
 
 import jellyfin_rpc
 
-__version__ = '1.6.0'
+__version__ = '1.6.1'
 
 logger = logging.getLogger('GUI')
 
@@ -252,15 +252,32 @@ def main():
     main_frame.pack(fill='both', expand=True)
     font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
 
-    ini_path, log_path = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
+    ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
-    ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_path))
+    ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
     png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
     ico_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
     os.chdir(os.path.dirname(get_executable_path()))
 
+    data_dir = ''
+    if platform.system() == 'Windows':
+        data_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
+    elif platform.system() == 'Darwin':
+        data_dir = os.path.expanduser('~/Library/Application Support')
+    if data_dir:
+        data_dir = os.path.join(data_dir, 'Jellyfin RPC')
+        os.makedirs(data_dir, exist_ok=True)
+        ini_path = os.path.join(data_dir, ini_name)
+        log_path = os.path.join(data_dir, log_name)
+    else:
+        ini_path, log_path = ini_name, log_name
     if not os.path.isfile(ini_path):
-        shutil.copyfile(ini_bundle_path, ini_path)
+        if data_dir and os.path.isfile(ini_name):
+            logger.info(f'Migrating INI to {ini_path}')
+            shutil.copyfile(ini_name, ini_path)
+        else:
+            logger.info(f'Extracting INI to {ini_path}')
+            shutil.copyfile(ini_bundle_path, ini_path)
 
     config = jellyfin_rpc.get_config(ini_path)
     jf_host = config.get('JELLYFIN_HOST')
@@ -409,7 +426,7 @@ def main():
     )
     checkbox9.pack(anchor='w', pady=5)
 
-    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main), log_queue)
+    rpc_process = RPCProcess(functools.partial(jellyfin_rpc.main, log_path), log_queue)
     global button_text
     button_text = 'Connect'
 

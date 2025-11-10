@@ -18,8 +18,6 @@ from pypresence.types import ActivityType, StatusDisplayType
 from requests.exceptions import RequestException
 
 CLIENT_ID = '1238889120672120853'
-DEFAULT_POSTER_URL = 'jellyfin_icon'
-
 logger = logging.getLogger('RPC')
 
 
@@ -102,7 +100,7 @@ def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
             )
         except (KeyError, JSONDecodeError):
             logger.warning('No Poster Available on TMDB. Skipping...')
-            return DEFAULT_POSTER_URL
+            return 'large_image'
 
 
 def get_movie_poster(api_key: str, tmdb_id: str) -> str:
@@ -117,7 +115,7 @@ def get_movie_poster(api_key: str, tmdb_id: str) -> str:
         )
     except (KeyError, JSONDecodeError):
         logger.warning('No Poster Available on TMDB. Skipping...')
-        return DEFAULT_POSTER_URL
+        return 'large_image'
 
 
 def get_album_cover(album_id: str, group_id: str) -> str:
@@ -131,7 +129,7 @@ def get_album_cover(album_id: str, group_id: str) -> str:
             return json.loads(response.text)['images'][0]['image']
         except (KeyError, JSONDecodeError):
             logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
-        return DEFAULT_POSTER_URL
+        return 'large_image'
 
 
 def await_connection(discord_rpc: Presence, refresh_rate: int):
@@ -227,7 +225,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                 details += ' '
 
             if previous_activity != activity or previous_playstate != session_paused:
-                poster_url = DEFAULT_POSTER_URL
+                poster_url = 'large_image'
                 state_url = large_url = details_url = None
 
                 if media_type == 'Episode' and config.get('TMDB_API_KEY'):
@@ -288,7 +286,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     start_time = current_time - position_ticks / 10_000_000
                     runtime_ticks = media_dict['RunTimeTicks']
                     end_time = start_time + runtime_ticks / 10_000_000
-                small_image = DEFAULT_POSTER_URL if show_jf_icon else None
+                small_image = 'small_image' if show_jf_icon else None
                 try:
                     discord_rpc.update(
                         activity_type=activity_type,
@@ -329,17 +327,19 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
         time.sleep(refresh_rate)
 
 
-def main(log_queue: Queue | None = None):
+def main(log_path: str | None = None, log_queue: Queue | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--ini-path', default='jellyfin_rpc.ini')
     parser.add_argument('--log-path', default='jellyfin_rpc.log')
     parser.add_argument('--refresh-rate', type=int, default=5)
     args = parser.parse_args()
 
+    if log_path is None:
+        log_path = args.log_path
     config = get_config(args.ini_path)
     logger.setLevel(config.get('LOG_LEVEL', 'INFO'))
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-    file_hdlr = logging.FileHandler(args.log_path, encoding='utf-8')
+    file_hdlr = logging.FileHandler(log_path, encoding='utf-8')  # type: ignore
     file_hdlr.setFormatter(formatter)
     logger.addHandler(file_hdlr)
     stream_hdlr = logging.StreamHandler(sys.stdout)
