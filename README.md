@@ -7,7 +7,7 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ## Installation
 
-- Download [Latest Release](https://github.com/kennethsible/jellyfin-rpc/releases) (**Recommended**)
+- Download [Latest Release](https://github.com/kennethsible/jellyfin-rpc/releases)
 - Build from Source
    1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
    2. Install Python<br>`uv install python`
@@ -25,6 +25,9 @@ To generate a Jellyfin API key, go to the server dashboard and select **API Keys
 
 If you prefer to use the CLI over the GUI (or you're on Linux), fill out the included [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you run into any issues, please change `log_level` in the INI to `DEBUG` and include the output in your GitHub Issue.
 
+- `%AppData%\Jellyfin RPC`
+- `~/Library/Application Support/Jellyfin RPC`
+
 > [!IMPORTANT]
 > TMDB is used to fetch posters for movies/shows. You need to create an account to generate an [API key](https://developer.themoviedb.org/docs/getting-started).
 
@@ -37,6 +40,8 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 
 ## Usage (CLI)
 
+To install the CLI script, run the command `pip install .` inside the cloned repository.
+
 ```bash
-jellyfin_rpc.py [-h] [--ini-path INI_PATH] [--log-path LOG_PATH] [--refresh-rate REFRESH_RATE]
+jellyfin-rpc [-h] --ini-path INI_PATH [--log-path LOG_PATH]
 ```

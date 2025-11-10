@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 build/
 dist/
+src/jellyfin_rpc/*.ico
+src/jellyfin_rpc/*.png

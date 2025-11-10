@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.6.0"
+version = "1.6.1"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,7 +15,13 @@ dependencies = [
 gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.16.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.14.3", "mypy>=1.18.2", "pytest>=8.4.2"]
+dev = ["ruff>=0.14.4", "mypy>=1.18.2"]
+
+[project.urls]
+homepage = "https://github.com/kennethsible/jellyfin-rpc"
+
+[project.scripts]
+jellyfin-rpc = "jellyfin_rpc.jellyfin_rpc:main"
 
 [tool.ruff]
 line-length = 100
