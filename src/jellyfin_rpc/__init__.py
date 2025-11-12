@@ -1,3 +1,3 @@
-from .jellyfin_rpc import get_config, init_discord_rpc
+from .jellyfin_rpc import init_discord_rpc, load_config
 
-__all__ = ['get_config', 'init_discord_rpc']
+__all__ = ['init_discord_rpc', 'load_config']

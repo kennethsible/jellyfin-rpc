@@ -20,9 +20,9 @@ import requests
 from PIL import Image
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import get_config, init_discord_rpc
+from jellyfin_rpc import init_discord_rpc, load_config
 
-__version__ = '1.6.1'
+__version__ = '1.6.2'
 
 logger = logging.getLogger('GUI')
 
@@ -84,71 +84,63 @@ class RPCLogger:
         return f'{record.levelname}: {record.getMessage()}\n'
 
 
-def set_config(ini_path: str, entries: list[ctk.CTkEntry], checkboxes: list[ctk.CTkCheckBox]):
+def save_config(
+    ini_path: str, entries: dict[str, ctk.CTkEntry], checkboxes: dict[str, ctk.CTkCheckBox]
+):
     config = ConfigParser()
     config.read(ini_path)
-
-    config.set('DEFAULT', 'JELLYFIN_HOST', entries[0].get())
-    config.set('DEFAULT', 'JELLYFIN_API_KEY', entries[1].get())
-    config.set('DEFAULT', 'JELLYFIN_USERNAME', entries[2].get())
-    config.set('DEFAULT', 'TMDB_API_KEY', entries[3].get())
-    config.set('DEFAULT', 'START_MINIMIZED', str(checkboxes[3]._variable.get()))
-    config.set('DEFAULT', 'MINIMIZE_ON_CLOSE', str(checkboxes[4]._variable.get()))
-    config.set('DEFAULT', 'SHOW_WHEN_PAUSED', str(checkboxes[5]._variable.get()))
-    config.set('DEFAULT', 'SHOW_SERVER_NAME', str(checkboxes[6]._variable.get()))
-    config.set('DEFAULT', 'SHOW_JELLYFIN_ICON', str(checkboxes[7]._variable.get()))
-
+    for key in ('JELLYFIN_HOST', 'JELLYFIN_API_KEY', 'JELLYFIN_USERNAME', 'TMDB_API_KEY'):
+        config.set('DEFAULT', key, entries[key].get())
     if not config.get('DEFAULT', 'LOG_LEVEL', fallback=None):
         config.set('DEFAULT', 'LOG_LEVEL', 'INFO')
 
     media_types = []
-    if checkboxes[0]._variable.get():
+    if checkboxes['MOVIES']._variable.get():
         media_types.append('Movies')
-    if checkboxes[1]._variable.get():
+    if checkboxes['SHOWS']._variable.get():
         media_types.append('Shows')
-    if checkboxes[2]._variable.get():
+    if checkboxes['MUSIC']._variable.get():
         media_types.append('Music')
     config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
+
+    for key in (
+        'START_MINIMIZED',
+        'MINIMIZE_ON_CLOSE',
+        'SHOW_WHEN_PAUSED',
+        'SHOW_SERVER_NAME',
+        'SHOW_JELLYFIN_ICON',
+    ):
+        config.set('DEFAULT', key, str(checkboxes[key]._variable.get()))
 
     with open(ini_path, 'w') as ini_file:
         config.write(ini_file)
 
 
 def on_click(
-    root: ctk.CTk,
-    ini_path: str,
+    button1: ctk.CTkButton,
+    entries: dict[str, ctk.CTkEntry],
     rpc_process: RPCProcess,
-    entries: list[ctk.CTkEntry],
-    checkboxes: list[ctk.CTkCheckBox],
-    button: ctk.CTkButton,
-    icon: pystray._base.Icon | None = None,
+    tray_icon: pystray._base.Icon | None = None,
+    is_checkbox: bool = False,
 ):
-    global button_text
-    if button_text == 'Connect':  # type: ignore
-        set_config(ini_path, entries, checkboxes)
+    global button1_text
+    if button1_text == 'Connect' and not is_checkbox:  # type: ignore
         rpc_process.start()
-        for component in entries + checkboxes:
-            component.configure(state='readonly')
-            component.update()
-        button_text = 'Disconnect'  # type: ignore
-        button.configure(text=button_text)  # type: ignore
-        if checkboxes[5]._variable.get():
-            root.protocol('WM_DELETE_WINDOW', root.withdraw)
-        else:
-            root.protocol(
-                'WM_DELETE_WINDOW',
-                lambda: on_close(root, ini_path, rpc_process, entries, checkboxes, icon),
-            )
+        for entry in entries.values():
+            entry.configure(state='readonly')
+            entry.update()
+        button1_text = 'Disconnect'  # type: ignore
+        button1.configure(text=button1_text)  # type: ignore
     else:
         rpc_process.stop()
-        for component in entries + checkboxes:
-            component.configure(state='normal')
-            component.update()
-        button_text = 'Connect'  # type: ignore
-        button.configure(text=button_text)  # type: ignore
-    if icon:
-        icon.update_menu()
-    button.update()
+        for entry in entries.values():
+            entry.configure(state='normal')
+            entry.update()
+        button1_text = 'Connect'  # type: ignore
+        button1.configure(text=button1_text)  # type: ignore
+    if tray_icon is not None:
+        tray_icon.update_menu()
+    button1.update()
 
 
 def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None):
@@ -157,23 +149,19 @@ def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None):
         root.after(0, root.deiconify)
 
 
-def on_close(
-    root: ctk.CTk,
-    ini_path: str,
-    rpc_process: RPCProcess,
-    entries: list[ctk.CTkEntry],
-    checkboxes: list[ctk.CTkCheckBox],
-    icon: pystray._base.Icon | None = None,
-):
-    try:
-        set_config(ini_path, entries, checkboxes)
-    except Exception:
-        logger.exception('Error Writing Config')
+def on_close(root: ctk.CTk, rpc_process: RPCProcess, tray_icon: pystray._base.Icon | None = None):
     rpc_process.stop()
-    if icon is not None:
-        icon.visible = False
-        icon.stop()
+    if tray_icon is not None:
+        tray_icon.visible = False
+        tray_icon.stop()
     root.quit()
+
+
+def set_close_behavior(root: ctk.CTk, on_close_callback: Callable, withdraw: bool):
+    if withdraw:
+        root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    else:
+        root.protocol('WM_DELETE_WINDOW', on_close_callback)
 
 
 def get_executable_path() -> str:
@@ -279,7 +267,7 @@ def main():
             logger.info(f'Extracting INI to {ini_path}')
             shutil.copyfile(ini_bundle_path, ini_path)
 
-    config = get_config(ini_path)
+    config = load_config(ini_path)
     jf_host = config.get('JELLYFIN_HOST')
     jf_api_key = config.get('JELLYFIN_API_KEY')
     jf_username = config.get('JELLYFIN_USERNAME')
@@ -427,55 +415,74 @@ def main():
     checkbox9.pack(anchor='w', pady=5)
 
     rpc_process = RPCProcess(functools.partial(init_discord_rpc, ini_path, log_path), log_queue)
-    global button_text
-    button_text = 'Connect'
+    global button1_text
+    button1_text = 'Connect'
 
     class AppContext(TypedDict):
-        button: Optional[ctk.CTkButton]
-        icon: Optional[pystray._base.Icon]
+        button1: Optional[ctk.CTkButton]
+        tray_icon: Optional[pystray._base.Icon]
 
-    context: AppContext = {'button': None, 'icon': None}
-    entries = [entry1, entry2, entry3, entry4]
-    checkboxes = [
-        checkbox1,
-        checkbox2,
-        checkbox3,
-        checkbox5,
-        checkbox6,
-        checkbox7,
-        checkbox8,
-        checkbox9,
-    ]
+    context: AppContext = {'button1': None, 'tray_icon': None}
+    entries = {
+        'JELLYFIN_HOST': entry1,
+        'JELLYFIN_API_KEY': entry2,
+        'JELLYFIN_USERNAME': entry3,
+        'TMDB_API_KEY': entry4,
+    }
+    checkboxes = {
+        'MOVIES': checkbox1,
+        'SHOWS': checkbox2,
+        'MUSIC': checkbox3,
+        'START_MINIMIZED': checkbox5,
+        'MINIMIZE_ON_CLOSE': checkbox6,
+        'SHOW_WHEN_PAUSED': checkbox7,
+        'SHOW_SERVER_NAME': checkbox8,
+        'SHOW_JELLYFIN_ICON': checkbox9,
+    }
+
+    for key, checkbox in checkboxes.items():
+        if key == 'MINIMIZE_ON_CLOSE':
+            checkbox.configure(
+                command=lambda: set_close_behavior(
+                    root, on_close_callback, checkboxes['MINIMIZE_ON_CLOSE']._variable.get()
+                )
+            )
+        elif key != 'START_MINIMIZED':
+            checkbox.configure(
+                command=lambda: on_click(context['button1'], entries, rpc_process, is_checkbox=True)  # type: ignore
+            )
 
     def on_click_callback():
-        assert context['button'] is not None, 'button is not initialized'
-        on_click(
-            root, ini_path, rpc_process, entries, checkboxes, context['button'], context['icon']
-        )
+        save_config(ini_path, entries, checkboxes)
+        on_click(context['button1'], entries, rpc_process, context['tray_icon'])  # type: ignore
+
+    def on_close_callback():
+        save_config(ini_path, entries, checkboxes)
+        on_close(root, rpc_process, context['tray_icon'])  # type: ignore
 
     if platform.system() == 'Darwin':
-        icon = None
+        tray_icon = None
         root.createcommand('::tk::mac::ReopenApplication', lambda: on_maximize(label1, root))
     else:
-        icon = pystray.Icon(
+        tray_icon = pystray.Icon(
             'jellyfin-rpc',
             Image.open(png_bundle_path),
             'Jellyfin RPC',
             menu=pystray.Menu(
-                pystray.MenuItem(lambda _: button_text, lambda: gui_queue.put('CONNECT')),
+                pystray.MenuItem(lambda _: button1_text, lambda: gui_queue.put('CONNECT')),
                 pystray.MenuItem('Maximize', lambda: gui_queue.put('MAXIMIZE'), default=True),
                 pystray.MenuItem('Quit', lambda: gui_queue.put('QUIT')),
             ),
         )
-        icon.run_detached()
-    context['icon'] = icon
+        tray_icon.run_detached()
+    context['tray_icon'] = tray_icon
 
-    button = ctk.CTkButton(master=main_frame, text=button_text, command=on_click_callback)
-    button.pack(side='bottom', pady=(5, 10), padx=10)
-    context['button'] = button
+    button1 = ctk.CTkButton(master=main_frame, text=button1_text, command=on_click_callback)
+    button1.pack(side='bottom', pady=(5, 10), padx=10)
+    context['button1'] = button1
     if jf_host and jf_api_key and jf_username:
         on_click_callback()
-        if start_minimized and button_text == 'Disconnect':
+        if start_minimized and button1_text == 'Disconnect':
             root.withdraw()
     else:
         logger.info('Awaiting Configuration')
@@ -495,7 +502,7 @@ def main():
                 case 'MAXIMIZE':
                     on_maximize(label1, root)
                 case 'QUIT':
-                    on_close(root, ini_path, rpc_process, entries, checkboxes, icon)
+                    on_close_callback()
         except queue.Empty:
             pass
         finally:
@@ -506,13 +513,7 @@ def main():
     if platform.system() == 'Windows':
         root.iconbitmap(ico_bundle_path)
     root.resizable(False, False)
-    if minimize_on_close:
-        root.protocol('WM_DELETE_WINDOW', root.withdraw)
-    else:
-        root.protocol(
-            'WM_DELETE_WINDOW',
-            lambda: on_close(root, ini_path, rpc_process, entries, checkboxes, icon),
-        )
+    set_close_behavior(root, on_close_callback, minimize_on_close)
     root.mainloop()
 
 

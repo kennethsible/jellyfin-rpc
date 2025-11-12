@@ -21,7 +21,7 @@ CLIENT_ID = '1238889120672120853'
 logger = logging.getLogger('RPC')
 
 
-def get_config(ini_path: str) -> SectionProxy:
+def load_config(ini_path: str) -> SectionProxy:
     config = ConfigParser()
     config.read(ini_path)
     if config.get('DEFAULT', 'API_TOKEN', fallback=None):
@@ -329,7 +329,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
 
 
 def init_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Queue | None = None):
-    config = get_config(ini_path)
+    config = load_config(ini_path)
     logger.setLevel(config.get('LOG_LEVEL', 'INFO'))
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     if log_path is not None:

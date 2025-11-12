@@ -110,7 +110,7 @@ wheels = [
 
 [[package]]
 name = "jellyfin-rpc"
-version = "1.6.1"
+version = "1.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "jellyfin-apiclient-python" },
