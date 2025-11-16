@@ -20,7 +20,7 @@ import requests
 from PIL import Image
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import init_discord_rpc, load_config
+from jellyfin_rpc import load_config, start_discord_rpc
 
 __version__ = '1.6.3'
 
@@ -220,8 +220,9 @@ def check_version(label: ctk.CTkLabel):
         else:
             label_text = f'Update Available ({__version__} \u2192 {release})'
             label_color = 'white'
-    except (RequestException, JSONDecodeError, KeyError):
-        logger.warning('Connection to GitHub Failed')
+    except (RequestException, JSONDecodeError, KeyError) as e:
+        logger.debug(e)
+        logger.warning('Connection to GitHub Failed. Skipping Version Check...')
         label_text = f'Current Version ({__version__})'
         label_color = 'gray'
     label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
@@ -415,7 +416,7 @@ def main():
     )
     checkbox9.pack(anchor='w', pady=5)
 
-    rpc_process = RPCProcess(functools.partial(init_discord_rpc, ini_path, log_path), log_queue)
+    rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
     global button1_text
     button1_text = 'Connect'
 

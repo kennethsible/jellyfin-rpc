@@ -12,7 +12,7 @@ from multiprocessing.queues import Queue
 import requests
 from jellyfin_apiclient_python import JellyfinClient, api
 from jellyfin_apiclient_python.exceptions import HTTPException
-from pypresence import DiscordNotFound, PipeClosed
+from pypresence.exceptions import PyPresenceException
 from pypresence.presence import Presence
 from pypresence.types import ActivityType, StatusDisplayType
 from requests.exceptions import RequestException
@@ -33,21 +33,23 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
-def get_user_id(config: SectionProxy) -> str:
-    url = config['JELLYFIN_HOST'] + '/Users'
-    headers = {'Accept': 'application/json', 'X-Emby-Token': config['JELLYFIN_API_KEY']}
-    user_data = requests.get(url, headers=headers, verify=True)
-    user_data.raise_for_status()
-    for user in user_data.json():
-        if config['JELLYFIN_USERNAME'] in user['Name']:
-            return user['Id']
-    raise ValueError(config['JELLYFIN_USERNAME'])
-
-
 def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
     initial_attempt = True
     while True:
         try:
+            url = config['JELLYFIN_HOST'] + '/Users'
+            headers = {'Accept': 'application/json', 'X-Emby-Token': config['JELLYFIN_API_KEY']}
+            user_data = requests.get(url, headers=headers, verify=True)
+            user_data.raise_for_status()
+
+            user_id = None
+            for user in user_data.json():
+                if config['JELLYFIN_USERNAME'] in user['Name']:
+                    user_id = user['Id']
+            if user_id is None:
+                logger.error(f'Username Not Found: {config["JELLYFIN_USERNAME"]}')
+                sys.exit(0)
+
             client = JellyfinClient()
             client.config.app('jellyfin-rpc', '0.1.0', 'Discord RPC', uuid.uuid4())
             client.config.data['auth.ssl'] = True
@@ -57,25 +59,30 @@ def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | 
                         {
                             'address': config['JELLYFIN_HOST'],
                             'AccessToken': config['JELLYFIN_API_KEY'],
-                            'UserId': get_user_id(config),
+                            'UserId': user_id,
                             'DateLastAccessed': 0,
                         }
                     ]
                 },
                 discover=False,
             )
+
             server_name = None
             if config.getboolean('SHOW_SERVER_NAME', False):
                 server_name = client.jellyfin.get_system_info().get('ServerName')
                 logger.info(f'Connected to {server_name}')
             else:
                 logger.info('Connected to Jellyfin')
-        except (RequestException, JSONDecodeError, ValueError):
+        except (RequestException, JSONDecodeError, HTTPException) as e:
             if initial_attempt:
+                logger.debug(e)
                 logger.error('Connection to Jellyfin Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
             continue
+        except KeyError as e:
+            logger.error(f'Missing Key in INI Config: {e}')
+            sys.exit(0)
         return client.jellyfin, server_name
 
 
@@ -89,7 +96,7 @@ def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
             'https://image.tmdb.org/t/p/w185/'
             + json.loads(response.text)['posters'][0]['file_path']
         )
-    except (KeyError, JSONDecodeError):
+    except (KeyError, JSONDecodeError, IndexError):
         response = requests.get(
             f'https://api.themoviedb.org/3/tv/{tmdb_id}/images?api_key={api_key}'
         )
@@ -98,7 +105,7 @@ def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
                 'https://image.tmdb.org/t/p/w185/'
                 + json.loads(response.text)['posters'][0]['file_path']
             )
-        except (KeyError, JSONDecodeError):
+        except (KeyError, JSONDecodeError, IndexError):
             logger.warning('No Poster Available on TMDB. Skipping...')
             return 'large_image'
 
@@ -113,7 +120,7 @@ def get_movie_poster(api_key: str, tmdb_id: str) -> str:
             'https://image.tmdb.org/t/p/w185/'
             + json.loads(response.text)['posters'][0]['file_path']
         )
-    except (KeyError, JSONDecodeError):
+    except (KeyError, JSONDecodeError, IndexError):
         logger.warning('No Poster Available on TMDB. Skipping...')
         return 'large_image'
 
@@ -123,11 +130,11 @@ def get_album_cover(album_id: str, group_id: str) -> str:
     response.raise_for_status()
     try:
         return json.loads(response.text)['images'][0]['image']
-    except (KeyError, JSONDecodeError):
+    except (KeyError, JSONDecodeError, IndexError):
         response = requests.get(f'https://coverartarchive.org/release-group/{group_id}')
         try:
             return json.loads(response.text)['images'][0]['image']
-        except (KeyError, JSONDecodeError):
+        except (KeyError, JSONDecodeError, IndexError):
             logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
         return 'large_image'
 
@@ -138,8 +145,9 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
         try:
             discord_rpc.connect()
             logger.info('Connected to Discord')
-        except (DiscordNotFound, ConnectionRefusedError):
+        except (PyPresenceException, ConnectionRefusedError) as e:
             if initial_attempt:
+                logger.debug(e)
                 logger.error('Connection to Discord Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
@@ -147,7 +155,7 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
         break
 
 
-def set_discord_rpc(config: SectionProxy, refresh_rate: int):
+def run_main_loop(config: SectionProxy, refresh_rate: int):
     discord_rpc = Presence(CLIENT_ID)
     await_connection(discord_rpc, refresh_rate)
     jf_api, server_name = get_jf_api(config, refresh_rate)
@@ -164,17 +172,23 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
             )
         except StopIteration:
             session = None
-        except (HTTPException, KeyError):
+        except (HTTPException, KeyError) as e:
+            logger.debug(e)
             jf_api, server_name = get_jf_api(config, refresh_rate)
             continue
 
         if session and 'NowPlayingItem' in session:
-            session_paused = session['PlayState']['IsPaused']
+            try:
+                session_paused = session['PlayState']['IsPaused']
+            except KeyError as e:
+                logger.warning(f'Missing Key in Session Data: {e}')
+                session_paused = False
             if session_paused and not show_when_paused:
                 if previous_activity:
                     try:
                         discord_rpc.clear()
-                    except PipeClosed:
+                    except PyPresenceException as e:
+                        logger.debug(e)
                         await_connection(discord_rpc, refresh_rate)
                         continue
                     logger.info(f'RPC Cleared for "{activity}"')
@@ -182,46 +196,50 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                 time.sleep(refresh_rate)
                 continue
 
-            state: str | None
-            media_dict = session['NowPlayingItem']
-            media_types = config['MEDIA_TYPES'].split(',')
-            match media_type := media_dict['Type']:
-                case 'Episode':
-                    activity_type = ActivityType.WATCHING
-                    if 'Shows' not in media_types:
+            try:
+                media_dict = session['NowPlayingItem']
+                media_types = config['MEDIA_TYPES'].split(',')
+                match media_type := media_dict['Type']:
+                    case 'Episode':
+                        activity_type = ActivityType.WATCHING
+                        if 'Shows' not in media_types:
+                            time.sleep(refresh_rate)
+                            continue
+                        season = media_dict['ParentIndexNumber']
+                        episode = media_dict['IndexNumber']
+                        state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
+                        details = media_dict['SeriesName']
+                        large_text = None
+                        activity = state
+                    case 'Movie':
+                        activity_type = ActivityType.WATCHING
+                        if 'Movies' not in media_types:
+                            time.sleep(refresh_rate)
+                            continue
+                        details = media_dict['Name']
+                        state = large_text = None
+                        activity = details
+                    case 'Audio':
+                        activity_type = ActivityType.LISTENING
+                        if 'Music' not in media_types:
+                            time.sleep(refresh_rate)
+                            continue
+                        state = None
+                        if 'Artists' in media_dict:
+                            state = ', '.join(media_dict['Artists'])
+                        details = media_dict['Name']
+                        large_text = None
+                        if 'Album' in media_dict:
+                            large_text = media_dict['Album']
+                        activity = details
+                    case _:
+                        logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
                         time.sleep(refresh_rate)
-                        continue
-                    season = media_dict['ParentIndexNumber']
-                    episode = media_dict['IndexNumber']
-                    state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
-                    details = media_dict['SeriesName']
-                    large_text = None
-                    activity = state
-                case 'Movie':
-                    activity_type = ActivityType.WATCHING
-                    if 'Movies' not in media_types:
-                        time.sleep(refresh_rate)
-                        continue
-                    details = media_dict['Name']
-                    state = large_text = None
-                    activity = details
-                case 'Audio':
-                    activity_type = ActivityType.LISTENING
-                    if 'Music' not in media_types:
-                        time.sleep(refresh_rate)
-                        continue
-                    state = None
-                    if 'Artists' in media_dict:
-                        state = ', '.join(media_dict['Artists'])
-                    details = media_dict['Name']
-                    large_text = None
-                    if 'Album' in media_dict:
-                        large_text = media_dict['Album']
-                    activity = details
-                case _:
-                    logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
-                    time.sleep(refresh_rate)
-                    continue  # raise NotImplementedError()
+                        continue  # raise NotImplementedError()
+            except KeyError as e:
+                logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
+                time.sleep(refresh_rate)
+                continue
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
 
@@ -239,7 +257,8 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         season = media_dict['ParentIndexNumber']
                         try:
                             poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id, season)
-                        except RequestException:
+                        except RequestException as e:
+                            logger.debug(e)
                             logger.warning('Connection to TMDB Failed. Skipping...')
                         details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
                         season = media_dict['ParentIndexNumber']
@@ -255,7 +274,8 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     else:
                         try:
                             poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id)
-                        except RequestException:
+                        except RequestException as e:
+                            logger.debug(e)
                             logger.warning('Connection to TMDB Failed. Skipping...')
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
                         large_url = details_url
@@ -269,7 +289,8 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                     else:
                         try:
                             poster_url = get_album_cover(album_id, group_id)
-                        except RequestException:
+                        except RequestException as e:
+                            logger.debug(e)
                             logger.warning('Connection to MusicBrainz Failed. Skipping...')
                         if 'MusicBrainzTrack' in media_dict['ProviderIds']:
                             track_id = media_dict['ProviderIds']['MusicBrainzTrack']
@@ -282,11 +303,14 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                 if session_paused:
                     start_time, end_time = time.time(), None
                 else:
-                    current_time = time.time()
-                    position_ticks = session['PlayState']['PositionTicks']
-                    start_time = current_time - position_ticks / 10_000_000
-                    runtime_ticks = media_dict['RunTimeTicks']
-                    end_time = start_time + runtime_ticks / 10_000_000
+                    try:
+                        current_time = time.time()
+                        position_ticks = session['PlayState']['PositionTicks']
+                        start_time = current_time - position_ticks / 10_000_000
+                        runtime_ticks = media_dict['RunTimeTicks']
+                        end_time = start_time + runtime_ticks / 10_000_000
+                    except KeyError:
+                        start_time, end_time = time.time(), None
                 small_image = 'small_image' if show_jf_icon else None
                 try:
                     discord_rpc.update(
@@ -304,7 +328,8 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
                         large_url=large_url,
                         small_image=small_image,
                     )
-                except PipeClosed:
+                except PyPresenceException as e:
+                    logger.debug(e)
                     await_connection(discord_rpc, refresh_rate)
                     continue
 
@@ -320,7 +345,8 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
         elif previous_activity:
             try:
                 discord_rpc.clear()
-            except PipeClosed:
+            except PyPresenceException as e:
+                logger.debug(e)
                 await_connection(discord_rpc, refresh_rate)
                 continue
             logger.info(f'RPC Cleared for "{activity}"')
@@ -328,7 +354,7 @@ def set_discord_rpc(config: SectionProxy, refresh_rate: int):
         time.sleep(refresh_rate)
 
 
-def init_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Queue | None = None):
+def start_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Queue | None = None):
     config = load_config(ini_path)
     logger.setLevel(config.get('LOG_LEVEL', 'INFO'))
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -343,7 +369,7 @@ def init_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Queu
         queue_hdlr = handlers.QueueHandler(log_queue)
         logger.addHandler(queue_hdlr)
 
-    set_discord_rpc(config, config.getint('REFRESH_RATE', 5))
+    run_main_loop(config, config.getint('REFRESH_RATE', 5))
 
 
 def main():
@@ -352,7 +378,7 @@ def main():
     parser.add_argument('--log-path', type=str)
     args = parser.parse_args()
 
-    init_discord_rpc(args.ini_path, args.log_path)
+    start_discord_rpc(args.ini_path, args.log_path)
 
 
 if __name__ == '__main__':
