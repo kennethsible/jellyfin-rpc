@@ -22,7 +22,7 @@ from requests.exceptions import RequestException
 
 from jellyfin_rpc import init_discord_rpc, load_config
 
-__version__ = '1.6.2'
+__version__ = '1.6.3'
 
 logger = logging.getLogger('GUI')
 
@@ -175,32 +175,33 @@ if platform.system() == 'Windows':
     import winreg
 
     def set_startup_status(enabled: bool):
-        key = winreg.OpenKey(
+        with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r'Software\Microsoft\Windows\CurrentVersion\Run',
             0,
             winreg.KEY_SET_VALUE,
-        )
-        if enabled:
-            exe_path = get_executable_path()
-            winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
-        else:
-            try:
-                winreg.DeleteValue(key, 'Jellyfin RPC')
-            except FileNotFoundError:
-                pass
-        winreg.CloseKey(key)
+        ) as key:
+            if enabled:
+                exe_path = get_executable_path()
+                winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
+            else:
+                try:
+                    winreg.DeleteValue(key, 'Jellyfin RPC')
+                except FileNotFoundError:
+                    pass
 
     def get_startup_status() -> bool:
         try:
-            key = winreg.OpenKey(
+            with winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 r'Software\Microsoft\Windows\CurrentVersion\Run',
                 0,
                 winreg.KEY_READ,
-            )
-            _, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
-            winreg.CloseKey(key)
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
+            exe_path, stored_path = get_executable_path(), value.strip('"')
+            if os.path.normcase(exe_path) != os.path.normcase(stored_path):
+                set_startup_status(True)
             return True
         except FileNotFoundError:
             return False
