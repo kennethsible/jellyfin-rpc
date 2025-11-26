@@ -12,10 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.16.0"]
+gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.17.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.14.5", "mypy>=1.18.2"]
+dev = ["ruff>=0.14.6", "mypy>=1.18.2"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"

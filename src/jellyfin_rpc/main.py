@@ -78,6 +78,21 @@ class RPCLogger:
         message = self.format_log_record(record)
         self.text_widget.configure(state='normal')
         self.text_widget.insert(ctk.END, message)
+        if message.rstrip().endswith('Need Help?'):
+            tk_text = self.text_widget._textbox
+            tk_text.tag_add('link', '1.6', '1.16')
+            mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
+            link_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
+            tk_text.tag_configure('link', foreground=link_color, underline=True)
+            tk_text.tag_bind(
+                'link',
+                '<Button-1>',
+                lambda _: webbrowser.open_new_tab(
+                    'https://github.com/kennethsible/jellyfin-rpc?tab=readme-ov-file#configuration'
+                ),
+            )
+            tk_text.tag_bind('link', '<Enter>', lambda event: event.widget.config(cursor='hand2'))
+            tk_text.tag_bind('link', '<Leave>', lambda event: event.widget.config(cursor=''))
         self.text_widget.configure(state='disabled')
         self.text_widget.see(ctk.END)
 
@@ -213,6 +228,7 @@ if platform.system() == 'Windows':
 
 
 def check_version(label: ctk.CTkLabel):
+    mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
     try:
         response = requests.get(
             'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
@@ -221,15 +237,15 @@ def check_version(label: ctk.CTkLabel):
         release = response.json()['tag_name'].lstrip('v')
         if __version__ == release:
             label_text = f'Latest Version ({__version__})'
-            label_color = 'gray'
+            label_color = ctk.ThemeManager.theme['CTkLabel']['text_color'][mode_index]
         else:
             label_text = f'Update Available ({__version__} \u2192 {release})'
-            label_color = 'white'
+            label_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
     except (RequestException, JSONDecodeError, KeyError) as e:
         logger.debug(e)
         logger.warning('Connection to GitHub Failed. Skipping Version Check...')
         label_text = f'Current Version ({__version__})'
-        label_color = 'gray'
+        label_color = ctk.ThemeManager.theme['CTkLabel']['text_color'][mode_index]
     label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
 
 
@@ -289,7 +305,7 @@ def main():
         '<Button-1>',
         lambda _: webbrowser.open_new_tab('https://github.com/kennethsible/jellyfin-rpc/releases'),
     )
-    label1.pack(pady=(10, 0), padx=10)
+    label1.pack(pady=(5, 0), padx=10)
     on_maximize(label1)
 
     scroll_frame = ctk.CTkScrollableFrame(master=main_frame, fg_color=main_frame.cget('fg_color'))
@@ -553,7 +569,7 @@ def main():
         if start_minimized and button1_text == 'Disconnect':
             root.withdraw()
     else:
-        logger.info('Awaiting Configuration')
+        logger.info('Need Help?')
 
     def poll_process_status():
         if rpc_process.has_failed():
