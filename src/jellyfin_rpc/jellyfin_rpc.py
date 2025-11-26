@@ -86,6 +86,16 @@ def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | 
         return client.jellyfin, server_name
 
 
+def ping_tmdb_api(api_key: str):
+    try:
+        response = requests.get(f'https://api.themoviedb.org/3/configuration?api_key={api_key}')
+        response.raise_for_status()
+        logger.info('Connected to TMDB')
+    except RequestException as e:
+        logger.debug(e)
+        logger.warning('Connection to TMDB Failed. Skipping...')
+
+
 def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
     response = requests.get(
         f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}'
@@ -156,9 +166,12 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
 
 
 def run_main_loop(config: SectionProxy, refresh_rate: int):
-    discord_rpc = Presence(CLIENT_ID)
+    client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
+    discord_rpc = Presence(client_id)
     await_connection(discord_rpc, refresh_rate)
     jf_api, server_name = get_jf_api(config, refresh_rate)
+    if config.get('TMDB_API_KEY'):
+        ping_tmdb_api(config['TMDB_API_KEY'])
     activity, previous_activity, previous_playstate = None, None, False
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
@@ -196,6 +209,8 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                 time.sleep(refresh_rate)
                 continue
 
+            state: str | None
+            large_text: str | None
             try:
                 media_dict = session['NowPlayingItem']
                 media_types = config['MEDIA_TYPES'].split(',')
@@ -356,7 +371,10 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
 
 def start_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Queue | None = None):
     config = load_config(ini_path)
-    logger.setLevel(config.get('LOG_LEVEL', 'INFO'))
+    log_level = config.get('LOG_LEVEL', 'INFO').upper()
+    refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
+
+    logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     if log_path is not None:
         file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
@@ -369,7 +387,7 @@ def start_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Que
         queue_hdlr = handlers.QueueHandler(log_queue)
         logger.addHandler(queue_hdlr)
 
-    run_main_loop(config, config.getint('REFRESH_RATE', 5))
+    run_main_loop(config, refresh_rate)
 
 
 def main():

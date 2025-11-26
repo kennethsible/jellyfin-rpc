@@ -12,7 +12,7 @@ from configparser import ConfigParser
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
-from typing import Callable, Optional, TypedDict
+from typing import Callable, TypedDict, cast
 
 import customtkinter as ctk
 import pystray
@@ -24,6 +24,7 @@ from jellyfin_rpc import load_config, start_discord_rpc
 
 __version__ = '1.6.3'
 
+button1_text = ''
 logger = logging.getLogger('GUI')
 
 
@@ -85,14 +86,18 @@ class RPCLogger:
 
 
 def save_config(
-    ini_path: str, entries: dict[str, ctk.CTkEntry], checkboxes: dict[str, ctk.CTkCheckBox]
+    ini_path: str,
+    entries: dict[str, ctk.CTkEntry],
+    checkboxes: dict[str, ctk.CTkCheckBox],
+    log_level_var: ctk.StringVar,
+    refresh_rate_var: ctk.IntVar,
 ):
     config = ConfigParser()
     config.read(ini_path)
     for key in ('JELLYFIN_HOST', 'JELLYFIN_API_KEY', 'JELLYFIN_USERNAME', 'TMDB_API_KEY'):
         config.set('DEFAULT', key, entries[key].get())
-    if not config.get('DEFAULT', 'LOG_LEVEL', fallback=None):
-        config.set('DEFAULT', 'LOG_LEVEL', 'INFO')
+    config.set('DEFAULT', 'LOG_LEVEL', log_level_var.get())
+    config.set('DEFAULT', 'REFRESH_RATE', str(refresh_rate_var.get()))
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -121,23 +126,23 @@ def on_click(
     entries: dict[str, ctk.CTkEntry],
     rpc_process: RPCProcess,
     tray_icon: pystray._base.Icon | None = None,
-    is_checkbox: bool = False,
+    only_disconnect: bool = False,
 ):
     global button1_text
-    if button1_text == 'Connect' and not is_checkbox:  # type: ignore
+    if button1_text == 'Connect' and not only_disconnect:
         rpc_process.start()
         for entry in entries.values():
             entry.configure(state='readonly')
             entry.update()
-        button1_text = 'Disconnect'  # type: ignore
-        button1.configure(text=button1_text)  # type: ignore
+        button1_text = 'Disconnect'
+        button1.configure(text=button1_text)
     else:
         rpc_process.stop()
         for entry in entries.values():
             entry.configure(state='normal')
             entry.update()
-        button1_text = 'Connect'  # type: ignore
-        button1.configure(text=button1_text)  # type: ignore
+        button1_text = 'Connect'
+        button1.configure(text=button1_text)
     if tray_icon is not None:
         tray_icon.update_menu()
     button1.update()
@@ -230,8 +235,6 @@ def check_version(label: ctk.CTkLabel):
 
 def main():
     ctk.set_appearance_mode('system')
-    ctk.set_default_color_theme('dark-blue')
-    ctk.deactivate_automatic_dpi_awareness()
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
@@ -273,6 +276,8 @@ def main():
     jf_host = config.get('JELLYFIN_HOST')
     jf_api_key = config.get('JELLYFIN_API_KEY')
     jf_username = config.get('JELLYFIN_USERNAME')
+    log_level = config.get('LOG_LEVEL', 'INFO').upper()
+    refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
     start_minimized = config.getboolean('START_MINIMIZED', True)
     minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
@@ -331,7 +336,7 @@ def main():
     textbox1.pack(pady=5, padx=10)
 
     log_queue = multiprocessing.Queue()
-    logger.setLevel(config['LOG_LEVEL'])
+    logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
     file_hdlr.setFormatter(formatter)
@@ -416,13 +421,48 @@ def main():
     )
     checkbox9.pack(anchor='w', pady=5)
 
+    label5 = ctk.CTkLabel(master=checkbox_container1, text='Advanced Settings', font=font)
+    label5.pack(pady=(5, 0), padx=10)
+
+    advanced_container1 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
+    advanced_container1.pack(fill='x', padx=10, pady=5)
+
+    label6 = ctk.CTkLabel(master=advanced_container1, text='Log Level')
+    label6.pack(side='left', padx=(0, 10))
+
+    log_level_var = ctk.StringVar(value=log_level)
+    optionmenu1 = ctk.CTkOptionMenu(
+        master=advanced_container1, values=['INFO', 'DEBUG'], variable=log_level_var
+    )
+    optionmenu1.pack(side='right', fill='x', expand=True)
+
+    advanced_container2 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
+    advanced_container2.pack(fill='x', padx=10, pady=5)
+
+    label7 = ctk.CTkLabel(master=advanced_container2, text='Refresh Rate')
+    label7.pack(side='left', padx=(0, 10))
+
+    refresh_rate_var = ctk.IntVar(value=refresh_rate)
+
+    button2 = ctk.CTkButton(master=advanced_container2, text='+', width=28, height=28)
+    button2.pack(side='right', padx=(5, 0))
+
+    entry5 = ctk.CTkEntry(
+        master=advanced_container2, textvariable=refresh_rate_var, width=50, justify='center'
+    )
+    entry5.configure(state='disabled')
+    entry5.pack(side='right')
+
+    button3 = ctk.CTkButton(master=advanced_container2, text='-', width=28, height=28)
+    button3.pack(side='right', padx=(0, 5))
+
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
     global button1_text
     button1_text = 'Connect'
 
     class AppContext(TypedDict):
-        button1: Optional[ctk.CTkButton]
-        tray_icon: Optional[pystray._base.Icon]
+        button1: ctk.CTkButton | None
+        tray_icon: pystray._base.Icon | None
 
     context: AppContext = {'button1': None, 'tray_icon': None}
     entries = {
@@ -450,17 +490,43 @@ def main():
                 )
             )
         elif key != 'START_MINIMIZED':
+            button = cast(ctk.CTkButton, context['button1'])
             checkbox.configure(
-                command=lambda: on_click(context['button1'], entries, rpc_process, is_checkbox=True)  # type: ignore
+                command=lambda: on_click(button, entries, rpc_process, only_disconnect=True)
             )
 
+    def set_log_level(level: str):
+        logger.setLevel(level)
+        button = cast(ctk.CTkButton, context['button1'])
+        on_click(button, entries, rpc_process, only_disconnect=True)
+
+    def inc_refresh():
+        value = refresh_rate_var.get()
+        refresh_rate_var.set(value + 1)
+        button = cast(ctk.CTkButton, context['button1'])
+        on_click(button, entries, rpc_process, only_disconnect=True)
+
+    def dec_refresh():
+        value = int(refresh_rate_var.get())
+        if value > 1:
+            refresh_rate_var.set(value - 1)
+        else:
+            refresh_rate_var.set(1)
+        button = cast(ctk.CTkButton, context['button1'])
+        on_click(button, entries, rpc_process, only_disconnect=True)
+
+    optionmenu1.configure(command=set_log_level)
+    button2.configure(command=inc_refresh)
+    button3.configure(command=dec_refresh)
+
     def on_click_callback():
-        save_config(ini_path, entries, checkboxes)
-        on_click(context['button1'], entries, rpc_process, context['tray_icon'])  # type: ignore
+        button = cast(ctk.CTkButton, context['button1'])
+        save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
+        on_click(button, entries, rpc_process, context['tray_icon'])
 
     def on_close_callback():
-        save_config(ini_path, entries, checkboxes)
-        on_close(root, rpc_process, context['tray_icon'])  # type: ignore
+        save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
+        on_close(root, rpc_process, context['tray_icon'])
 
     if platform.system() == 'Darwin':
         tray_icon = None
