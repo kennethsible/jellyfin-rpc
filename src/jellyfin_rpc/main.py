@@ -1,6 +1,6 @@
 import functools
 import logging
-import multiprocessing
+import multiprocessing as mp
 import os
 import platform
 import queue
@@ -11,7 +11,6 @@ import webbrowser
 from configparser import ConfigParser
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
-from multiprocessing.queues import Queue
 from typing import Callable, TypedDict, cast
 
 import customtkinter as ctk
@@ -22,20 +21,20 @@ from requests.exceptions import RequestException
 
 from jellyfin_rpc import load_config, start_discord_rpc
 
-__version__ = '1.6.3'
+__version__ = '1.6.4'
 
 button1_text = ''
 logger = logging.getLogger('GUI')
 
 
 class RPCProcess:
-    def __init__(self, target: Callable, log_queue: Queue):
+    def __init__(self, target: Callable, log_queue: mp.Queue):
         self.target = target
         self.log_queue = log_queue
-        self.process: multiprocessing.Process | None = None
+        self.process: mp.Process | None = None
 
     def start(self):
-        self.process = multiprocessing.Process(target=self.target, args=(self.log_queue,))
+        self.process = mp.Process(target=self.target, args=(self.log_queue,))
         self.process.start()
 
     def stop(self):
@@ -60,9 +59,7 @@ class RPCProcess:
 
 
 class RPCLogger:
-    def __init__(
-        self, frame: ctk.CTkFrame, log_queue: multiprocessing.Queue, text_widget: ctk.CTkTextbox
-    ):
+    def __init__(self, frame: ctk.CTkFrame, log_queue: mp.Queue, text_widget: ctk.CTkTextbox):
         self.frame = frame
         self.log_queue = log_queue
         self.text_widget = text_widget
@@ -255,7 +252,7 @@ def main():
     root = ctk.CTk()
     root.title('Jellyfin RPC')
     root.geometry('285x488')
-    gui_queue = queue.Queue()
+    gui_queue: queue.Queue[str] = queue.Queue()
 
     main_frame = ctk.CTkFrame(master=root)
     main_frame.pack(fill='both', expand=True)
@@ -351,7 +348,7 @@ def main():
     textbox1.configure(state='disabled')
     textbox1.pack(pady=5, padx=10)
 
-    log_queue = multiprocessing.Queue()
+    log_queue: mp.Queue[LogRecord] = mp.Queue()
     logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
@@ -506,21 +503,27 @@ def main():
                 )
             )
         elif key != 'START_MINIMIZED':
-            button = cast(ctk.CTkButton, context['button1'])
             checkbox.configure(
-                command=lambda: on_click(button, entries, rpc_process, only_disconnect=True)
+                command=lambda: on_click(
+                    cast(ctk.CTkButton, context['button1']),
+                    entries,
+                    rpc_process,
+                    only_disconnect=True,
+                )
             )
 
     def set_log_level(level: str):
         logger.setLevel(level)
-        button = cast(ctk.CTkButton, context['button1'])
-        on_click(button, entries, rpc_process, only_disconnect=True)
+        on_click(
+            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+        )
 
     def inc_refresh():
         value = refresh_rate_var.get()
         refresh_rate_var.set(value + 1)
-        button = cast(ctk.CTkButton, context['button1'])
-        on_click(button, entries, rpc_process, only_disconnect=True)
+        on_click(
+            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+        )
 
     def dec_refresh():
         value = int(refresh_rate_var.get())
@@ -528,17 +531,19 @@ def main():
             refresh_rate_var.set(value - 1)
         else:
             refresh_rate_var.set(1)
-        button = cast(ctk.CTkButton, context['button1'])
-        on_click(button, entries, rpc_process, only_disconnect=True)
+        on_click(
+            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+        )
 
     optionmenu1.configure(command=set_log_level)
     button2.configure(command=inc_refresh)
     button3.configure(command=dec_refresh)
 
     def on_click_callback():
-        button = cast(ctk.CTkButton, context['button1'])
         save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
-        on_click(button, entries, rpc_process, context['tray_icon'])
+        on_click(
+            cast(ctk.CTkButton, context['button1']), entries, rpc_process, context['tray_icon']
+        )
 
     def on_close_callback():
         save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
@@ -602,5 +607,5 @@ def main():
 
 
 if __name__ == '__main__':
-    multiprocessing.freeze_support()
+    mp.freeze_support()
     main()

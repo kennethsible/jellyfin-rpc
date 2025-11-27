@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.6.3"
+version = "1.6.4"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,6 +33,7 @@ extend-select = ["I"]
 quote-style = "single"
 
 [tool.mypy]
+check_untyped_defs = true
 ignore_missing_imports = true
 
 [tool.hatch.metadata]
