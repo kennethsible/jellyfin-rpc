@@ -70,10 +70,11 @@ def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | 
             server_name = None
             if config.getboolean('SHOW_SERVER_NAME', False):
                 server_name = client.jellyfin.get_system_info().get('ServerName')
+            logger.info('Connected to Jellyfin API')
         except (RequestException, JSONDecodeError, HTTPException) as e:
             if initial_attempt:
                 logger.debug(e)
-                logger.error('Connection to Jellyfin Failed. Retrying...')
+                logger.error('Jellyfin API Connection Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
             continue
@@ -87,9 +88,10 @@ def ping_tmdb_api(api_key: str):
     try:
         response = requests.get(f'https://api.themoviedb.org/3/configuration?api_key={api_key}')
         response.raise_for_status()
+        logger.info('Connected to TMDB API')
     except RequestException as e:
         logger.debug(e)
-        logger.warning('Connection to TMDB Failed. Skipping...')
+        logger.warning('TMDB API Connection Failed. Skipping...')
 
 
 def get_series_poster(api_key: str, tmdb_id: str) -> str:
@@ -167,10 +169,11 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
             discord_rpc.connect()
+            logger.info('Connected to Discord Client')
         except (PyPresenceException, ConnectionRefusedError) as e:
             if initial_attempt:
                 logger.debug(e)
-                logger.error('Connection to Discord Failed. Retrying...')
+                logger.error('Discord Client Connection Failed. Retrying...')
             initial_attempt = False
             time.sleep(refresh_rate)
             continue

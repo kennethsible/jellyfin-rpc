@@ -36,7 +36,6 @@ class RPCProcess:
     def start(self):
         self.process = mp.Process(target=self.target, args=(self.log_queue,))
         self.process.start()
-        logger.info('RPC Started')
 
     def stop(self):
         if self.process is None:
