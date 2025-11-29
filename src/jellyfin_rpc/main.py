@@ -36,6 +36,7 @@ class RPCProcess:
     def start(self):
         self.process = mp.Process(target=self.target, args=(self.log_queue,))
         self.process.start()
+        logger.info('RPC Started')
 
     def stop(self):
         if self.process is None:
@@ -43,6 +44,7 @@ class RPCProcess:
         if self.process.is_alive():
             self.process.terminate()
             self.process.join()
+            logger.info('RPC Stopped')
 
     def has_failed(self) -> bool:
         if self.process is None:
@@ -50,10 +52,9 @@ class RPCProcess:
         if self.process.exitcode is None:
             return False
         if self.process.exitcode in (0, -15):
-            logger.info('RPC Process Stopped')
             self.process = None
             return False
-        logger.error('RPC Process Exited Unexpectedly')
+        logger.error('RPC Crashed')
         self.process = None
         return True
 
@@ -102,14 +103,14 @@ def save_config(
     entries: dict[str, ctk.CTkEntry],
     checkboxes: dict[str, ctk.CTkCheckBox],
     log_level_var: ctk.StringVar,
-    refresh_rate_var: ctk.IntVar,
+    refresh_rate_var: ctk.StringVar,
 ):
     config = ConfigParser()
     config.read(ini_path)
     for key in ('JELLYFIN_HOST', 'JELLYFIN_API_KEY', 'JELLYFIN_USERNAME', 'TMDB_API_KEY'):
         config.set('DEFAULT', key, entries[key].get())
     config.set('DEFAULT', 'LOG_LEVEL', log_level_var.get())
-    config.set('DEFAULT', 'REFRESH_RATE', str(refresh_rate_var.get()))
+    config.set('DEFAULT', 'REFRESH_RATE', refresh_rate_var.get().rstrip('s'))
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -248,6 +249,7 @@ def check_version(label: ctk.CTkLabel):
 
 def main():
     ctk.set_appearance_mode('system')
+    ctk.deactivate_automatic_dpi_awareness()
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
@@ -455,7 +457,7 @@ def main():
     label7 = ctk.CTkLabel(master=advanced_container2, text='Refresh Rate')
     label7.pack(side='left', padx=(0, 10))
 
-    refresh_rate_var = ctk.IntVar(value=refresh_rate)
+    refresh_rate_var = ctk.StringVar(value=f'{refresh_rate}s')
 
     button2 = ctk.CTkButton(master=advanced_container2, text='+', width=28, height=28)
     button2.pack(side='right', padx=(5, 0))
@@ -519,18 +521,18 @@ def main():
         )
 
     def inc_refresh():
-        value = refresh_rate_var.get()
-        refresh_rate_var.set(value + 1)
+        value = int(refresh_rate_var.get().rstrip('s'))
+        refresh_rate_var.set(f'{value + 1}s')
         on_click(
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
         )
 
     def dec_refresh():
-        value = int(refresh_rate_var.get())
+        value = int(refresh_rate_var.get().rstrip('s'))
         if value > 1:
-            refresh_rate_var.set(value - 1)
+            refresh_rate_var.set(f'{value - 1}s')
         else:
-            refresh_rate_var.set(1)
+            refresh_rate_var.set('1s')
         on_click(
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
         )

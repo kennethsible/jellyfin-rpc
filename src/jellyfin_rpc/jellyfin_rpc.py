@@ -70,9 +70,6 @@ def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | 
             server_name = None
             if config.getboolean('SHOW_SERVER_NAME', False):
                 server_name = client.jellyfin.get_system_info().get('ServerName')
-                logger.info(f'Connected to {server_name}')
-            else:
-                logger.info('Connected to Jellyfin')
         except (RequestException, JSONDecodeError, HTTPException) as e:
             if initial_attempt:
                 logger.debug(e)
@@ -90,63 +87,79 @@ def ping_tmdb_api(api_key: str):
     try:
         response = requests.get(f'https://api.themoviedb.org/3/configuration?api_key={api_key}')
         response.raise_for_status()
-        logger.info('Connected to TMDB')
     except RequestException as e:
         logger.debug(e)
         logger.warning('Connection to TMDB Failed. Skipping...')
 
 
-def get_series_poster(api_key: str, tmdb_id: str, season: int) -> str:
-    response = requests.get(
-        f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}'
-    )
-    response.raise_for_status()
+def get_series_poster(api_key: str, tmdb_id: str) -> str:
     try:
-        return (
-            'https://image.tmdb.org/t/p/w185/'
-            + json.loads(response.text)['posters'][0]['file_path']
-        )
-    except (KeyError, JSONDecodeError, IndexError):
         response = requests.get(
             f'https://api.themoviedb.org/3/tv/{tmdb_id}/images?api_key={api_key}'
         )
-        try:
-            return (
-                'https://image.tmdb.org/t/p/w185/'
-                + json.loads(response.text)['posters'][0]['file_path']
-            )
-        except (KeyError, JSONDecodeError, IndexError):
-            logger.warning('No Poster Available on TMDB. Skipping...')
-            return 'large_image'
-
-
-def get_movie_poster(api_key: str, tmdb_id: str) -> str:
-    response = requests.get(
-        f'https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}'
-    )
-    response.raise_for_status()
-    try:
+        response.raise_for_status()
         return (
             'https://image.tmdb.org/t/p/w185/'
             + json.loads(response.text)['posters'][0]['file_path']
         )
-    except (KeyError, JSONDecodeError, IndexError):
+    except (RequestException, KeyError, JSONDecodeError, IndexError) as e:
+        logger.debug(e)
         logger.warning('No Poster Available on TMDB. Skipping...')
         return 'large_image'
 
 
-def get_album_cover(album_id: str, group_id: str) -> str:
-    response = requests.get(f'https://coverartarchive.org/release/{album_id}')
-    response.raise_for_status()
+def get_season_poster(api_key: str, tmdb_id: str, season: int | None = None) -> str:
+    if season is None:
+        return get_series_poster(api_key, tmdb_id)
     try:
-        return json.loads(response.text)['images'][0]['image']
-    except (KeyError, JSONDecodeError, IndexError):
-        response = requests.get(f'https://coverartarchive.org/release-group/{group_id}')
-        try:
-            return json.loads(response.text)['images'][0]['image']
-        except (KeyError, JSONDecodeError, IndexError):
-            logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
+        response = requests.get(
+            f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images?api_key={api_key}'
+        )
+        response.raise_for_status()
+        return (
+            'https://image.tmdb.org/t/p/w185/'
+            + json.loads(response.text)['posters'][0]['file_path']
+        )
+    except (RequestException, KeyError, JSONDecodeError, IndexError):
+        return get_series_poster(api_key, tmdb_id)
+
+
+def get_movie_poster(api_key: str, tmdb_id: str) -> str:
+    try:
+        response = requests.get(
+            f'https://api.themoviedb.org/3/movie/{tmdb_id}/images?api_key={api_key}'
+        )
+        response.raise_for_status()
+        return (
+            'https://image.tmdb.org/t/p/w185/'
+            + json.loads(response.text)['posters'][0]['file_path']
+        )
+    except (RequestException, KeyError, JSONDecodeError, IndexError) as e:
+        logger.debug(e)
+        logger.warning('No Poster Available on TMDB. Skipping...')
         return 'large_image'
+
+
+def get_release_group_cover(group_id: str) -> str:
+    try:
+        response = requests.get(f'https://coverartarchive.org/release-group/{group_id}')
+        response.raise_for_status()
+        return json.loads(response.text)['images'][0]['image']
+    except (RequestException, KeyError, JSONDecodeError, IndexError) as e:
+        logger.debug(e)
+        logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
+    return 'large_image'
+
+
+def get_release_cover(group_id: str, release_id: str | None = None) -> str:
+    if release_id is None:
+        return get_release_group_cover(group_id)
+    try:
+        response = requests.get(f'https://coverartarchive.org/release/{release_id}')
+        response.raise_for_status()
+        return json.loads(response.text)['images'][0]['image']
+    except (RequestException, KeyError, JSONDecodeError, IndexError):
+        return get_release_group_cover(group_id)
 
 
 def await_connection(discord_rpc: Presence, refresh_rate: int):
@@ -154,7 +167,6 @@ def await_connection(discord_rpc: Presence, refresh_rate: int):
     while True:
         try:
             discord_rpc.connect()
-            logger.info('Connected to Discord')
         except (PyPresenceException, ConnectionRefusedError) as e:
             if initial_attempt:
                 logger.debug(e)
@@ -172,10 +184,11 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
     jf_api, server_name = get_jf_api(config, refresh_rate)
     if config.get('TMDB_API_KEY'):
         ping_tmdb_api(config['TMDB_API_KEY'])
-    activity, previous_activity, previous_playstate = None, None, False
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
 
+    activity = previous_activity = None
+    previous_warning = previous_playstate = False
     while True:
         try:
             session = next(
@@ -197,20 +210,19 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                 logger.warning(f'Missing Key in Session Data: {e}')
                 session_paused = False
             if session_paused and not show_when_paused:
-                if previous_activity:
+                if previous_activity is not None:
                     try:
                         discord_rpc.clear()
                     except PyPresenceException as e:
                         logger.debug(e)
                         await_connection(discord_rpc, refresh_rate)
                         continue
-                    logger.info(f'RPC Cleared for "{activity}"')
+                    logger.info('Activity Cleared')
                     previous_activity, previous_playstate = None, False
                 time.sleep(refresh_rate)
                 continue
 
-            state: str | None
-            large_text: str | None
+            state = details = None
             try:
                 media_dict = session['NowPlayingItem']
                 media_types = config['MEDIA_TYPES'].split(',')
@@ -222,9 +234,8 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             continue
                         season = media_dict['ParentIndexNumber']
                         episode = media_dict['IndexNumber']
-                        state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
                         details = media_dict['SeriesName']
-                        large_text = None
+                        state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
                         activity = state
                     case 'Movie':
                         activity_type = ActivityType.WATCHING
@@ -232,29 +243,31 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             time.sleep(refresh_rate)
                             continue
                         details = media_dict['Name']
-                        state = large_text = None
                         activity = details
                     case 'Audio':
                         activity_type = ActivityType.LISTENING
                         if 'Music' not in media_types:
                             time.sleep(refresh_rate)
                             continue
-                        state = None
                         if 'Artists' in media_dict:
                             state = ', '.join(media_dict['Artists'])
+                            if 'Album' in media_dict:
+                                state += f' - {media_dict["Album"]}'
+                        elif 'Album' in media_dict:
+                            state = media_dict['Album']
                         details = media_dict['Name']
-                        large_text = None
-                        if 'Album' in media_dict:
-                            large_text = media_dict['Album']
                         activity = details
                     case _:
                         logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
                         time.sleep(refresh_rate)
                         continue  # raise NotImplementedError()
             except KeyError as e:
-                logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
+                if not previous_warning:
+                    logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
+                    previous_warning = True
                 time.sleep(refresh_rate)
                 continue
+            previous_warning = False
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
 
@@ -269,17 +282,15 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
                     else:
-                        season = media_dict['ParentIndexNumber']
-                        try:
-                            poster_url = get_series_poster(config['TMDB_API_KEY'], tmdb_id, season)
-                        except RequestException as e:
-                            logger.debug(e)
-                            logger.warning('Connection to TMDB Failed. Skipping...')
+                        season = None
+                        if 'ParentIndexNumber' in media_dict:
+                            season = media_dict['ParentIndexNumber']
+                        poster_url = get_season_poster(config['TMDB_API_KEY'], tmdb_id, season)
                         details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
-                        season = media_dict['ParentIndexNumber']
+                        if 'IndexNumber' in media_dict:
+                            episode = media_dict['IndexNumber']
+                            state_url = f'{details_url}/season/{season}/episode/{episode}'
                         large_url = f'{details_url}/season/{season}'
-                        episode = media_dict['IndexNumber']
-                        state_url = f'{details_url}/season/{season}/episode/{episode}'
 
                 elif media_type == 'Movie' and config.get('TMDB_API_KEY'):
                     try:
@@ -287,33 +298,29 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
                     else:
-                        try:
-                            poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id)
-                        except RequestException as e:
-                            logger.debug(e)
-                            logger.warning('Connection to TMDB Failed. Skipping...')
+                        poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id)
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
                         large_url = details_url
 
                 elif media_type == 'Audio':
                     try:
                         group_id = media_dict['ProviderIds']['MusicBrainzReleaseGroup']
-                        album_id = media_dict['ProviderIds']['MusicBrainzAlbum']
                     except KeyError:
                         logger.warning('No MusicBrainz ID Found. Skipping...')
                     else:
                         try:
-                            poster_url = get_album_cover(album_id, group_id)
-                        except RequestException as e:
-                            logger.debug(e)
-                            logger.warning('Connection to MusicBrainz Failed. Skipping...')
+                            release_id = media_dict['ProviderIds']['MusicBrainzAlbum']
+                        except KeyError:
+                            release_id = None
+                        poster_url = get_release_cover(group_id, release_id)
                         if 'MusicBrainzTrack' in media_dict['ProviderIds']:
                             track_id = media_dict['ProviderIds']['MusicBrainzTrack']
                             details_url = f'https://musicbrainz.org/track/{track_id}'
-                        large_url = f'https://musicbrainz.org/release/{album_id}'
-                        if 'MusicBrainzAlbumArtist' in media_dict['ProviderIds']:
-                            artist_id = media_dict['ProviderIds']['MusicBrainzAlbumArtist']
-                            state_url = f'https://musicbrainz.org/artist/{artist_id}'
+                        state_url = f'https://musicbrainz.org/release-group/{group_id}'
+                        if release_id is None:
+                            large_url = f'https://musicbrainz.org/release/{release_id}'
+                        else:
+                            large_url = state_url
 
                 if session_paused:
                     start_time, end_time = time.time(), None
@@ -339,7 +346,6 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                         start=start_time,
                         end=end_time,
                         large_image=poster_url,
-                        large_text=large_text,
                         large_url=large_url,
                         small_image=small_image,
                     )
@@ -348,23 +354,21 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     await_connection(discord_rpc, refresh_rate)
                     continue
 
-                if not previous_activity:
-                    logger.info(f'RPC Set for "{activity}"')
-                elif previous_activity != activity:
-                    logger.info(f'RPC Updated for "{activity}"')
+                if previous_activity is None or previous_activity != activity:
+                    logger.info(f'Activity Updated "{activity}"')
                 else:
                     playstate = 'Paused' if session_paused else 'Resumed'
-                    logger.info(f'PlayState Updated for "{activity}" ({playstate})')
+                    logger.debug(f'PlayState Changed "{activity}" ({playstate})')
                 previous_activity, previous_playstate = activity, session_paused
 
-        elif previous_activity:
+        elif previous_activity is not None:
             try:
                 discord_rpc.clear()
             except PyPresenceException as e:
                 logger.debug(e)
                 await_connection(discord_rpc, refresh_rate)
                 continue
-            logger.info(f'RPC Cleared for "{activity}"')
+            logger.info('Activity Cleared')
             previous_activity, previous_playstate = None, False
         time.sleep(refresh_rate)
 
