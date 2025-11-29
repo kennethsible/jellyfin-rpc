@@ -28,8 +28,10 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 - `%AppData%\Jellyfin RPC`
 - `~/Library/Application Support/Jellyfin RPC`
 
+To fetch posters and album covers, your media must be properly tagged with the appropriate provider IDs.
+
 > [!IMPORTANT]
-> TMDB is used to fetch posters for movies/shows. You need to create an account to generate an [API key](https://developer.themoviedb.org/docs/getting-started).
+> [**TMDB**](https://www.themoviedb.org/) is used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [**MusicBrainz**](https://musicbrainz.org/) and the [**Cover Art Archive**](https://coverartarchive.org/) are used to fetch album covers.
 
 ## Usage (GUI)
 
