@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 import uuid
+from datetime import datetime
 from configparser import ConfigParser, SectionProxy
 from json.decoder import JSONDecodeError
 from logging import handlers
@@ -189,6 +190,7 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
         ping_tmdb_api(config['TMDB_API_KEY'])
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    show_livetv_image = config.getboolean('SHOW_LIVETV_IMAGE', False)
 
     activity = previous_activity = None
     previous_warning = previous_playstate = False
@@ -260,6 +262,23 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             state = media_dict['Album']
                         details = media_dict['Name']
                         activity = details
+                    
+                    case 'TvChannel':
+                        activity_type = ActivityType.WATCHING
+
+                        channel_name = media_dict.get('Name', 'Live TV')
+                        prog = media_dict.get('CurrentProgram') or {}
+
+                        details = prog.get('Name') or channel_name
+
+                        episode_title = prog.get('EpisodeTitle')
+                        if episode_title:
+                            state = f"{channel_name} - {episode_title}"
+                        else:
+                            state = channel_name
+
+                        activity = state
+
                     case _:
                         logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
                         time.sleep(refresh_rate)
@@ -324,6 +343,31 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             large_url = f'https://musicbrainz.org/release/{release_id}'
                         else:
                             large_url = state_url
+                
+                elif media_type == 'TvChannel':
+                    if show_livetv_image:
+                        try:
+                            host = config.get('JELLYFIN_HOST', '').rstrip('/')
+                            image_tag = None
+                            item_id = None
+
+                            prog = media_dict.get('CurrentProgram') or {}
+                            prog_tags = prog.get('ImageTags') or {}
+                            chan_tags = media_dict.get('ImageTags') or {}
+
+                            if prog_tags.get('Primary') and prog.get('Id'):
+                                image_tag = prog_tags['Primary']
+                                item_id = prog['Id']
+                            elif chan_tags.get('Primary') and media_dict.get('Id'):
+                                image_tag = chan_tags['Primary']
+                                item_id = media_dict['Id']
+
+                            if host and image_tag and item_id:
+                                poster_url = f"{host}/Items/{item_id}/Images/Primary?tag={image_tag}"
+                                large_url = f"{host}/web/index.html#!/details?id={item_id}"
+
+                        except Exception as e:
+                            logger.debug(f"Failed to generate TvChannel image: {e}")
 
                 if session_paused:
                     start_time, end_time = time.time(), None
