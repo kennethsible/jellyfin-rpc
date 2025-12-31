@@ -511,6 +511,7 @@ def main():
         'SHOW_SERVER_NAME': checkbox8,
         'SHOW_JELLYFIN_ICON': checkbox9,
         'SHOW_LIVETV_IMAGE': checkbox10,
+        'TVCHANNEL': checkbox11,
     }
 
     for key, checkbox in checkboxes.items():
