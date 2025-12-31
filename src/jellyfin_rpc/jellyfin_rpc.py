@@ -372,14 +372,26 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                 if session_paused:
                     start_time, end_time = time.time(), None
                 else:
-                    try:
-                        current_time = time.time()
-                        position_ticks = session['PlayState']['PositionTicks']
-                        start_time = current_time - position_ticks / 10_000_000
-                        runtime_ticks = media_dict['RunTimeTicks']
-                        end_time = start_time + runtime_ticks / 10_000_000
-                    except KeyError:
-                        start_time, end_time = time.time(), None
+                    start_time = None
+
+                    if media_type == 'TvChannel' and 'CurrentProgram' in media_dict:
+                        try:
+                            prog = media_dict['CurrentProgram']
+                            end_dt = datetime.fromisoformat(prog['EndDate'].replace('Z', '+00:00'))
+                            start_dt = datetime.fromisoformat(prog['StartDate'].replace('Z', '+00:00'))
+                            start_time = start_dt.timestamp()
+                            end_time = end_dt.timestamp()
+                        except (KeyError, ValueError):
+                            pass # Fall back to original
+                    if start_time is None:
+                        try:
+                            current_time = time.time()
+                            position_ticks = session['PlayState']['PositionTicks']
+                            start_time = current_time - position_ticks / 10_000_000
+                            runtime_ticks = media_dict['RunTimeTicks']
+                            end_time = start_time + runtime_ticks / 10_000_000
+                        except KeyError:
+                            start_time, end_time = time.time(), None
                 small_image = 'small_image' if show_jf_icon else None
                 try:
                     discord_rpc.update(
