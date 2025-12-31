@@ -126,6 +126,7 @@ def save_config(
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
         'SHOW_JELLYFIN_ICON',
+        'SHOW_LIVETV_IMAGE',
     ):
         config.set('DEFAULT', key, str(checkboxes[key]._variable.get()))
 
@@ -297,6 +298,7 @@ def main():
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    show_livetv_image = config.getboolean('SHOW_LIVETV_IMAGE', False)
 
     label1 = ctk.CTkLabel(master=main_frame, text='Checking for Update...', cursor='hand2')
     label1.bind(
@@ -435,6 +437,12 @@ def main():
     )
     checkbox9.pack(anchor='w', pady=5)
 
+    checkbox10_var = ctk.IntVar(value=show_livetv_image)
+    checkbox10 = ctk.CTkCheckBox(
+        master=checkbox_container1, text='Show Live TV Artwork', variable=checkbox10_var
+    )
+    checkbox10.pack(anchor='w', pady=5)
+
     label5 = ctk.CTkLabel(master=checkbox_container1, text='Advanced Settings', font=font)
     label5.pack(pady=(5, 0), padx=10)
 
@@ -494,6 +502,7 @@ def main():
         'SHOW_WHEN_PAUSED': checkbox7,
         'SHOW_SERVER_NAME': checkbox8,
         'SHOW_JELLYFIN_ICON': checkbox9,
+        'SHOW_LIVETV_IMAGE': checkbox10,
     }
 
     for key, checkbox in checkboxes.items():
