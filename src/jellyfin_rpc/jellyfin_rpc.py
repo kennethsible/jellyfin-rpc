@@ -194,6 +194,8 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
 
     activity = previous_activity = None
     previous_warning = previous_playstate = False
+    cached_program = None
+
     while True:
         try:
             session = next(
@@ -265,13 +267,33 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     
                     case 'TvChannel':
                         activity_type = ActivityType.WATCHING
-                        try:
-                            fresh_channel = jf_api.get_item(media_dict['Id'])
-                            if fresh_channel:
-                                media_dict = fresh_channel
-                        except Exception as e:
-                            logger.debug(f"Failed to fetch fresh channel data: {e}")
-                            
+                        channel_id = media_dict.get('Id')
+
+                        using_cache = False
+                        if cached_program and cached_program.get('ChannelId') == channel_id:
+                            try:
+                                end_str = cached_program.get('EndDate', '').split('.')[0].replace('Z', '') + '+00:00'
+                                if datetime.fromisoformat(end_str).timestamp() + 180 > time.time(): # Takes abt 3m for jellyfin to update LiveTV show
+                                    media_dict['CurrentProgram'] = cached_program
+                                    using_cache = True
+                            except (ValueError, TypeError):
+                                pass
+
+                        if not using_cache:
+                            try:
+                                fresh_channel = jf_api.get_item(channel_id)
+                                if fresh_channel:
+                                    media_dict = fresh_channel
+
+                                    new_prog = media_dict.get('CurrentProgram')
+                                    if new_prog:
+                                        cached_program = new_prog
+                                        cached_program['ChannelId'] = channel_id
+                                        logger.info(f"Refreshed LiveTV Data: {new_prog.get('Name')}")
+                                    
+                            except Exception as e:
+                                logger.debug(f"Failed to fetch fresh channel data: {e}")
+                        
                         channel_name = media_dict.get('Name', 'Live TV')
                         prog = media_dict.get('CurrentProgram') or {}
 
