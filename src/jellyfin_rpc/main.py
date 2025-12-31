@@ -119,7 +119,7 @@ def save_config(
     if checkboxes['MUSIC']._variable.get():
         media_types.append('Music')
     if checkboxes['TVCHANNEL']._variable.get():
-        media_type.append('TvChannel')
+        media_types.append('TvChannel')
     config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
     for key in (
