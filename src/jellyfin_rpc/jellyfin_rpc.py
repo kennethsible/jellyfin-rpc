@@ -265,7 +265,13 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     
                     case 'TvChannel':
                         activity_type = ActivityType.WATCHING
-
+                        try:
+                            fresh_channel = jf_api.get_item(media_dict['Id'])
+                            if fresh_channel:
+                                media_dict = fresh_channel
+                        except Exception as e:
+                            logger.debug(f"Failed to fetch fresh channel data: {e}")
+                            
                         channel_name = media_dict.get('Name', 'Live TV')
                         prog = media_dict.get('CurrentProgram') or {}
 
