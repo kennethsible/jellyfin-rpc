@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 import uuid
+from datetime import datetime
 from configparser import ConfigParser, SectionProxy
 from json.decoder import JSONDecodeError
 from logging import handlers
@@ -189,9 +190,12 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
         ping_tmdb_api(config['TMDB_API_KEY'])
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    show_livetv_image = config.getboolean('SHOW_LIVETV_IMAGE', False)
 
     activity = previous_activity = None
     previous_warning = previous_playstate = False
+    cached_program = None
+
     while True:
         try:
             session = next(
@@ -260,6 +264,49 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             state = media_dict['Album']
                         details = media_dict['Name']
                         activity = details
+                    
+                    case 'TvChannel':
+                        activity_type = ActivityType.WATCHING
+                        channel_id = media_dict.get('Id')
+
+                        using_cache = False
+                        if cached_program and cached_program.get('ChannelId') == channel_id:
+                            try:
+                                end_str = cached_program.get('EndDate', '').split('.')[0].replace('Z', '') + '+00:00'
+                                if datetime.fromisoformat(end_str).timestamp() + 180 > time.time(): # Takes abt 3m for jellyfin to update LiveTV show
+                                    media_dict['CurrentProgram'] = cached_program
+                                    using_cache = True
+                            except (ValueError, TypeError):
+                                pass
+
+                        if not using_cache:
+                            try:
+                                fresh_channel = jf_api.get_item(channel_id)
+                                if fresh_channel:
+                                    media_dict = fresh_channel
+
+                                    new_prog = media_dict.get('CurrentProgram')
+                                    if new_prog:
+                                        cached_program = new_prog
+                                        cached_program['ChannelId'] = channel_id
+                                        logger.info(f"Refreshed LiveTV Data: {new_prog.get('Name')}")
+                                    
+                            except Exception as e:
+                                logger.debug(f"Failed to fetch fresh channel data: {e}")
+                        
+                        channel_name = media_dict.get('Name', 'Live TV')
+                        prog = media_dict.get('CurrentProgram') or {}
+
+                        details = prog.get('Name') or channel_name
+
+                        episode_title = prog.get('EpisodeTitle')
+                        if episode_title:
+                            state = f"{channel_name} - {episode_title}"
+                        else:
+                            state = channel_name
+
+                        activity = state
+
                     case _:
                         logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
                         time.sleep(refresh_rate)
@@ -324,18 +371,55 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             large_url = f'https://musicbrainz.org/release/{release_id}'
                         else:
                             large_url = state_url
+                
+                elif media_type == 'TvChannel':
+                    if show_livetv_image:
+                        try:
+                            host = config.get('JELLYFIN_HOST', '').rstrip('/')
+                            image_tag = None
+                            item_id = None
+
+                            prog = media_dict.get('CurrentProgram') or {}
+                            prog_tags = prog.get('ImageTags') or {}
+                            chan_tags = media_dict.get('ImageTags') or {}
+
+                            if prog_tags.get('Primary') and prog.get('Id'):
+                                image_tag = prog_tags['Primary']
+                                item_id = prog['Id']
+                            elif chan_tags.get('Primary') and media_dict.get('Id'):
+                                image_tag = chan_tags['Primary']
+                                item_id = media_dict['Id']
+
+                            if host and image_tag and item_id:
+                                poster_url = f"{host}/Items/{item_id}/Images/Primary?tag={image_tag}"
+                                large_url = f"{host}/web/index.html#!/details?id={item_id}"
+
+                        except Exception as e:
+                            logger.debug(f"Failed to generate TvChannel image: {e}")
 
                 if session_paused:
                     start_time, end_time = time.time(), None
                 else:
-                    try:
-                        current_time = time.time()
-                        position_ticks = session['PlayState']['PositionTicks']
-                        start_time = current_time - position_ticks / 10_000_000
-                        runtime_ticks = media_dict['RunTimeTicks']
-                        end_time = start_time + runtime_ticks / 10_000_000
-                    except KeyError:
-                        start_time, end_time = time.time(), None
+                    start_time = None
+
+                    if media_type == 'TvChannel' and 'CurrentProgram' in media_dict:
+                        try:
+                            prog = media_dict['CurrentProgram']
+                            end_dt = datetime.fromisoformat(prog['EndDate'].replace('Z', '+00:00'))
+                            start_dt = datetime.fromisoformat(prog['StartDate'].replace('Z', '+00:00'))
+                            start_time = start_dt.timestamp()
+                            end_time = end_dt.timestamp()
+                        except (KeyError, ValueError):
+                            pass # Fall back to original
+                    if start_time is None:
+                        try:
+                            current_time = time.time()
+                            position_ticks = session['PlayState']['PositionTicks']
+                            start_time = current_time - position_ticks / 10_000_000
+                            runtime_ticks = media_dict['RunTimeTicks']
+                            end_time = start_time + runtime_ticks / 10_000_000
+                        except KeyError:
+                            start_time, end_time = time.time(), None
                 small_image = 'small_image' if show_jf_icon else None
                 try:
                     discord_rpc.update(

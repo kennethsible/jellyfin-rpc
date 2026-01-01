@@ -118,6 +118,8 @@ def save_config(
         media_types.append('Shows')
     if checkboxes['MUSIC']._variable.get():
         media_types.append('Music')
+    if checkboxes['TVCHANNEL']._variable.get():
+        media_types.append('TvChannel')
     config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
     for key in (
@@ -126,6 +128,7 @@ def save_config(
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
         'SHOW_JELLYFIN_ICON',
+        'SHOW_LIVETV_IMAGE',
     ):
         config.set('DEFAULT', key, str(checkboxes[key]._variable.get()))
 
@@ -297,6 +300,7 @@ def main():
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    show_livetv_image = config.getboolean('SHOW_LIVETV_IMAGE', False)
 
     label1 = ctk.CTkLabel(master=main_frame, text='Checking for Update...', cursor='hand2')
     label1.bind(
@@ -395,7 +399,7 @@ def main():
     label3 = ctk.CTkLabel(master=checkbox_container1, text='Media Settings', font=font)
     label3.pack(pady=(5, 0), padx=10)
 
-    media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music').split(',')
+    media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music,TvChannel').split(',')
     checkbox1_var = ctk.IntVar(value=int('Movies' in media_types))
     checkbox1 = ctk.CTkCheckBox(
         master=checkbox_container1, text='Show Watching for Movies', variable=checkbox1_var
@@ -408,6 +412,12 @@ def main():
     )
     checkbox2.pack(anchor='w', pady=5)
 
+    checkbox11_var = ctk.IntVar(value=int('TvChannel' in media_types))
+    checkbox11 = ctk.CTkCheckBox(
+        master=checkbox_container1, text='Show Watching for LiveTV', variable=checkbox11_var
+    )
+    checkbox11.pack(anchor='w', pady=5)
+    
     checkbox3_var = ctk.IntVar(value=int('Music' in media_types))
     checkbox3 = ctk.CTkCheckBox(
         master=checkbox_container1, text='Show Listening for Music', variable=checkbox3_var
@@ -434,6 +444,12 @@ def main():
         master=checkbox_container1, text='Show Jellyfin Icon in Activity', variable=checkbox9_var
     )
     checkbox9.pack(anchor='w', pady=5)
+
+    checkbox10_var = ctk.IntVar(value=show_livetv_image)
+    checkbox10 = ctk.CTkCheckBox(
+        master=checkbox_container1, text='Show Live TV Artwork', variable=checkbox10_var
+    )
+    checkbox10.pack(anchor='w', pady=5)
 
     label5 = ctk.CTkLabel(master=checkbox_container1, text='Advanced Settings', font=font)
     label5.pack(pady=(5, 0), padx=10)
@@ -494,6 +510,8 @@ def main():
         'SHOW_WHEN_PAUSED': checkbox7,
         'SHOW_SERVER_NAME': checkbox8,
         'SHOW_JELLYFIN_ICON': checkbox9,
+        'SHOW_LIVETV_IMAGE': checkbox10,
+        'TVCHANNEL': checkbox11,
     }
 
     for key, checkbox in checkboxes.items():
