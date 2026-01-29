@@ -281,7 +281,9 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                 if media_type == 'Episode' and config.get('TMDB_API_KEY'):
                     try:
                         series = jf_api.get_item(media_dict['SeriesId'])
-                        tmdb_id = series['ProviderIds']['Tmdb']
+                        tmdb_id = series['ProviderIds'].get('Tmdb') or series['ProviderIds'].get('TheMovieDb')
+                        if tmdb_id is None:
+                            raise KeyError('Tmdb')
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
                     else:
@@ -297,7 +299,9 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
 
                 elif media_type == 'Movie' and config.get('TMDB_API_KEY'):
                     try:
-                        tmdb_id = media_dict['ProviderIds']['Tmdb']
+                        tmdb_id = media_dict['ProviderIds'].get('Tmdb') or media_dict['ProviderIds'].get('TheMovieDb')
+                        if tmdb_id is None:
+                            raise KeyError('Tmdb')
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
                     else:
