@@ -210,7 +210,7 @@ def get_release_group_cover(group_id: str) -> str:
 
 
 def get_release_cover(group_id: str, release_id: str | None = None) -> str:
-    if release_id is None:
+    if not release_id:
         return get_release_group_cover(group_id)
     try:
         response = requests.get(f'https://coverartarchive.org/release/{release_id}')
@@ -344,20 +344,20 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     tmdb_id = None
                     try:
                         series = jf_api.get_item(media_dict['SeriesId'])
-                        if 'Tmdb' in series['ProviderIds']:
-                            tmdb_id = series['ProviderIds']['Tmdb']
-                        elif 'TheMovieDb' in series['ProviderIds']:
-                            tmdb_id = series['ProviderIds']['TheMovieDb']
-                        elif find_best_match:
+                        tmdb_id = (
+                            series['ProviderIds'].get('Tmdb', '').strip()
+                            or series['ProviderIds'].get('TheMovieDb', '').strip()
+                        )
+                        if not tmdb_id and find_best_match:
                             logger.warning('No TMDB ID Found. Searching...')
                             tmdb_id = get_series_id(
                                 config['TMDB_API_KEY'], media_dict['SeriesName']
                             )
-                            if tmdb_id is None:
+                            if not tmdb_id:
                                 logger.warning('TMDB ID Search Failed. Skipping...')
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
-                    if tmdb_id is not None:
+                    if tmdb_id:
                         season = None
                         if 'ParentIndexNumber' in media_dict:
                             season = media_dict['ParentIndexNumber']
@@ -378,18 +378,18 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                 elif media_type == 'Movie' and config.get('TMDB_API_KEY'):
                     tmdb_id = None
                     try:
-                        if 'Tmdb' in media_dict['ProviderIds']:
-                            tmdb_id = media_dict['ProviderIds']['Tmdb']
-                        elif 'TheMovieDb' in media_dict['ProviderIds']:
-                            tmdb_id = media_dict['ProviderIds']['TheMovieDb']
-                        elif find_best_match:
+                        tmdb_id = (
+                            media_dict['ProviderIds'].get('Tmdb', '').strip()
+                            or media_dict['ProviderIds'].get('TheMovieDb', '').strip()
+                        )
+                        if not tmdb_id and find_best_match:
                             logger.warning('No TMDB ID Found. Searching...')
                             tmdb_id = get_movie_id(config['TMDB_API_KEY'], media_dict['Name'])
-                            if tmdb_id is None:
+                            if not tmdb_id:
                                 logger.warning('TMDB ID Search Failed. Skipping...')
                     except KeyError:
                         logger.warning('No TMDB ID Found. Skipping...')
-                    if tmdb_id is not None:
+                    if tmdb_id:
                         poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id, languages)
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
                         large_url = details_url
@@ -397,28 +397,28 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                 elif media_type == 'Audio':
                     group_id = None
                     try:
-                        if 'MusicBrainzReleaseGroup' in media_dict['ProviderIds']:
-                            group_id = media_dict['ProviderIds']['MusicBrainzReleaseGroup']
-                        elif find_best_match:
+                        group_id = (
+                            media_dict['ProviderIds'].get('MusicBrainzReleaseGroup', '').strip()
+                        )
+                        if not group_id and find_best_match:
                             logger.warning('No MusicBrainz ID Found. Searching...')
                             group_id = get_music_id(media_dict['AlbumArtist'], media_dict['Album'])
-                            if group_id is None:
+                            if not group_id:
                                 logger.warning('MusicBrainz ID Search Failed. Skipping...')
                     except KeyError:
                         logger.warning('No MusicBrainz ID Found. Skipping...')
-                    if group_id is not None:
+                    if group_id:
                         release_id = None
                         if release_over_group:
-                            try:
-                                release_id = media_dict['ProviderIds']['MusicBrainzAlbum']
-                            except KeyError:
-                                pass
+                            release_id = (
+                                media_dict['ProviderIds'].get('MusicBrainzAlbum', '').strip()
+                            )
                         poster_url = get_release_cover(group_id, release_id)
                         if 'MusicBrainzTrack' in media_dict['ProviderIds']:
                             track_id = media_dict['ProviderIds']['MusicBrainzTrack']
                             details_url = f'https://musicbrainz.org/track/{track_id}'
                         state_url = f'https://musicbrainz.org/release-group/{group_id}'
-                        if release_id is None:
+                        if release_id:
                             large_url = f'https://musicbrainz.org/release/{release_id}'
                         else:
                             large_url = state_url

@@ -33,6 +33,14 @@ To fetch posters and album covers, your media must be properly tagged with the a
 > [!IMPORTANT]
 > [**TMDB**](https://www.themoviedb.org/) is used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [**MusicBrainz**](https://musicbrainz.org/) and the [**Cover Art Archive**](https://coverartarchive.org/) are used to fetch album covers.
 
+- `poster_languages` is a space- or comma-separated list of two-letter language codes ([ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1)) that indicates the preferred language(s) for TMDB posters.
+- `season_over_series` controls whether season posters are preferred over series posters for shows.
+- `release_over_group` controls whether release album covers are preferred over group album covers for music. The distinction between [release](https://musicbrainz.org/doc/Release) and [release group](https://musicbrainz.org/doc/Release_Group) is described in the MusicBrainz documentation. In short, a release is a specific version *or release* of an album that belongs to a *release group* (one per album).
+- `find_best_match` searches for missing TMDB or MusicBrainz IDs before fetching posters or covers, respectively. Ideally, you should make sure that Jellyfin has populated these metadata tags.
+- `show_when_paused` shows the rich presence with a paused timer instead of a progress bar. If disabled, the rich presence stops displaying when you pause your media.
+- `show_server_name` shows your server name as the rich presence activity instead of saying Jellyfin.
+- `show_jellyfin_icon` shows a small Jellyfin icon in the bottom right of the poster or album cover.
+
 ## Usage (GUI)
 
 ![jellyfin_rpc_gui](images/jellyfin_rpc_gui.png)
@@ -42,7 +50,7 @@ To fetch posters and album covers, your media must be properly tagged with the a
 
 ## Usage (CLI)
 
-To install the CLI script, run the command `pip install .` inside the cloned repository.
+To install the CLI script, use `pip install git+https://github.com/kennethsible/jellyfin-rpc.git`
 
 ```bash
 jellyfin-rpc [-h] --ini-path INI_PATH [--log-path LOG_PATH]

@@ -435,8 +435,8 @@ def main():
     poster_container1 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
     poster_container1.pack(fill='x', padx=10, pady=5)
 
-    label6 = ctk.CTkLabel(master=poster_container1, text='Poster Language(s):')
-    label6.pack(side='left', padx=(0, 10))
+    label9 = ctk.CTkLabel(master=poster_container1, text='Poster Language(s):')
+    label9.pack(side='left', padx=(0, 10))
 
     entry6_text = ctk.StringVar(value=poster_languages)
     entry6 = ctk.CTkEntry(
@@ -492,7 +492,7 @@ def main():
     advanced_container1 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
     advanced_container1.pack(fill='x', padx=10, pady=5)
 
-    label6 = ctk.CTkLabel(master=advanced_container1, text='Log Level')
+    label6 = ctk.CTkLabel(master=advanced_container1, text='Log Level:')
     label6.pack(side='left', padx=(0, 10))
 
     log_level_var = ctk.StringVar(value=log_level)
@@ -504,7 +504,7 @@ def main():
     advanced_container2 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
     advanced_container2.pack(fill='x', padx=10, pady=5)
 
-    label7 = ctk.CTkLabel(master=advanced_container2, text='Refresh Rate')
+    label7 = ctk.CTkLabel(master=advanced_container2, text='Refresh Rate:')
     label7.pack(side='left', padx=(0, 10))
 
     refresh_rate_var = ctk.StringVar(value=f'{refresh_rate}s')
