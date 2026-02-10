@@ -19,9 +19,7 @@ import requests
 from PIL import Image
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import load_config, start_discord_rpc
-
-__version__ = '1.6.4'
+from jellyfin_rpc import __version__, load_config, start_discord_rpc
 
 button1_text = ''
 logger = logging.getLogger('GUI')
@@ -106,7 +104,13 @@ def save_config(
 ):
     config = ConfigParser()
     config.read(ini_path)
-    for key in ('JELLYFIN_HOST', 'JELLYFIN_API_KEY', 'JELLYFIN_USERNAME', 'TMDB_API_KEY'):
+    for key in (
+        'JELLYFIN_HOST',
+        'JELLYFIN_API_KEY',
+        'JELLYFIN_USERNAME',
+        'TMDB_API_KEY',
+        'POSTER_LANGUAGES',
+    ):
         config.set('DEFAULT', key, entries[key].get())
     config.set('DEFAULT', 'LOG_LEVEL', log_level_var.get())
     config.set('DEFAULT', 'REFRESH_RATE', refresh_rate_var.get().rstrip('s'))
@@ -123,11 +127,14 @@ def save_config(
     for key in (
         'START_MINIMIZED',
         'MINIMIZE_ON_CLOSE',
+        'SEASON_OVER_SERIES',
+        'RELEASE_OVER_GROUP',
+        'FIND_BEST_MATCH',
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
         'SHOW_JELLYFIN_ICON',
     ):
-        config.set('DEFAULT', key, str(checkboxes[key]._variable.get()))
+        config.set('DEFAULT', key, str(bool(checkboxes[key]._variable.get())).lower())
 
     with open(ini_path, 'w') as ini_file:
         config.write(ini_file)
@@ -224,6 +231,10 @@ if platform.system() == 'Windows':
             return False
 
 
+def parse_version(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.lstrip('v').split('.'))
+
+
 def check_version(label: ctk.CTkLabel):
     mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
     try:
@@ -231,12 +242,12 @@ def check_version(label: ctk.CTkLabel):
             'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
         )
         response.raise_for_status()
-        release = response.json()['tag_name'].lstrip('v')
-        if __version__ == release:
+        latest_version = parse_version(response.json()['tag_name'])
+        if parse_version(__version__) >= latest_version:
             label_text = f'Latest Version ({__version__})'
             label_color = ctk.ThemeManager.theme['CTkLabel']['text_color'][mode_index]
         else:
-            label_text = f'Update Available ({__version__} \u2192 {release})'
+            label_text = f'Update Available ({__version__} \u2192 {latest_version})'
             label_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
     except (RequestException, JSONDecodeError, KeyError) as e:
         logger.debug(e)
@@ -292,6 +303,10 @@ def main():
     jf_username = config.get('JELLYFIN_USERNAME')
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
+    poster_languages = config.get('POSTER_LANGUAGES')
+    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
+    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
+    find_best_match = config.getboolean('FIND_BEST_MATCH', True)
     start_minimized = config.getboolean('START_MINIMIZED', True)
     minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
@@ -414,6 +429,42 @@ def main():
     )
     checkbox3.pack(anchor='w', pady=5)
 
+    label8 = ctk.CTkLabel(master=checkbox_container1, text='Image Settings', font=font)
+    label8.pack(pady=(5, 0), padx=10)
+
+    poster_container1 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
+    poster_container1.pack(fill='x', padx=10, pady=5)
+
+    label6 = ctk.CTkLabel(master=poster_container1, text='Poster Language(s):')
+    label6.pack(side='left', padx=(0, 10))
+
+    entry6_text = ctk.StringVar(value=poster_languages)
+    entry6 = ctk.CTkEntry(
+        master=poster_container1,
+        textvariable=entry6_text if entry6_text.get() else None,
+        placeholder_text='e.g., en ja',
+        width=265,
+    )
+    entry6.pack(side='right', fill='x', expand=True)
+
+    checkbox10_var = ctk.IntVar(value=season_over_series)
+    checkbox10 = ctk.CTkCheckBox(
+        master=checkbox_container1, text='Prefer Season Poster Over Series', variable=checkbox10_var
+    )
+    checkbox10.pack(anchor='w', pady=5)
+
+    checkbox11_var = ctk.IntVar(value=release_over_group)
+    checkbox11 = ctk.CTkCheckBox(
+        master=checkbox_container1, text='Prefer Release Cover Over Group', variable=checkbox11_var
+    )
+    checkbox11.pack(anchor='w', pady=5)
+
+    checkbox12_var = ctk.IntVar(value=find_best_match)
+    checkbox12 = ctk.CTkCheckBox(
+        master=checkbox_container1, text='Find Best Match for Missing IDs', variable=checkbox12_var
+    )
+    checkbox12.pack(anchor='w', pady=5)
+
     label4 = ctk.CTkLabel(master=checkbox_container1, text='Activity Settings', font=font)
     label4.pack(pady=(5, 0), padx=10)
 
@@ -484,6 +535,7 @@ def main():
         'JELLYFIN_API_KEY': entry2,
         'JELLYFIN_USERNAME': entry3,
         'TMDB_API_KEY': entry4,
+        'POSTER_LANGUAGES': entry6,
     }
     checkboxes = {
         'MOVIES': checkbox1,
@@ -491,6 +543,9 @@ def main():
         'MUSIC': checkbox3,
         'START_MINIMIZED': checkbox5,
         'MINIMIZE_ON_CLOSE': checkbox6,
+        'SEASON_OVER_SERIES': checkbox10,
+        'RELEASE_OVER_GROUP': checkbox11,
+        'FIND_BEST_MATCH': checkbox12,
         'SHOW_WHEN_PAUSED': checkbox7,
         'SHOW_SERVER_NAME': checkbox8,
         'SHOW_JELLYFIN_ICON': checkbox9,
