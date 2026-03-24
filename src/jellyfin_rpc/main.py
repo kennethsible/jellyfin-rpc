@@ -12,7 +12,7 @@ from configparser import ConfigParser
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
-from typing import Callable, TypedDict, cast
+from typing import Any, Callable, TypedDict, cast
 
 import customtkinter as ctk
 import pystray
@@ -100,7 +100,7 @@ class RPCLogger:
 
 def save_config(
     ini_path: str,
-    entries: dict[str, ctk.CTkEntry],
+    entries: dict[str, dict[str, Any]],
     checkboxes: dict[str, ctk.CTkCheckBox],
     log_level_var: ctk.StringVar,
     refresh_rate_var: ctk.StringVar,
@@ -114,7 +114,7 @@ def save_config(
         'TMDB_API_KEY',
         'POSTER_LANGUAGES',
     ):
-        config.set('DEFAULT', key, entries[key].get())
+        config.set('DEFAULT', key, entries[key]['entry'].get())
     config.set('DEFAULT', 'LOG_LEVEL', log_level_var.get())
     config.set('DEFAULT', 'REFRESH_RATE', refresh_rate_var.get().rstrip('s'))
 
@@ -145,7 +145,7 @@ def save_config(
 
 def on_click(
     button1: ctk.CTkButton,
-    entries: dict[str, ctk.CTkEntry],
+    entries: dict[str, dict[str, Any]],
     rpc_process: RPCProcess,
     tray_icon: pystray._base.Icon | None = None,
     only_disconnect: bool = False,
@@ -156,15 +156,16 @@ def on_click(
     if button1_text == 'Connect' and not only_disconnect:
         rpc_process.start()
         for entry in entries.values():
-            entry.configure(state='readonly')
-            entry.update()
+            show = '*' if entry['obfuscate'] else ''
+            entry['entry'].configure(state='readonly', show=show)
+            entry['entry'].update()
         button1_text = 'Disconnect'
         button1.configure(text=button1_text)
     else:
         rpc_process.stop()
         for entry in entries.values():
-            entry.configure(state='normal')
-            entry.update()
+            entry['entry'].configure(state='normal', show='')
+            entry['entry'].update()
         button1_text = 'Connect'
         button1.configure(text=button1_text)
     if tray_icon is not None:
@@ -540,11 +541,11 @@ def main() -> None:
 
     context: AppContext = {'button1': None, 'tray_icon': None}
     entries = {
-        'JELLYFIN_HOST': entry1,
-        'JELLYFIN_API_KEY': entry2,
-        'JELLYFIN_USERNAME': entry3,
-        'TMDB_API_KEY': entry4,
-        'POSTER_LANGUAGES': entry6,
+        'JELLYFIN_HOST': {'entry': entry1, 'obfuscate': False},
+        'JELLYFIN_API_KEY': {'entry': entry2, 'obfuscate': True},
+        'JELLYFIN_USERNAME': {'entry': entry3, 'obfuscate': False},
+        'TMDB_API_KEY': {'entry': entry4, 'obfuscate': True},
+        'POSTER_LANGUAGES': {'entry': entry6, 'obfuscate': False},
     }
     checkboxes = {
         'MOVIES': checkbox1,
