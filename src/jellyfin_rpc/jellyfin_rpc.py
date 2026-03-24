@@ -1,7 +1,9 @@
 import argparse
+import asyncio
 import json
 import logging
 import re
+import signal
 import sys
 import time
 import uuid
@@ -9,14 +11,16 @@ from configparser import ConfigParser, SectionProxy
 from email.utils import parseaddr
 from importlib.metadata import metadata
 from json.decoder import JSONDecodeError
-from logging import handlers
+from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
+from types import FrameType
+from typing import cast
 
 import requests
 from jellyfin_apiclient_python import JellyfinClient, api
 from jellyfin_apiclient_python.exceptions import HTTPException
 from pypresence.exceptions import PyPresenceException
-from pypresence.presence import Presence
+from pypresence.presence import AioPresence
 from pypresence.types import ActivityType, StatusDisplayType
 from requests.exceptions import RequestException
 
@@ -40,7 +44,7 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
-def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
+async def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
     initial_attempt = True
     while True:
         try:
@@ -83,7 +87,7 @@ def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | 
                 logger.debug(e)
                 logger.error('Jellyfin API Connection Failed. Retrying...')
             initial_attempt = False
-            time.sleep(refresh_rate)
+            await asyncio.sleep(refresh_rate)
             continue
         except KeyError as e:
             logger.error(f'Missing Key in INI Config: {e}')
@@ -91,7 +95,7 @@ def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | 
         return client.jellyfin, server_name
 
 
-def check_tmdb_connection(api_key: str):
+def check_tmdb_api(api_key: str) -> None:
     config_url = 'https://api.themoviedb.org/3/configuration'
     config_params = {'api_key': api_key}
     try:
@@ -109,7 +113,7 @@ def get_series_id(api_key: str, title: str) -> str | None:
     try:
         response = requests.get(search_url, params=search_params)
         response.raise_for_status()
-        return response.json()['results'][0]['id']
+        return cast(str, response.json()['results'][0]['id'])
     except (RequestException, KeyError, JSONDecodeError, IndexError) as e:
         logger.debug(e)
         logger.warning('TMDB API Connection Failed. Skipping...')
@@ -122,7 +126,7 @@ def get_movie_id(api_key: str, title: str) -> str | None:
     try:
         response = requests.get(search_url, params=search_params)
         response.raise_for_status()
-        return response.json()['results'][0]['id']
+        return cast(str, response.json()['results'][0]['id'])
     except (RequestException, KeyError, JSONDecodeError, IndexError) as e:
         logger.debug(e)
         logger.warning('TMDB API Connection Failed. Skipping...')
@@ -132,14 +136,14 @@ def get_movie_id(api_key: str, title: str) -> str | None:
 def get_music_id(artist: str, album: str) -> str | None:
     search_url = 'https://musicbrainz.org/ws/2/release-group'
     headers = {
-        'User-Agent': 'Jellyfin-RPC/1.0 ( ksible21@gmail.com )',  # TODO
+        'User-Agent': 'Jellyfin-RPC/1.0 ( ksible21@gmail.com )',
         'Accept': 'application/json',
     }
     params = {'query': f'artist:"{artist}" AND releasegroup:"{album}"', 'fmt': 'json'}
     try:
         response = requests.get(search_url, headers=headers, params=params)
         response.raise_for_status()
-        return response.json()['release-groups'][0]['id']
+        return cast(str, response.json()['release-groups'][0]['id'])
     except (RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
         logger.debug(e)
         logger.warning('MusicBrainz API Connection Failed. Skipping...')
@@ -202,7 +206,7 @@ def get_release_group_cover(group_id: str) -> str:
     try:
         response = requests.get(f'https://coverartarchive.org/release-group/{group_id}')
         response.raise_for_status()
-        return json.loads(response.text)['images'][0]['image']
+        return cast(str, json.loads(response.text)['images'][0]['image'])
     except (RequestException, KeyError, JSONDecodeError, IndexError) as e:
         logger.debug(e)
         logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
@@ -215,34 +219,34 @@ def get_release_cover(group_id: str, release_id: str | None = None) -> str:
     try:
         response = requests.get(f'https://coverartarchive.org/release/{release_id}')
         response.raise_for_status()
-        return json.loads(response.text)['images'][0]['image']
+        return cast(str, json.loads(response.text)['images'][0]['image'])
     except (RequestException, KeyError, JSONDecodeError, IndexError):
         return get_release_group_cover(group_id)
 
 
-def await_connection(discord_rpc: Presence, refresh_rate: int):
+async def await_connection(discord_rpc: AioPresence, refresh_rate: int) -> None:
     initial_attempt = True
     while True:
         try:
-            discord_rpc.connect()
+            await discord_rpc.connect()
             logger.info('Connected to Discord Client')
         except (PyPresenceException, ConnectionRefusedError) as e:
             if initial_attempt:
                 logger.debug(e)
                 logger.error('Discord Client Connection Failed. Retrying...')
             initial_attempt = False
-            time.sleep(refresh_rate)
+            await asyncio.sleep(refresh_rate)
             continue
         break
 
 
-def run_main_loop(config: SectionProxy, refresh_rate: int):
+async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
-    discord_rpc = Presence(client_id)
-    await_connection(discord_rpc, refresh_rate)
-    jf_api, server_name = get_jf_api(config, refresh_rate)
+    discord_rpc = AioPresence(client_id)
+    await await_connection(discord_rpc, refresh_rate)
+    jf_api, server_name = await get_jf_api(config, refresh_rate)
     if config.get('TMDB_API_KEY'):
-        check_tmdb_connection(config['TMDB_API_KEY'])
+        check_tmdb_api(config['TMDB_API_KEY'])
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
     find_best_match = config.getboolean('FIND_BEST_MATCH', True)
@@ -263,7 +267,8 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
             session = None
         except (HTTPException, KeyError) as e:
             logger.debug(e)
-            jf_api, server_name = get_jf_api(config, refresh_rate)
+            jf_api, server_name = await get_jf_api(config, refresh_rate)
+            await asyncio.sleep(refresh_rate)
             continue
 
         if session and 'NowPlayingItem' in session:
@@ -275,14 +280,15 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
             if session_paused and not show_when_paused:
                 if previous_activity is not None:
                     try:
-                        discord_rpc.clear()
+                        await discord_rpc.clear()
                     except PyPresenceException as e:
                         logger.debug(e)
-                        await_connection(discord_rpc, refresh_rate)
+                        await await_connection(discord_rpc, refresh_rate)
+                        await asyncio.sleep(refresh_rate)
                         continue
                     logger.info('Activity Cleared')
                     previous_activity, previous_playstate = None, False
-                time.sleep(refresh_rate)
+                await asyncio.sleep(refresh_rate)
                 continue
 
             state = details = None
@@ -293,7 +299,7 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     case 'Episode':
                         activity_type = ActivityType.WATCHING
                         if 'Shows' not in media_types:
-                            time.sleep(refresh_rate)
+                            await asyncio.sleep(refresh_rate)
                             continue
                         season = media_dict['ParentIndexNumber']
                         episode = media_dict['IndexNumber']
@@ -303,14 +309,14 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     case 'Movie':
                         activity_type = ActivityType.WATCHING
                         if 'Movies' not in media_types:
-                            time.sleep(refresh_rate)
+                            await asyncio.sleep(refresh_rate)
                             continue
                         details = media_dict['Name']
                         activity = details
                     case 'Audio':
                         activity_type = ActivityType.LISTENING
                         if 'Music' not in media_types:
-                            time.sleep(refresh_rate)
+                            await asyncio.sleep(refresh_rate)
                             continue
                         if 'Artists' in media_dict:
                             state = ', '.join(media_dict['Artists'])
@@ -320,17 +326,17 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             state = media_dict['Album']
                         details = media_dict['Name']
                         activity = details
-                        if state is not None:
+                        if state is not None and activity is not None:
                             activity += f' by {state.split(" - ")[0]}'
                     case _:
                         logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
-                        time.sleep(refresh_rate)
+                        await asyncio.sleep(refresh_rate)
                         continue  # raise NotImplementedError()
             except KeyError as e:
                 if not previous_warning:
                     logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
                     previous_warning = True
-                time.sleep(refresh_rate)
+                await asyncio.sleep(refresh_rate)
                 continue
             previous_warning = False
             if len(details) < 2:  # e.g., Chinese characters
@@ -424,19 +430,18 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                             large_url = state_url
 
                 if session_paused:
-                    start_time, end_time = time.time(), None
+                    start_time, end_time = int(time.time()), None
                 else:
                     try:
-                        current_time = time.time()
-                        position_ticks = session['PlayState']['PositionTicks']
-                        start_time = current_time - position_ticks / 10_000_000
-                        runtime_ticks = media_dict['RunTimeTicks']
-                        end_time = start_time + runtime_ticks / 10_000_000
+                        position_ticks = int(session['PlayState']['PositionTicks'])
+                        start_time = int(time.time() - position_ticks / 10_000_000)
+                        runtime_ticks = int(media_dict['RunTimeTicks'])
+                        end_time = int(start_time + runtime_ticks / 10_000_000)
                     except KeyError:
-                        start_time, end_time = time.time(), None
+                        start_time, end_time = int(time.time()), None
                 small_image = 'small_image' if show_jf_icon else None
                 try:
-                    discord_rpc.update(
+                    await discord_rpc.update(
                         activity_type=activity_type,
                         status_display_type=StatusDisplayType.DETAILS,
                         state=state,
@@ -452,7 +457,8 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
                     )
                 except PyPresenceException as e:
                     logger.debug(e)
-                    await_connection(discord_rpc, refresh_rate)
+                    await await_connection(discord_rpc, refresh_rate)
+                    await asyncio.sleep(refresh_rate)
                     continue
 
                 if previous_activity is None or previous_activity != activity:
@@ -465,17 +471,21 @@ def run_main_loop(config: SectionProxy, refresh_rate: int):
 
         elif previous_activity is not None:
             try:
-                discord_rpc.clear()
+                await discord_rpc.clear()
             except PyPresenceException as e:
                 logger.debug(e)
-                await_connection(discord_rpc, refresh_rate)
+                await await_connection(discord_rpc, refresh_rate)
+                await asyncio.sleep(refresh_rate)
                 continue
             logger.info('Activity Cleared')
             previous_activity, previous_playstate = None, False
-        time.sleep(refresh_rate)
+
+        await asyncio.sleep(refresh_rate)
 
 
-def start_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Queue | None = None):
+def start_discord_rpc(
+    ini_path: str, log_path: str | None = None, log_queue: Queue[LogRecord] | None = None
+) -> None:
     config = load_config(ini_path)
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
@@ -493,10 +503,18 @@ def start_discord_rpc(ini_path: str, log_path: str | None = None, log_queue: Que
         queue_hdlr = handlers.QueueHandler(log_queue)
         logger.addHandler(queue_hdlr)
 
-    run_main_loop(config, refresh_rate)
+    def handle_shutdown(signum: int, frame: FrameType | None) -> None:
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+    try:
+        asyncio.run(monitor_activity(config, refresh_rate))
+    except KeyboardInterrupt:
+        pass
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--ini-path', type=str, required=True)
     parser.add_argument('--log-path', type=str)

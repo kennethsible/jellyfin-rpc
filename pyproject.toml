@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.7.0"
+version = "1.7.1"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,10 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.18.0"]
+gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.19.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.0", "mypy>=1.19.1"]
+dev = ["ruff>=0.15.7", "mypy>=1.19.1"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"
@@ -33,8 +33,9 @@ extend-select = ["I"]
 quote-style = "single"
 
 [tool.mypy]
-check_untyped_defs = true
+strict = true
 ignore_missing_imports = true
+untyped_calls_exclude = ["pypresence"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

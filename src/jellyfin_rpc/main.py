@@ -11,6 +11,7 @@ import webbrowser
 from configparser import ConfigParser
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
+from multiprocessing.queues import Queue
 from typing import Callable, TypedDict, cast
 
 import customtkinter as ctk
@@ -26,16 +27,16 @@ logger = logging.getLogger('GUI')
 
 
 class RPCProcess:
-    def __init__(self, target: Callable, log_queue: mp.Queue):
+    def __init__(self, target: Callable[[Queue[LogRecord]], None], log_queue: Queue[LogRecord]):
         self.target = target
         self.log_queue = log_queue
         self.process: mp.Process | None = None
 
-    def start(self):
+    def start(self) -> None:
         self.process = mp.Process(target=self.target, args=(self.log_queue,))
         self.process.start()
 
-    def stop(self):
+    def stop(self) -> None:
         if self.process is None:
             return
         if self.process.is_alive():
@@ -57,19 +58,21 @@ class RPCProcess:
 
 
 class RPCLogger:
-    def __init__(self, frame: ctk.CTkFrame, log_queue: mp.Queue, text_widget: ctk.CTkTextbox):
+    def __init__(
+        self, frame: ctk.CTkFrame, log_queue: Queue[LogRecord], text_widget: ctk.CTkTextbox
+    ):
         self.frame = frame
         self.log_queue = log_queue
         self.text_widget = text_widget
         self.frame.after(100, self.poll_log_queue)
 
-    def poll_log_queue(self):
+    def poll_log_queue(self) -> None:
         while not self.log_queue.empty():
             record = self.log_queue.get_nowait()
             self.display_record(record)
         self.frame.after(100, self.poll_log_queue)
 
-    def display_record(self, record: LogRecord):
+    def display_record(self, record: LogRecord) -> None:
         message = self.format_log_record(record)
         self.text_widget.configure(state='normal')
         self.text_widget.insert(ctk.END, message)
@@ -91,7 +94,7 @@ class RPCLogger:
         self.text_widget.configure(state='disabled')
         self.text_widget.see(ctk.END)
 
-    def format_log_record(self, record: LogRecord):
+    def format_log_record(self, record: LogRecord) -> str:
         return f'{record.levelname}: {record.getMessage()}\n'
 
 
@@ -101,7 +104,7 @@ def save_config(
     checkboxes: dict[str, ctk.CTkCheckBox],
     log_level_var: ctk.StringVar,
     refresh_rate_var: ctk.StringVar,
-):
+) -> None:
     config = ConfigParser()
     config.read(ini_path)
     for key in (
@@ -146,8 +149,10 @@ def on_click(
     rpc_process: RPCProcess,
     tray_icon: pystray._base.Icon | None = None,
     only_disconnect: bool = False,
-):
+) -> None:
     global button1_text
+    if tray_icon is not None:
+        tray_icon.title = f'Jellyfin RPC\n{button1_text}ed'
     if button1_text == 'Connect' and not only_disconnect:
         rpc_process.start()
         for entry in entries.values():
@@ -167,13 +172,15 @@ def on_click(
     button1.update()
 
 
-def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None):
+def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None) -> None:
     threading.Thread(target=check_version, args=(label,), daemon=True).start()
     if root is not None:
         root.after(0, root.deiconify)
 
 
-def on_close(root: ctk.CTk, rpc_process: RPCProcess, tray_icon: pystray._base.Icon | None = None):
+def on_close(
+    root: ctk.CTk, rpc_process: RPCProcess, tray_icon: pystray._base.Icon | None = None
+) -> None:
     rpc_process.stop()
     if tray_icon is not None:
         tray_icon.visible = False
@@ -181,7 +188,9 @@ def on_close(root: ctk.CTk, rpc_process: RPCProcess, tray_icon: pystray._base.Ic
     root.quit()
 
 
-def set_close_behavior(root: ctk.CTk, on_close_callback: Callable, withdraw: bool):
+def set_close_behavior(
+    root: ctk.CTk, on_close_callback: Callable[[], None], withdraw: bool
+) -> None:
     if withdraw:
         root.protocol('WM_DELETE_WINDOW', root.withdraw)
     else:
@@ -198,7 +207,7 @@ def get_executable_path() -> str:
 if platform.system() == 'Windows':
     import winreg
 
-    def set_startup_status(enabled: bool):
+    def set_startup_status(enabled: bool) -> None:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r'Software\Microsoft\Windows\CurrentVersion\Run',
@@ -235,7 +244,7 @@ def parse_version(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.lstrip('v').split('.'))
 
 
-def check_version(label: ctk.CTkLabel):
+def check_version(label: ctk.CTkLabel) -> None:
     mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
     try:
         response = requests.get(
@@ -257,7 +266,7 @@ def check_version(label: ctk.CTkLabel):
     label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
 
 
-def main():
+def main() -> None:
     ctk.set_appearance_mode('system')
     ctk.deactivate_automatic_dpi_awareness()
 
@@ -364,7 +373,7 @@ def main():
     textbox1.configure(state='disabled')
     textbox1.pack(pady=5, padx=10)
 
-    log_queue: mp.Queue[LogRecord] = mp.Queue()
+    log_queue: Queue[LogRecord] = mp.Queue()
     logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
@@ -568,20 +577,20 @@ def main():
                 )
             )
 
-    def set_log_level(level: str):
+    def set_log_level(level: str) -> None:
         logger.setLevel(level)
         on_click(
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
         )
 
-    def inc_refresh():
+    def inc_refresh() -> None:
         value = int(refresh_rate_var.get().rstrip('s'))
         refresh_rate_var.set(f'{value + 1}s')
         on_click(
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
         )
 
-    def dec_refresh():
+    def dec_refresh() -> None:
         value = int(refresh_rate_var.get().rstrip('s'))
         if value > 1:
             refresh_rate_var.set(f'{value - 1}s')
@@ -595,13 +604,13 @@ def main():
     button2.configure(command=inc_refresh)
     button3.configure(command=dec_refresh)
 
-    def on_click_callback():
+    def on_click_callback() -> None:
         save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
         on_click(
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, context['tray_icon']
         )
 
-    def on_close_callback():
+    def on_close_callback() -> None:
         save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
         on_close(root, rpc_process, context['tray_icon'])
 
@@ -632,14 +641,14 @@ def main():
     else:
         logger.info('Need Help?')
 
-    def poll_process_status():
+    def poll_process_status() -> None:
         if rpc_process.has_failed():
             on_click_callback()
         root.after(1000, lambda: poll_process_status())
 
     poll_process_status()
 
-    def poll_gui_queue():
+    def poll_gui_queue() -> None:
         try:
             match gui_queue.get_nowait():
                 case 'CONNECT':
