@@ -14,7 +14,7 @@ from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from types import FrameType
-from typing import cast
+from typing import Any, cast
 
 import requests
 from jellyfin_apiclient_python import JellyfinClient, api
@@ -256,6 +256,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
 
     activity = previous_activity = None
     previous_warning = previous_playstate = False
+    cached_kwargs: dict[str, Any] = {}
     while True:
         try:
             session = next(
@@ -342,7 +343,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
             if len(details) < 2:  # e.g., Chinese characters
                 details += ' '
 
-            if previous_activity != activity or previous_playstate != session_paused:
+            if media_changed := previous_activity != activity:
                 poster_url = 'large_image'
                 state_url = large_url = details_url = None
 
@@ -429,31 +430,33 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                         else:
                             large_url = state_url
 
-                if session_paused:
-                    start_time, end_time = int(time.time()), None
-                else:
+                cached_kwargs = {
+                    'activity_type': activity_type,
+                    'status_display_type': StatusDisplayType.DETAILS,
+                    'state': state,
+                    'state_url': state_url,
+                    'details': details,
+                    'details_url': details_url,
+                    'name': server_name,
+                    'large_image': poster_url,
+                    'large_url': large_url,
+                }
+
+            playstate_changed = previous_playstate != session_paused
+            if media_changed or playstate_changed:
+                start_time, end_time = None, None
+                if not session_paused:
                     try:
                         position_ticks = int(session['PlayState']['PositionTicks'])
                         start_time = int(time.time() - position_ticks / 10_000_000)
                         runtime_ticks = int(media_dict['RunTimeTicks'])
                         end_time = int(start_time + runtime_ticks / 10_000_000)
                     except KeyError:
-                        start_time, end_time = int(time.time()), None
+                        pass
                 small_image = 'small_image' if show_jf_icon else None
                 try:
                     await discord_rpc.update(
-                        activity_type=activity_type,
-                        status_display_type=StatusDisplayType.DETAILS,
-                        state=state,
-                        state_url=state_url,
-                        details=details,
-                        details_url=details_url,
-                        name=server_name,
-                        start=start_time,
-                        end=end_time,
-                        large_image=poster_url,
-                        large_url=large_url,
-                        small_image=small_image,
+                        **cached_kwargs, start=start_time, end=end_time, small_image=small_image
                     )
                 except PyPresenceException as e:
                     logger.debug(e)
