@@ -151,11 +151,15 @@ def get_music_id(artist: str, album: str) -> str | None:
 
 
 def select_poster(posters: list[dict[str, str]], languages: list[str]) -> dict[str, str]:
+    matched_posters: list[dict[str, str]] = []
     for lang_code in languages:
         for poster in posters:
-            if poster.get('iso_639_1') == lang_code:
-                return poster
-    return posters[0]
+            if poster.get('iso_639_1') == (lang_code or None):
+                matched_posters.append(poster)
+        if matched_posters:
+            break
+    matched_posters.sort(key=lambda x: x['vote_count'], reverse=True)
+    return matched_posters[0] if matched_posters else posters[0]
 
 
 def get_series_poster(api_key: str, tmdb_id: str, languages: list[str]) -> str:
