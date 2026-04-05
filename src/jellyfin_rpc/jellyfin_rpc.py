@@ -134,12 +134,12 @@ def get_movie_id(api_key: str, title: str) -> str | None:
 
 
 def get_music_id(artist: str, album: str) -> str | None:
+    artist, album = artist.lower(), album.lower()
     search_url = 'https://musicbrainz.org/ws/2/release-group'
-    headers = {
-        'User-Agent': 'Jellyfin-RPC/1.0 ( ksible21@gmail.com )',
-        'Accept': 'application/json',
-    }
-    params = {'query': f'artist:"{artist}" AND releasegroup:"{album}"', 'fmt': 'json'}
+    headers = {'User-Agent': USER_AGENT, 'Accept': 'application/json'}
+    artist_query = f'artist:({artist}) OR artistalias:({artist})'
+    album_query = f'releasegroup:({album}) OR alias:({album}'
+    params = {'query': f'({artist_query}) AND ({album_query})', 'fmt': 'json'}
     try:
         response = requests.get(search_url, headers=headers, params=params)
         response.raise_for_status()

@@ -2,7 +2,6 @@ import functools
 import logging
 import multiprocessing as mp
 import os
-import platform
 import queue
 import shutil
 import sys
@@ -205,7 +204,7 @@ def get_executable_path() -> str:
         return os.path.abspath(__file__)
 
 
-if platform.system() == 'Windows':
+if sys.platform == 'win32':
     import winreg
 
     def set_startup_status(enabled: bool) -> None:
@@ -288,9 +287,9 @@ def main() -> None:
     os.chdir(os.path.dirname(get_executable_path()))
 
     data_dir = ''
-    if platform.system() == 'Windows':
+    if sys.platform == 'win32':
         data_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
-    elif platform.system() == 'Darwin':
+    elif sys.platform == 'darwin':
         data_dir = os.path.expanduser('~/Library/Application Support')
     if data_dir:
         data_dir = os.path.join(data_dir, 'Jellyfin RPC')
@@ -392,7 +391,7 @@ def main() -> None:
     label2 = ctk.CTkLabel(master=checkbox_container1, text='System Settings', font=font)
     label2.pack(pady=(5, 0), padx=10)
 
-    if platform.system() == 'Windows':
+    if sys.platform == 'win32':
         checkbox4_var = ctk.IntVar(value=int(get_startup_status()))
         checkbox4 = ctk.CTkCheckBox(
             master=checkbox_container1,
@@ -408,7 +407,7 @@ def main() -> None:
     )
     checkbox5.pack(anchor='w', pady=5)
 
-    background_type = 'Dock' if platform.system() == 'Darwin' else 'Tray'
+    background_type = 'Dock' if sys.platform == 'darwin' else 'Tray'
     checkbox6_var = ctk.IntVar(value=minimize_on_close)
     checkbox6 = ctk.CTkCheckBox(
         master=checkbox_container1,
@@ -615,7 +614,7 @@ def main() -> None:
         save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
         on_close(root, rpc_process, context['tray_icon'])
 
-    if platform.system() == 'Darwin':
+    if sys.platform == 'darwin':
         tray_icon = None
         root.createcommand('::tk::mac::ReopenApplication', lambda: on_maximize(label1, root))
     else:
@@ -665,7 +664,7 @@ def main() -> None:
 
     poll_gui_queue()
 
-    if platform.system() == 'Windows':
+    if sys.platform == 'win32':
         root.iconbitmap(ico_bundle_path)
     root.resizable(False, False)
     set_close_behavior(root, on_close_callback, minimize_on_close)
