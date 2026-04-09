@@ -328,18 +328,21 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                         if 'Music' not in media_types:
                             await asyncio.sleep(refresh_rate)
                             continue
-                        if 'Artists' in media_dict:
+                        if 'Artists' in media_dict and media_dict['Artists']:
                             state = ', '.join(media_dict['Artists'])
-                            if 'Album' in media_dict:
+                        if 'Album' in media_dict and media_dict['Album']:
+                            if state:
                                 state += f' - {media_dict["Album"]}'
-                        elif 'Album' in media_dict:
-                            state = media_dict['Album']
+                            else:
+                                state = media_dict['Album']
                         details = media_dict['Name']
                         activity = details
-                        if state is not None and activity is not None:
-                            activity += f' by {state.split(" - ")[0]}'
+                        if state:
+                            activity += f' - {state.split(" - ")[0]}'
                     case _:
-                        logger.warning(f'Unsupported Media Type "{media_type}". Ignoring...')
+                        if not previous_warning:
+                            logger.warning(f'Unsupported Media Type "{media_type}". Skipping...')
+                            previous_warning = True
                         await asyncio.sleep(refresh_rate)
                         continue  # raise NotImplementedError()
                 if len(details) < 2:  # e.g., Chinese characters
@@ -488,7 +491,6 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
 
                 if previous_activity is None or previous_activity != activity:
                     logger.info(f'Activity Updated "{activity}"')
-                    logger.debug(media_dict)
                 else:
                     playstate = 'Paused' if session_paused else 'Resumed'
                     logger.debug(f'PlayState Changed "{activity}" ({playstate})')
