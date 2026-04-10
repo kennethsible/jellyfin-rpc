@@ -336,7 +336,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                             else:
                                 state = media_dict['Album']
                         details = media_dict['Name']
-                        activity = details
+                        activity = str(details)
                         if state:
                             activity += f' - {state.split(" - ")[0]}'
                     case _:
@@ -386,6 +386,10 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                         if season_over_series:
                             poster_url = get_season_poster(
                                 config['TMDB_API_KEY'], tmdb_id, languages, season
+                            )
+                        else:
+                            poster_url = get_series_poster(
+                                config['TMDB_API_KEY'], tmdb_id, languages
                             )
                         if 'IndexNumber' in media_dict:
                             episode = media_dict['IndexNumber']

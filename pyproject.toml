@@ -12,16 +12,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.19.0"]
+gui = ["customtkinter", "pystray>=0.19.5", "pyinstaller>=6.19.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.9", "mypy>=1.20.0", "types-requests"]
+dev = ["ruff>=0.15.10", "mypy>=1.20.0", "types-requests"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"
 
 [project.scripts]
 jellyfin-rpc = "jellyfin_rpc.jellyfin_rpc:main"
+
+[tool.uv.sources]
+customtkinter = { git = "https://github.com/TomSchimansky/CustomTkinter.git", rev = "c12c9ab6874ad26b525bad19d912a9ff93f3206d" }
 
 [tool.ruff]
 line-length = 100
