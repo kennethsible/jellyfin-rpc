@@ -244,7 +244,7 @@ async def await_connection(discord_rpc: AioPresence, refresh_rate: int) -> None:
         break
 
 
-async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
+async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_threshold: int) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
     discord_rpc = AioPresence(client_id)
     await await_connection(discord_rpc, refresh_rate)
@@ -261,7 +261,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
     if config.get('TMDB_API_KEY'):
         check_tmdb_api(config['TMDB_API_KEY'])
 
-    activity = previous_activity = None
+    activity = previous_activity = previous_start = None
     previous_warning = previous_playstate = False
     cached_kwargs: dict[str, Any] = {}
     while True:
@@ -297,7 +297,8 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                         await asyncio.sleep(refresh_rate)
                         continue
                     logger.info('Activity Cleared')
-                    previous_activity, previous_playstate = None, False
+                    previous_activity = previous_start = None
+                    previous_playstate = False
                 await asyncio.sleep(refresh_rate)
                 continue
 
@@ -355,7 +356,25 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                 continue
             previous_warning = False
 
-            if media_changed := previous_activity != activity:
+            current_start = current_end = None
+            if not session_paused:
+                try:
+                    position_ticks = int(session['PlayState']['PositionTicks'])
+                    current_start = int(time.time() - position_ticks / 10_000_000)
+                    runtime_ticks = int(media_dict['RunTimeTicks'])
+                    current_end = int(current_start + runtime_ticks / 10_000_000)
+                except (KeyError, TypeError, ValueError):
+                    pass
+
+            media_changed = previous_activity != activity
+            playstate_changed = previous_playstate != session_paused
+
+            seek_detected = False
+            if previous_start is not None and current_start is not None and not playstate_changed:
+                if abs(current_start - previous_start) > seek_threshold:
+                    seek_detected = True
+
+            if media_changed:
                 poster_url = 'large_image'
                 state_url = large_url = details_url = None
 
@@ -471,21 +490,14 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                     'large_url': large_url,
                 }
 
-            playstate_changed = previous_playstate != session_paused
-            if media_changed or playstate_changed:
-                start_time, end_time = None, None
-                if not session_paused:
-                    try:
-                        position_ticks = int(session['PlayState']['PositionTicks'])
-                        start_time = int(time.time() - position_ticks / 10_000_000)
-                        runtime_ticks = int(media_dict['RunTimeTicks'])
-                        end_time = int(start_time + runtime_ticks / 10_000_000)
-                    except (KeyError, TypeError, ValueError):
-                        pass
+            if media_changed or playstate_changed or seek_detected:
                 small_image = 'small_image' if show_jf_icon else None
                 try:
                     await discord_rpc.update(
-                        **cached_kwargs, start=start_time, end=end_time, small_image=small_image
+                        **cached_kwargs,
+                        start=current_start,
+                        end=current_end,
+                        small_image=small_image,
                     )
                 except (PyPresenceException, ConnectionRefusedError) as e:
                     logger.debug(e)
@@ -493,12 +505,16 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                     await asyncio.sleep(refresh_rate)
                     continue
 
-                if previous_activity is None or previous_activity != activity:
+                if media_changed:
                     logger.info(f'Activity Updated "{activity}"')
-                else:
+                elif playstate_changed:
                     playstate = 'Paused' if session_paused else 'Resumed'
                     logger.debug(f'PlayState Changed "{activity}" ({playstate})')
+                elif seek_detected:
+                    logger.debug(f'Seek Detected "{activity}"')
+
                 previous_activity, previous_playstate = activity, session_paused
+                previous_start = current_start
 
         elif previous_activity is not None:
             try:
@@ -509,7 +525,8 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int) -> None:
                 await asyncio.sleep(refresh_rate)
                 continue
             logger.info('Activity Cleared')
-            previous_activity, previous_playstate = None, False
+            previous_activity = previous_start = None
+            previous_playstate = False
 
         await asyncio.sleep(refresh_rate)
 
@@ -520,6 +537,7 @@ def start_discord_rpc(
     config = load_config(ini_path)
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
+    seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
 
     logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -540,7 +558,7 @@ def start_discord_rpc(
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     try:
-        asyncio.run(monitor_activity(config, refresh_rate))
+        asyncio.run(monitor_activity(config, refresh_rate, seek_threshold))
     except KeyboardInterrupt:
         pass
 

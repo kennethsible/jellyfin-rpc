@@ -103,6 +103,7 @@ def save_config(
     checkboxes: dict[str, ctk.CTkCheckBox],
     log_level_var: ctk.StringVar,
     refresh_rate_var: ctk.StringVar,
+    seek_threshold_var: ctk.StringVar,
 ) -> None:
     config = ConfigParser()
     config.read(ini_path)
@@ -116,6 +117,7 @@ def save_config(
         config.set('DEFAULT', key, entries[key]['entry'].get())
     config.set('DEFAULT', 'LOG_LEVEL', log_level_var.get())
     config.set('DEFAULT', 'REFRESH_RATE', refresh_rate_var.get().rstrip('s'))
+    config.set('DEFAULT', 'SEEK_THRESHOLD', seek_threshold_var.get().rstrip('s'))
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -312,6 +314,7 @@ def main() -> None:
     jf_username = config.get('JELLYFIN_USERNAME')
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
+    seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     poster_languages = config.get('POSTER_LANGUAGES')
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
@@ -530,6 +533,26 @@ def main() -> None:
     button3 = ctk.CTkButton(master=advanced_container2, text='-', width=28, height=28)
     button3.pack(side='right', padx=(0, 5))
 
+    advanced_container3 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
+    advanced_container3.pack(fill='x', padx=10, pady=5)
+
+    label10 = ctk.CTkLabel(master=advanced_container3, text='Seek Threshold:')
+    label10.pack(side='left', padx=(0, 10))
+
+    seek_threshold_var = ctk.StringVar(value=f'{seek_threshold}s')
+
+    button4 = ctk.CTkButton(master=advanced_container3, text='+', width=28, height=28)
+    button4.pack(side='right', padx=(5, 0))
+
+    entry7 = ctk.CTkEntry(
+        master=advanced_container3, textvariable=seek_threshold_var, width=50, justify='center'
+    )
+    entry7.configure(state='disabled')
+    entry7.pack(side='right')
+
+    button5 = ctk.CTkButton(master=advanced_container3, text='-', width=28, height=28)
+    button5.pack(side='right', padx=(0, 5))
+
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
     global button1_text
     button1_text = 'Connect'
@@ -600,18 +623,41 @@ def main() -> None:
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
         )
 
+    def inc_threshold() -> None:
+        value = int(seek_threshold_var.get().rstrip('s'))
+        seek_threshold_var.set(f'{value + 1}s')
+        on_click(
+            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+        )
+
+    def dec_threshold() -> None:
+        value = int(seek_threshold_var.get().rstrip('s'))
+        if value > 1:
+            seek_threshold_var.set(f'{value - 1}s')
+        else:
+            seek_threshold_var.set('1s')
+        on_click(
+            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+        )
+
     optionmenu1.configure(command=set_log_level)
     button2.configure(command=inc_refresh)
     button3.configure(command=dec_refresh)
+    button4.configure(command=inc_threshold)
+    button5.configure(command=dec_threshold)
 
     def on_click_callback() -> None:
-        save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
+        save_config(
+            ini_path, entries, checkboxes, log_level_var, refresh_rate_var, seek_threshold_var
+        )
         on_click(
             cast(ctk.CTkButton, context['button1']), entries, rpc_process, context['tray_icon']
         )
 
     def on_close_callback() -> None:
-        save_config(ini_path, entries, checkboxes, log_level_var, refresh_rate_var)
+        save_config(
+            ini_path, entries, checkboxes, log_level_var, refresh_rate_var, seek_threshold_var
+        )
         on_close(root, rpc_process, context['tray_icon'])
 
     if sys.platform == 'darwin':
