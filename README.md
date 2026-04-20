@@ -7,12 +7,14 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ## Installation
 
-- Download [Latest Release](https://github.com/kennethsible/jellyfin-rpc/releases)
-- Build from Source
-   1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-   2. Install Python<br>`uv install python`
-   3. Create Python Environment<br>`uv sync --extra gui`
-   4. Build Standalone Executable<br>`uv run pyinstaller main.spec`
+- For Windows and macOS, download the [latest release](https://github.com/kennethsible/jellyfin-rpc/releases)
+- For Linux, download the [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini) and install the CLI tool<br>`pip install git+https://github.com/kennethsible/jellyfin-rpc.git`
+
+### Local Development
+
+1. Install Package Manager ([uv](https://docs.astral.sh/uv/getting-started/installation/))<br>`curl -LsSf https://astral.sh/uv/install.sh | sh`
+2. Create Python Environment<br>`uv sync --extra gui`
+3. Build Standalone Executable<br>`uv run pyinstaller main.spec`
 
 ## Configuration
 
@@ -49,8 +51,6 @@ To fetch posters and album covers, your media must be properly tagged with the a
 ![jellyfin_rpc_ico](images/jellyfin_rpc_ico.png)
 
 ## Usage (CLI)
-
-To install the CLI script, use `pip install git+https://github.com/kennethsible/jellyfin-rpc.git`
 
 ```bash
 jellyfin-rpc [-h] --ini-path INI_PATH [--log-path LOG_PATH]

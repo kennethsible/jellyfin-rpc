@@ -2,7 +2,7 @@
 import platform
 
 a = Analysis(
-    ['src/jellyfin_rpc/main.py'],
+    ['src/jellyfin_rpc/app.py'],
     pathex=[],
     binaries=[],
     datas=[
