@@ -7,8 +7,8 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ## Installation
 
-- For Windows and macOS, download the [latest release](https://github.com/kennethsible/jellyfin-rpc/releases)
-- For Linux, download the [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini) and install the CLI tool<br>`pip install git+https://github.com/kennethsible/jellyfin-rpc.git`
+- For Windows and macOS, download the [latest release](https://github.com/kennethsible/jellyfin-rpc/releases) for the GUI.
+- For Linux, use [pip](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://pip.pypa.io/en/stable/installation/&ved=2ahUKEwitg4Hr2fuTAxWQkIkEHchVE1gQFnoECCYQAQ&usg=AOvVaw31Hu8kE5Z4dpEnAanOzEpL) to install the CLI tool and refer to the [CLI usage](#usage-cli).<br>`pip install git+https://github.com/kennethsible/jellyfin-rpc.git`
 
 ### Local Development
 

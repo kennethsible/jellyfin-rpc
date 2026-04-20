@@ -21,7 +21,7 @@ dev = ["ruff>=0.15.11", "mypy>=1.20.1", "types-requests"]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"
 
 [project.scripts]
-jellyfin-rpc = "jellyfin_rpc.jellyfin_rpc:main"
+jellyfin-rpc = "jellyfin_rpc.main:main"
 
 [tool.uv.sources]
 customtkinter = { git = "https://github.com/TomSchimansky/CustomTkinter.git", rev = "c12c9ab6874ad26b525bad19d912a9ff93f3206d" }
