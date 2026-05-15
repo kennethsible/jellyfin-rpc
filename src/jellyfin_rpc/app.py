@@ -21,7 +21,7 @@ from requests.exceptions import RequestException
 
 from jellyfin_rpc import __version__, load_config, start_discord_rpc
 
-button1_text = ''
+button_connect_text = ''
 logger = logging.getLogger('GUI')
 
 
@@ -101,9 +101,9 @@ def save_config(
     ini_path: str,
     entries: dict[str, dict[str, Any]],
     checkboxes: dict[str, ctk.CTkCheckBox],
-    log_level_var: ctk.StringVar,
-    refresh_rate_var: ctk.StringVar,
-    seek_threshold_var: ctk.StringVar,
+    var_log_level: ctk.StringVar,
+    var_polling_rate: ctk.StringVar,
+    var_seek_threshold: ctk.StringVar,
 ) -> None:
     config = ConfigParser()
     config.read(ini_path)
@@ -115,9 +115,9 @@ def save_config(
         'POSTER_LANGUAGES',
     ):
         config.set('DEFAULT', key, entries[key]['entry'].get())
-    config.set('DEFAULT', 'LOG_LEVEL', log_level_var.get())
-    config.set('DEFAULT', 'REFRESH_RATE', refresh_rate_var.get().rstrip('s'))
-    config.set('DEFAULT', 'SEEK_THRESHOLD', seek_threshold_var.get().rstrip('s'))
+    config.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
+    config.set('DEFAULT', 'polling_rate', var_polling_rate.get().rstrip('s'))
+    config.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -145,39 +145,38 @@ def save_config(
 
 
 def on_click(
-    button1: ctk.CTkButton,
+    button_connect: ctk.CTkButton,
     entries: dict[str, dict[str, Any]],
     rpc_process: RPCProcess,
     tray_icon: pystray._base.Icon | None = None,
     only_disconnect: bool = False,
 ) -> None:
-    global button1_text
+    global button_connect_text
     if tray_icon is not None:
-        tray_icon.title = f'Jellyfin RPC\n{button1_text}ed'
-    if button1_text == 'Connect' and not only_disconnect:
+        tray_icon.title = f'Jellyfin RPC\n{button_connect_text}ed'
+    if button_connect_text == 'Connect' and not only_disconnect:
         rpc_process.start()
         for entry in entries.values():
             show = '*' if entry['obfuscate'] else ''
             entry['entry'].configure(state='readonly', show=show)
             entry['entry'].update()
-        button1_text = 'Disconnect'
-        button1.configure(text=button1_text)
+        button_connect_text = 'Disconnect'
+        button_connect.configure(text=button_connect_text)
     else:
         rpc_process.stop()
         for entry in entries.values():
             entry['entry'].configure(state='normal', show='')
             entry['entry'].update()
-        button1_text = 'Connect'
-        button1.configure(text=button1_text)
+        button_connect_text = 'Connect'
+        button_connect.configure(text=button_connect_text)
     if tray_icon is not None:
         tray_icon.update_menu()
-    button1.update()
+    button_connect.update()
 
 
-def on_maximize(label: ctk.CTkLabel, root: ctk.CTk | None = None) -> None:
-    threading.Thread(target=check_version, args=(label,), daemon=True).start()
-    if root is not None:
-        root.after(0, root.deiconify)
+def on_maximize(label: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
+    threading.Thread(target=check_for_updates, args=(label, frame_grid, root), daemon=True).start()
+    root.after(0, root.deiconify)
 
 
 def on_close(
@@ -242,30 +241,33 @@ if sys.platform == 'win32':
             return False
 
 
-def parse_version(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version.lstrip('v').split('.'))
+def parse_version(version_tag: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version_tag.lstrip('v').split('.'))
 
 
-def check_version(label: ctk.CTkLabel) -> None:
-    mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
+def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
     try:
         response = requests.get(
             'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
         )
         response.raise_for_status()
-        latest_version = parse_version(response.json()['tag_name'])
-        if parse_version(__version__) >= latest_version:
-            label_text = f'Latest Version ({__version__})'
-            label_color = ctk.ThemeManager.theme['CTkLabel']['text_color'][mode_index]
-        else:
-            label_text = f'Update Available ({__version__} \u2192 {latest_version})'
-            label_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
+        version_tag = response.json()['tag_name'].lstrip('v')
+        version_tuple = parse_version(version_tag)
+
+        if parse_version(__version__) < version_tuple:
+            label_text = f'Update Available ({__version__} \u2192 {version_tag})'
+            label_font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
+
+            def show_label_update() -> None:
+                label_update.configure(text=label_text, font=label_font)
+                label_update.pack(before=frame_grid, pady=(5, 0), padx=10)
+                root.geometry('780x540')
+
+            label_update.after(0, show_label_update)
+
     except (RequestException, JSONDecodeError, KeyError) as e:
         logger.debug(e)
         logger.warning('Connection to GitHub Failed. Skipping Version Check...')
-        label_text = f'Current Version ({__version__})'
-        label_color = ctk.ThemeManager.theme['CTkLabel']['text_color'][mode_index]
-    label.after(0, lambda: label.configure(text=label_text, text_color=label_color))
 
 
 def main() -> None:
@@ -274,12 +276,16 @@ def main() -> None:
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
-    root.geometry('285x488')
+    root.geometry('780x510')
     gui_queue: queue.Queue[str] = queue.Queue()
 
-    main_frame = ctk.CTkFrame(master=root)
-    main_frame.pack(fill='both', expand=True)
-    font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
+    frame_main = ctk.CTkFrame(master=root)
+    frame_main.pack(fill='both', expand=True)
+    font_header = ctk.CTkFont(family='Roboto', size=14, weight='bold')
+    font_label = ctk.CTkFont(size=12)
+
+    frame_bottom = ctk.CTkFrame(master=frame_main, fg_color='transparent')
+    frame_bottom.pack(side='bottom', fill='x')
 
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
@@ -313,7 +319,7 @@ def main() -> None:
     jf_api_key = config.get('JELLYFIN_API_KEY')
     jf_username = config.get('JELLYFIN_USERNAME')
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
-    refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
+    polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     poster_languages = config.get('POSTER_LANGUAGES')
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
@@ -325,56 +331,72 @@ def main() -> None:
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
 
-    label1 = ctk.CTkLabel(master=main_frame, text='Checking for Update...', cursor='hand2')
-    label1.bind(
+    frame_grid = ctk.CTkFrame(master=frame_main, fg_color='transparent')
+    frame_grid.pack(fill='both', expand=True, padx=10, pady=5)
+    frame_grid.grid_columnconfigure((0, 1, 2), weight=1, uniform='column')
+    frame_grid.grid_rowconfigure(0, weight=1)
+
+    col1 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
+    col1.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
+    col2 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
+    col2.grid(row=0, column=1, sticky='nsew', padx=5)
+    col3 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
+    col3.grid(row=0, column=2, sticky='nsew', padx=(5, 0))
+
+    label_update = ctk.CTkLabel(master=frame_main, cursor='hand2')
+    label_update.bind(
         '<Button-1>',
         lambda _: webbrowser.open_new_tab('https://github.com/kennethsible/jellyfin-rpc/releases'),
     )
-    label1.pack(pady=(5, 0), padx=10)
-    on_maximize(label1)
 
-    scroll_frame = ctk.CTkScrollableFrame(master=main_frame, fg_color=main_frame.cget('fg_color'))
-    scroll_frame.pack(fill='both', expand=True)
+    threading.Thread(
+        target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
+    ).start()
 
-    entry1_text = ctk.StringVar(value=jf_host)
-    entry1 = ctk.CTkEntry(
-        master=scroll_frame,
-        textvariable=entry1_text if entry1_text.get() else None,
-        placeholder_text='Jellyfin Host',
-        width=265,
+    label_connection_settings = ctk.CTkLabel(
+        master=col1, text='Connection Settings', font=font_header
     )
-    entry1.pack(pady=(0, 5), padx=10)
+    label_connection_settings.pack(pady=(0, 5), padx=10)
 
-    entry2_text = ctk.StringVar(value=jf_api_key)
-    entry2 = ctk.CTkEntry(
-        master=scroll_frame,
-        textvariable=entry2_text if entry2_text.get() else None,
-        placeholder_text='Jellyfin API Key',
-        width=265,
+    label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
+    label_host.pack(anchor='w', padx=10)
+    var_jf_host = ctk.StringVar(value=jf_host)
+    entry_jf_host = ctk.CTkEntry(
+        master=col1, textvariable=var_jf_host if var_jf_host.get() else None
     )
-    entry2.pack(pady=5, padx=10)
+    entry_jf_host.pack(pady=(0, 5), padx=10, fill='x')
 
-    entry3_text = ctk.StringVar(value=jf_username)
-    entry3 = ctk.CTkEntry(
-        master=scroll_frame,
-        textvariable=entry3_text if entry3_text.get() else None,
-        placeholder_text='Jellyfin Username',
-        width=265,
+    label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
+    label_jf_api_key.pack(anchor='w', padx=10)
+    var_jf_api_key = ctk.StringVar(value=jf_api_key)
+    entry_jf_api_key = ctk.CTkEntry(
+        master=col1, textvariable=var_jf_api_key if var_jf_api_key.get() else None
     )
-    entry3.pack(pady=5, padx=10)
+    entry_jf_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
-    entry4_text = ctk.StringVar(value=config.get('TMDB_API_KEY'))
-    entry4 = ctk.CTkEntry(
-        master=scroll_frame,
-        textvariable=entry4_text if entry4_text.get() else None,
-        placeholder_text='TMDB API Key (Optional)',
-        width=265,
+    label_jf_username = ctk.CTkLabel(master=col1, text='Jellyfin Username', font=font_label)
+    label_jf_username.pack(anchor='w', padx=10)
+    var_jf_username = ctk.StringVar(value=jf_username)
+    entry_jf_username = ctk.CTkEntry(
+        master=col1, textvariable=var_jf_username if var_jf_username.get() else None
     )
-    entry4.pack(pady=5, padx=10)
+    entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
-    textbox1 = ctk.CTkTextbox(master=scroll_frame, width=265, height=100)
-    textbox1.configure(state='disabled')
-    textbox1.pack(pady=5, padx=10)
+    label_tmdb_api_key = ctk.CTkLabel(master=col1, text='TMDB API Key', font=font_label)
+    label_tmdb_api_key.pack(anchor='w', padx=10)
+    var_tmdb_api_key = ctk.StringVar(value=config.get('TMDB_API_KEY'))
+    entry_tmdb_api_key = ctk.CTkEntry(
+        master=col1,
+        textvariable=var_tmdb_api_key if var_tmdb_api_key.get() else None,
+        placeholder_text='Optional',
+    )
+    entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
+
+    label_status_monitor = ctk.CTkLabel(master=col1, text='Status Monitor', font=font_header)
+    label_status_monitor.pack(pady=(10, 5), padx=10)
+    textbox_status_monitor = ctk.CTkTextbox(master=col1)
+    textbox_status_monitor.configure(state='disabled')
+    textbox_status_monitor.pack(pady=(0, 5), padx=10, fill='both', expand=True)
 
     log_queue: Queue[LogRecord] = mp.Queue()
     logger.setLevel(log_level)
@@ -386,201 +408,210 @@ def main() -> None:
     queue_hdlr = handlers.QueueHandler(log_queue)
     for hdlr in (file_hdlr, stream_hdlr, queue_hdlr):
         logger.addHandler(hdlr)
-    RPCLogger(main_frame, log_queue, textbox1)
+    RPCLogger(frame_main, log_queue, textbox_status_monitor)
 
-    checkbox_container1 = ctk.CTkFrame(master=scroll_frame, fg_color='transparent')
-    checkbox_container1.pack(pady=5, padx=10)
+    label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
+    label_media_settings.pack(pady=(0, 0), padx=10)
 
-    label2 = ctk.CTkLabel(master=checkbox_container1, text='System Settings', font=font)
-    label2.pack(pady=(5, 0), padx=10)
+    media_types = [m.strip() for m in config.get('MEDIA_TYPES', 'Movies,Shows,Music').split(',')]
+    var_movies = ctk.IntVar(value=int('Movies' in media_types))
+    checkbox_movies = ctk.CTkCheckBox(
+        master=col2, text='Show Watching for Movies', variable=var_movies
+    )
+    checkbox_movies.pack(anchor='w', pady=5, padx=10)
+
+    var_shows = ctk.IntVar(value=int('Shows' in media_types))
+    checkbox_shows = ctk.CTkCheckBox(
+        master=col2, text='Show Watching for Shows', variable=var_shows
+    )
+    checkbox_shows.pack(anchor='w', pady=5, padx=10)
+
+    var_music = ctk.IntVar(value=int('Music' in media_types))
+    checkbox_music = ctk.CTkCheckBox(
+        master=col2, text='Show Listening for Music', variable=var_music
+    )
+    checkbox_music.pack(anchor='w', pady=5, padx=10)
+
+    label_activity_settings = ctk.CTkLabel(master=col2, text='Activity Settings', font=font_header)
+    label_activity_settings.pack(pady=(10, 0), padx=10)
+
+    var_paused = ctk.IntVar(value=show_when_paused)
+    checkbox_paused = ctk.CTkCheckBox(
+        master=col2, text='Show Activity When Paused', variable=var_paused
+    )
+    checkbox_paused.pack(anchor='w', pady=5, padx=10)
+
+    var_server_name = ctk.IntVar(value=show_server_name)
+    checkbox_server_name = ctk.CTkCheckBox(
+        master=col2, text='Show Server Name in Activity', variable=var_server_name
+    )
+    checkbox_server_name.pack(anchor='w', pady=5, padx=10)
+
+    var_jf_icon = ctk.IntVar(value=show_jf_icon)
+    checkbox_jf_icon = ctk.CTkCheckBox(
+        master=col2, text='Show Jellyfin Icon in Activity', variable=var_jf_icon
+    )
+    checkbox_jf_icon.pack(anchor='w', pady=5, padx=10)
+
+    label_image_settings = ctk.CTkLabel(master=col2, text='Image Settings', font=font_header)
+    label_image_settings.pack(pady=(10, 0), padx=10)
+
+    container_languages = ctk.CTkFrame(master=col2, fg_color='transparent')
+    container_languages.pack(fill='x', padx=10, pady=5)
+
+    label_languages = ctk.CTkLabel(master=container_languages, text='Poster Language(s):')
+    label_languages.pack(side='left', padx=(0, 10))
+
+    var_languages = ctk.StringVar(value=poster_languages)
+    entry_languages = ctk.CTkEntry(
+        master=container_languages,
+        textvariable=var_languages if var_languages.get() else None,
+        placeholder_text='e.g., en ja',
+    )
+    entry_languages.pack(side='right', fill='x', expand=True)
+
+    var_season_over_series = ctk.IntVar(value=season_over_series)
+    checkbox_season_over_series = ctk.CTkCheckBox(
+        master=col2, text='Prefer Season Poster Over Series', variable=var_season_over_series
+    )
+    checkbox_season_over_series.pack(anchor='w', pady=5, padx=10)
+
+    var_release_over_group = ctk.IntVar(value=release_over_group)
+    checkbox_release_over_group = ctk.CTkCheckBox(
+        master=col2, text='Prefer Release Cover Over Group', variable=var_release_over_group
+    )
+    checkbox_release_over_group.pack(anchor='w', pady=5, padx=10)
+
+    var_find_best_match = ctk.IntVar(value=find_best_match)
+    checkbox_find_best_match = ctk.CTkCheckBox(
+        master=col2, text='Find Best Match for Missing IDs', variable=var_find_best_match
+    )
+    checkbox_find_best_match.pack(anchor='w', pady=5, padx=10)
+
+    label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
+    label_system_settings.pack(pady=(0, 0), padx=10)
 
     if sys.platform == 'win32':
-        checkbox4_var = ctk.IntVar(value=int(get_startup_status()))
-        checkbox4 = ctk.CTkCheckBox(
-            master=checkbox_container1,
+        var_startup_status = ctk.IntVar(value=int(get_startup_status()))
+        checkbox_startup_status = ctk.CTkCheckBox(
+            master=col3,
             text='Open Jellyfin RPC on Startup',
-            variable=checkbox4_var,
-            command=lambda: set_startup_status(bool(checkbox4_var.get())),
+            variable=var_startup_status,
+            command=lambda: set_startup_status(bool(var_startup_status.get())),
         )
-        checkbox4.pack(anchor='w', pady=5)
+        checkbox_startup_status.pack(anchor='w', pady=5, padx=10)
 
-    checkbox5_var = ctk.IntVar(value=start_minimized)
-    checkbox5 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Start Minimized (If Connected)', variable=checkbox5_var
+    var_start_minimized = ctk.IntVar(value=start_minimized)
+    checkbox_start_minimized = ctk.CTkCheckBox(
+        master=col3, text='Start Minimized (If Connected)', variable=var_start_minimized
     )
-    checkbox5.pack(anchor='w', pady=5)
+    checkbox_start_minimized.pack(anchor='w', pady=5, padx=10)
 
     background_type = 'Dock' if sys.platform == 'darwin' else 'Tray'
-    checkbox6_var = ctk.IntVar(value=minimize_on_close)
-    checkbox6 = ctk.CTkCheckBox(
-        master=checkbox_container1,
+    var_minimize_on_close = ctk.IntVar(value=minimize_on_close)
+    checkbox_minimize_on_close = ctk.CTkCheckBox(
+        master=col3,
         text=f'Close Button Minimizes to {background_type}',
-        variable=checkbox6_var,
+        variable=var_minimize_on_close,
     )
-    checkbox6.pack(anchor='w', pady=5)
+    checkbox_minimize_on_close.pack(anchor='w', pady=5, padx=10)
 
-    label3 = ctk.CTkLabel(master=checkbox_container1, text='Media Settings', font=font)
-    label3.pack(pady=(5, 0), padx=10)
+    label_advanced_settings = ctk.CTkLabel(master=col3, text='Advanced Settings', font=font_header)
+    label_advanced_settings.pack(pady=(10, 0), padx=10)
 
-    media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music').split(',')
-    checkbox1_var = ctk.IntVar(value=int('Movies' in media_types))
-    checkbox1 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Show Watching for Movies', variable=checkbox1_var
+    container_advanced_settings = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_advanced_settings.pack(fill='x', padx=10, pady=5)
+
+    label_polling_rate = ctk.CTkLabel(master=container_advanced_settings, text='Polling Rate:')
+    label_polling_rate.pack(side='left', padx=(0, 10))
+
+    var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
+
+    button_polling_rate_inc = ctk.CTkButton(
+        master=container_advanced_settings, text='+', width=28, height=28
     )
-    checkbox1.pack(anchor='w', pady=5)
+    button_polling_rate_inc.pack(side='right', padx=(5, 0))
 
-    checkbox2_var = ctk.IntVar(value=int('Shows' in media_types))
-    checkbox2 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Show Watching for Shows', variable=checkbox2_var
+    entry_polling_rate = ctk.CTkEntry(
+        master=container_advanced_settings,
+        textvariable=var_polling_rate,
+        width=50,
+        justify='center',
     )
-    checkbox2.pack(anchor='w', pady=5)
+    entry_polling_rate.configure(state='disabled')
+    entry_polling_rate.pack(side='right')
 
-    checkbox3_var = ctk.IntVar(value=int('Music' in media_types))
-    checkbox3 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Show Listening for Music', variable=checkbox3_var
+    button_polling_rate_dec = ctk.CTkButton(
+        master=container_advanced_settings, text='-', width=28, height=28
     )
-    checkbox3.pack(anchor='w', pady=5)
+    button_polling_rate_dec.pack(side='right', padx=(0, 5))
 
-    label8 = ctk.CTkLabel(master=checkbox_container1, text='Image Settings', font=font)
-    label8.pack(pady=(5, 0), padx=10)
+    container_seek_threshold = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_seek_threshold.pack(fill='x', padx=10, pady=5)
 
-    poster_container1 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
-    poster_container1.pack(fill='x', padx=10, pady=5)
+    label_seek_threshold = ctk.CTkLabel(master=container_seek_threshold, text='Seek Threshold:')
+    label_seek_threshold.pack(side='left', padx=(0, 10))
 
-    label9 = ctk.CTkLabel(master=poster_container1, text='Poster Language(s):')
-    label9.pack(side='left', padx=(0, 10))
+    var_seek_threshold = ctk.StringVar(value=f'{seek_threshold}s')
 
-    entry6_text = ctk.StringVar(value=poster_languages)
-    entry6 = ctk.CTkEntry(
-        master=poster_container1,
-        textvariable=entry6_text if entry6_text.get() else None,
-        placeholder_text='e.g., en ja',
-        width=265,
+    button_seek_threshold_inc = ctk.CTkButton(
+        master=container_seek_threshold, text='+', width=28, height=28
     )
-    entry6.pack(side='right', fill='x', expand=True)
+    button_seek_threshold_inc.pack(side='right', padx=(5, 0))
 
-    checkbox10_var = ctk.IntVar(value=season_over_series)
-    checkbox10 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Prefer Season Poster Over Series', variable=checkbox10_var
+    entry_seek_threshold = ctk.CTkEntry(
+        master=container_seek_threshold, textvariable=var_seek_threshold, width=50, justify='center'
     )
-    checkbox10.pack(anchor='w', pady=5)
+    entry_seek_threshold.configure(state='disabled')
+    entry_seek_threshold.pack(side='right')
 
-    checkbox11_var = ctk.IntVar(value=release_over_group)
-    checkbox11 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Prefer Release Cover Over Group', variable=checkbox11_var
+    button_seek_threshold_dec = ctk.CTkButton(
+        master=container_seek_threshold, text='-', width=28, height=28
     )
-    checkbox11.pack(anchor='w', pady=5)
+    button_seek_threshold_dec.pack(side='right', padx=(0, 5))
 
-    checkbox12_var = ctk.IntVar(value=find_best_match)
-    checkbox12 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Find Best Match for Missing IDs', variable=checkbox12_var
+    container_log_level = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_log_level.pack(fill='x', padx=10, pady=5)
+
+    label_log_level = ctk.CTkLabel(master=container_log_level, text='Log Level:')
+    label_log_level.pack(side='left', padx=(0, 10))
+
+    var_log_level = ctk.StringVar(value=log_level)
+    log_level_values = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+
+    optionmenu_log_level = ctk.CTkOptionMenu(
+        master=container_log_level, values=log_level_values, variable=var_log_level, width=116
     )
-    checkbox12.pack(anchor='w', pady=5)
-
-    label4 = ctk.CTkLabel(master=checkbox_container1, text='Activity Settings', font=font)
-    label4.pack(pady=(5, 0), padx=10)
-
-    checkbox7_var = ctk.IntVar(value=show_when_paused)
-    checkbox7 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Show Activity When Paused', variable=checkbox7_var
-    )
-    checkbox7.pack(anchor='w', pady=5)
-
-    checkbox8_var = ctk.IntVar(value=show_server_name)
-    checkbox8 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Show Server Name in Activity', variable=checkbox8_var
-    )
-    checkbox8.pack(anchor='w', pady=5)
-
-    checkbox9_var = ctk.IntVar(value=show_jf_icon)
-    checkbox9 = ctk.CTkCheckBox(
-        master=checkbox_container1, text='Show Jellyfin Icon in Activity', variable=checkbox9_var
-    )
-    checkbox9.pack(anchor='w', pady=5)
-
-    label5 = ctk.CTkLabel(master=checkbox_container1, text='Advanced Settings', font=font)
-    label5.pack(pady=(5, 0), padx=10)
-
-    advanced_container1 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
-    advanced_container1.pack(fill='x', padx=10, pady=5)
-
-    label6 = ctk.CTkLabel(master=advanced_container1, text='Log Level:')
-    label6.pack(side='left', padx=(0, 10))
-
-    log_level_var = ctk.StringVar(value=log_level)
-    optionmenu1 = ctk.CTkOptionMenu(
-        master=advanced_container1, values=['INFO', 'DEBUG'], variable=log_level_var
-    )
-    optionmenu1.pack(side='right', fill='x', expand=True)
-
-    advanced_container2 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
-    advanced_container2.pack(fill='x', padx=10, pady=5)
-
-    label7 = ctk.CTkLabel(master=advanced_container2, text='Refresh Rate:')
-    label7.pack(side='left', padx=(0, 10))
-
-    refresh_rate_var = ctk.StringVar(value=f'{refresh_rate}s')
-
-    button2 = ctk.CTkButton(master=advanced_container2, text='+', width=28, height=28)
-    button2.pack(side='right', padx=(5, 0))
-
-    entry5 = ctk.CTkEntry(
-        master=advanced_container2, textvariable=refresh_rate_var, width=50, justify='center'
-    )
-    entry5.configure(state='disabled')
-    entry5.pack(side='right')
-
-    button3 = ctk.CTkButton(master=advanced_container2, text='-', width=28, height=28)
-    button3.pack(side='right', padx=(0, 5))
-
-    advanced_container3 = ctk.CTkFrame(master=checkbox_container1, fg_color='transparent')
-    advanced_container3.pack(fill='x', padx=10, pady=5)
-
-    label10 = ctk.CTkLabel(master=advanced_container3, text='Seek Threshold:')
-    label10.pack(side='left', padx=(0, 10))
-
-    seek_threshold_var = ctk.StringVar(value=f'{seek_threshold}s')
-
-    button4 = ctk.CTkButton(master=advanced_container3, text='+', width=28, height=28)
-    button4.pack(side='right', padx=(5, 0))
-
-    entry7 = ctk.CTkEntry(
-        master=advanced_container3, textvariable=seek_threshold_var, width=50, justify='center'
-    )
-    entry7.configure(state='disabled')
-    entry7.pack(side='right')
-
-    button5 = ctk.CTkButton(master=advanced_container3, text='-', width=28, height=28)
-    button5.pack(side='right', padx=(0, 5))
+    optionmenu_log_level.pack(side='right')
 
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
-    global button1_text
-    button1_text = 'Connect'
+    global button_connect_text
+    button_connect_text = 'Connect'
 
     class AppContext(TypedDict):
-        button1: ctk.CTkButton | None
+        button_connect: ctk.CTkButton | None
         tray_icon: pystray._base.Icon | None
 
-    context: AppContext = {'button1': None, 'tray_icon': None}
+    context: AppContext = {'button_connect': None, 'tray_icon': None}
     entries = {
-        'JELLYFIN_HOST': {'entry': entry1, 'obfuscate': False},
-        'JELLYFIN_API_KEY': {'entry': entry2, 'obfuscate': True},
-        'JELLYFIN_USERNAME': {'entry': entry3, 'obfuscate': False},
-        'TMDB_API_KEY': {'entry': entry4, 'obfuscate': True},
-        'POSTER_LANGUAGES': {'entry': entry6, 'obfuscate': False},
+        'JELLYFIN_HOST': {'entry': entry_jf_host, 'obfuscate': False},
+        'JELLYFIN_API_KEY': {'entry': entry_jf_api_key, 'obfuscate': True},
+        'JELLYFIN_USERNAME': {'entry': entry_jf_username, 'obfuscate': False},
+        'TMDB_API_KEY': {'entry': entry_tmdb_api_key, 'obfuscate': True},
+        'POSTER_LANGUAGES': {'entry': entry_languages, 'obfuscate': False},
     }
     checkboxes = {
-        'MOVIES': checkbox1,
-        'SHOWS': checkbox2,
-        'MUSIC': checkbox3,
-        'START_MINIMIZED': checkbox5,
-        'MINIMIZE_ON_CLOSE': checkbox6,
-        'SEASON_OVER_SERIES': checkbox10,
-        'RELEASE_OVER_GROUP': checkbox11,
-        'FIND_BEST_MATCH': checkbox12,
-        'SHOW_WHEN_PAUSED': checkbox7,
-        'SHOW_SERVER_NAME': checkbox8,
-        'SHOW_JELLYFIN_ICON': checkbox9,
+        'MOVIES': checkbox_movies,
+        'SHOWS': checkbox_shows,
+        'MUSIC': checkbox_music,
+        'START_MINIMIZED': checkbox_start_minimized,
+        'MINIMIZE_ON_CLOSE': checkbox_minimize_on_close,
+        'SEASON_OVER_SERIES': checkbox_season_over_series,
+        'RELEASE_OVER_GROUP': checkbox_release_over_group,
+        'FIND_BEST_MATCH': checkbox_find_best_match,
+        'SHOW_WHEN_PAUSED': checkbox_paused,
+        'SHOW_SERVER_NAME': checkbox_server_name,
+        'SHOW_JELLYFIN_ICON': checkbox_jf_icon,
     }
 
     for key, checkbox in checkboxes.items():
@@ -593,7 +624,7 @@ def main() -> None:
         elif key != 'START_MINIMIZED':
             checkbox.configure(
                 command=lambda: on_click(
-                    cast(ctk.CTkButton, context['button1']),
+                    cast(ctk.CTkButton, context['button_connect']),
                     entries,
                     rpc_process,
                     only_disconnect=True,
@@ -603,73 +634,93 @@ def main() -> None:
     def set_log_level(level: str) -> None:
         logger.setLevel(level)
         on_click(
-            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
         )
 
-    def inc_refresh() -> None:
-        value = int(refresh_rate_var.get().rstrip('s'))
-        refresh_rate_var.set(f'{value + 1}s')
+    def inc_polling_rate() -> None:
+        value = int(var_polling_rate.get().rstrip('s'))
+        var_polling_rate.set(f'{value + 1}s')
         on_click(
-            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
         )
 
-    def dec_refresh() -> None:
-        value = int(refresh_rate_var.get().rstrip('s'))
+    def dec_polling_rate() -> None:
+        value = int(var_polling_rate.get().rstrip('s'))
         if value > 1:
-            refresh_rate_var.set(f'{value - 1}s')
+            var_polling_rate.set(f'{value - 1}s')
         else:
-            refresh_rate_var.set('1s')
+            var_polling_rate.set('1s')
         on_click(
-            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
         )
 
-    def inc_threshold() -> None:
-        value = int(seek_threshold_var.get().rstrip('s'))
-        seek_threshold_var.set(f'{value + 1}s')
+    def inc_seek_threshold() -> None:
+        value = int(var_seek_threshold.get().rstrip('s'))
+        var_seek_threshold.set(f'{value + 1}s')
         on_click(
-            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
         )
 
-    def dec_threshold() -> None:
-        value = int(seek_threshold_var.get().rstrip('s'))
+    def dec_seek_threshold() -> None:
+        value = int(var_seek_threshold.get().rstrip('s'))
         if value > 1:
-            seek_threshold_var.set(f'{value - 1}s')
+            var_seek_threshold.set(f'{value - 1}s')
         else:
-            seek_threshold_var.set('1s')
+            var_seek_threshold.set('1s')
         on_click(
-            cast(ctk.CTkButton, context['button1']), entries, rpc_process, only_disconnect=True
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
         )
 
-    optionmenu1.configure(command=set_log_level)
-    button2.configure(command=inc_refresh)
-    button3.configure(command=dec_refresh)
-    button4.configure(command=inc_threshold)
-    button5.configure(command=dec_threshold)
+    optionmenu_log_level.configure(command=set_log_level)
+    button_polling_rate_inc.configure(command=inc_polling_rate)
+    button_polling_rate_dec.configure(command=dec_polling_rate)
+    button_seek_threshold_inc.configure(command=inc_seek_threshold)
+    button_seek_threshold_dec.configure(command=dec_seek_threshold)
 
     def on_click_callback() -> None:
         save_config(
-            ini_path, entries, checkboxes, log_level_var, refresh_rate_var, seek_threshold_var
+            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold
         )
         on_click(
-            cast(ctk.CTkButton, context['button1']), entries, rpc_process, context['tray_icon']
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            context['tray_icon'],
         )
 
     def on_close_callback() -> None:
         save_config(
-            ini_path, entries, checkboxes, log_level_var, refresh_rate_var, seek_threshold_var
+            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold
         )
         on_close(root, rpc_process, context['tray_icon'])
 
     if sys.platform == 'darwin':
         tray_icon = None
-        root.createcommand('::tk::mac::ReopenApplication', lambda: on_maximize(label1, root))
+        root.createcommand(
+            '::tk::mac::ReopenApplication', lambda: on_maximize(label_update, frame_grid, root)
+        )
     else:
         tray_icon = pystray.Icon(
             'jellyfin-rpc',
             Image.open(png_bundle_path),
             'Jellyfin RPC',
             menu=pystray.Menu(
-                pystray.MenuItem(lambda _: button1_text, lambda: gui_queue.put('CONNECT')),
+                pystray.MenuItem(lambda _: button_connect_text, lambda: gui_queue.put('CONNECT')),
                 pystray.MenuItem('Maximize', lambda: gui_queue.put('MAXIMIZE'), default=True),
                 pystray.MenuItem('Quit', lambda: gui_queue.put('QUIT')),
             ),
@@ -677,12 +728,14 @@ def main() -> None:
         tray_icon.run_detached()
     context['tray_icon'] = tray_icon
 
-    button1 = ctk.CTkButton(master=main_frame, text=button1_text, command=on_click_callback)
-    button1.pack(side='bottom', pady=(5, 10), padx=10)
-    context['button1'] = button1
+    button_connect = ctk.CTkButton(
+        master=frame_bottom, text=button_connect_text, command=on_click_callback
+    )
+    button_connect.pack(pady=(5, 10))
+    context['button_connect'] = button_connect
     if jf_host and jf_api_key and jf_username:
         on_click_callback()
-        if start_minimized and button1_text == 'Disconnect':
+        if start_minimized and button_connect_text == 'Disconnect':
             root.withdraw()
     else:
         logger.info('Need Help?')
@@ -700,7 +753,7 @@ def main() -> None:
                 case 'CONNECT':
                     on_click_callback()
                 case 'MAXIMIZE':
-                    on_maximize(label1, root)
+                    on_maximize(label_update, frame_grid, root)
                 case 'QUIT':
                     on_close_callback()
         except queue.Empty:

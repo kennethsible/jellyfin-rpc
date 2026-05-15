@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.7.5"
+version = "1.8.0"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["customtkinter", "pystray>=0.19.5", "pyinstaller>=6.20.0"]
+gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.20.0"]
 
 [dependency-groups]
 dev = ["ruff>=0.15.13", "mypy>=2.1.0", "types-requests"]
@@ -22,9 +22,6 @@ homepage = "https://github.com/kennethsible/jellyfin-rpc"
 
 [project.scripts]
 jellyfin-rpc = "jellyfin_rpc.main:main"
-
-[tool.uv.sources]
-customtkinter = { git = "https://github.com/TomSchimansky/CustomTkinter.git", rev = "c12c9ab6874ad26b525bad19d912a9ff93f3206d" }
 
 [tool.ruff]
 line-length = 100

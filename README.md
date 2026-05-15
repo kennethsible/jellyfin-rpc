@@ -46,7 +46,6 @@ To fetch posters and album covers, your media must be properly tagged with the a
 ## Usage (GUI)
 
 ![jellyfin_rpc_gui](images/jellyfin_rpc_gui.png)
-![jellyfin_rpc_gui_2](images/jellyfin_rpc_gui_2.png)
 
 ![jellyfin_rpc_ico](images/jellyfin_rpc_ico.png)
 

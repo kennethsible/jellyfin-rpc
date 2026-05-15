@@ -102,11 +102,15 @@ wheels = [
 
 [[package]]
 name = "customtkinter"
-version = "5.3.0"
-source = { git = "https://github.com/TomSchimansky/CustomTkinter.git?rev=c12c9ab6874ad26b525bad19d912a9ff93f3206d#c12c9ab6874ad26b525bad19d912a9ff93f3206d" }
+version = "5.2.2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "darkdetect" },
     { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cf/48/c5a9d44188c44702e1e3db493c741e9c779596835a761b819fe15431d163/customtkinter-5.2.2.tar.gz", hash = "sha256:fd8db3bafa961c982ee6030dba80b4c2e25858630756b513986db19113d8d207", size = 261999, upload-time = "2024-01-10T02:24:36.314Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/b1/b43b33001a77256b335511e75f257d001082350b8506c8807f30c98db052/customtkinter-5.2.2-py3-none-any.whl", hash = "sha256:14ad3e7cd3cb3b9eb642b9d4e8711ae80d3f79fb82545ad11258eeffb2e6b37c", size = 296062, upload-time = "2024-01-10T02:24:33.53Z" },
 ]
 
 [[package]]
@@ -144,7 +148,7 @@ wheels = [
 
 [[package]]
 name = "jellyfin-rpc"
-version = "1.7.5"
+version = "1.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "jellyfin-apiclient-python" },
@@ -167,7 +171,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "customtkinter", marker = "extra == 'gui'", git = "https://github.com/TomSchimansky/CustomTkinter.git?rev=c12c9ab6874ad26b525bad19d912a9ff93f3206d" },
+    { name = "customtkinter", marker = "extra == 'gui'", specifier = ">=5.2.2" },
     { name = "jellyfin-apiclient-python", specifier = ">=1.12.0" },
     { name = "pyinstaller", marker = "extra == 'gui'", specifier = ">=6.20.0" },
     { name = "pypresence", git = "https://github.com/qwertyquerty/pypresence" },

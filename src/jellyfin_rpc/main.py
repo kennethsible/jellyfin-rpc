@@ -44,7 +44,7 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
-async def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
+async def get_jf_api(config: SectionProxy, polling_rate: int) -> tuple[api.API, str | None]:
     jf_host = config['JELLYFIN_HOST']
     jf_username = config['JELLYFIN_USERNAME']
     jf_api_key = config['JELLYFIN_API_KEY']
@@ -91,7 +91,7 @@ async def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
                 logger.debug(e)
                 logger.error('Jellyfin API Connection Failed. Retrying...')
             initial_attempt = False
-            await asyncio.sleep(refresh_rate)
+            await asyncio.sleep(polling_rate)
             continue
         except KeyError as e:
             logger.error(f'Missing Key in INI Config: {e}')
@@ -232,7 +232,7 @@ def get_release_cover(group_id: str, release_id: str | None = None) -> str:
         return get_release_group_cover(group_id)
 
 
-async def await_connection(discord_rpc: AioPresence, refresh_rate: int) -> None:
+async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
     initial_attempt = True
     while True:
         try:
@@ -243,17 +243,17 @@ async def await_connection(discord_rpc: AioPresence, refresh_rate: int) -> None:
                 logger.debug(e)
                 logger.error('Discord Client Connection Failed. Retrying...')
             initial_attempt = False
-            await asyncio.sleep(refresh_rate)
+            await asyncio.sleep(polling_rate)
             continue
         break
 
 
-async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_threshold: int) -> None:
+async def monitor_activity(config: SectionProxy, polling_rate: int, seek_threshold: int) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
     discord_rpc = AioPresence(client_id)
-    await await_connection(discord_rpc, refresh_rate)
+    await await_connection(discord_rpc, polling_rate)
 
-    jf_api, server_name = await get_jf_api(config, refresh_rate)
+    jf_api, server_name = await get_jf_api(config, polling_rate)
     jf_username = config['JELLYFIN_USERNAME']
 
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
@@ -283,13 +283,13 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
             sessions = jf_api.sessions() or []
         except (RequestException, JSONDecodeError, HTTPException) as e:
             logger.debug(e)
-            jf_api, server_name = await get_jf_api(config, refresh_rate)
-            await asyncio.sleep(refresh_rate)
+            jf_api, server_name = await get_jf_api(config, polling_rate)
+            await asyncio.sleep(polling_rate)
             continue
 
         user_sessions = [s for s in sessions if s.get('UserName') == jf_username]
         if not user_sessions:
-            await asyncio.sleep(refresh_rate)
+            await asyncio.sleep(polling_rate)
             continue
 
         session = user_sessions[0]
@@ -314,13 +314,13 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                         await discord_rpc.clear()
                     except (PyPresenceException, ConnectionRefusedError) as e:
                         logger.debug(e)
-                        await await_connection(discord_rpc, refresh_rate)
-                        await asyncio.sleep(refresh_rate)
+                        await await_connection(discord_rpc, polling_rate)
+                        await asyncio.sleep(polling_rate)
                         continue
                     logger.info('Activity Cleared')
                     previous_activity = previous_start = None
                     previous_playstate = False
-                await asyncio.sleep(refresh_rate)
+                await asyncio.sleep(polling_rate)
                 continue
 
             try:
@@ -361,14 +361,14 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                                 await discord_rpc.clear()
                             except (PyPresenceException, ConnectionRefusedError) as e:
                                 logger.debug(e)
-                                await await_connection(discord_rpc, refresh_rate)
-                                await asyncio.sleep(refresh_rate)
+                                await await_connection(discord_rpc, polling_rate)
+                                await asyncio.sleep(polling_rate)
                                 continue
                             logger.info('Activity Cleared (Unsupported Media)')
                             previous_activity = previous_start = None
                             previous_playstate = False
 
-                        await asyncio.sleep(refresh_rate)
+                        await asyncio.sleep(polling_rate)
                         continue  # raise NotImplementedError()
                 if len(details) < 2:  # e.g., Chinese characters
                     details += ' '
@@ -376,7 +376,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                 if not previous_warning:
                     logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
                     previous_warning = True
-                await asyncio.sleep(refresh_rate)
+                await asyncio.sleep(polling_rate)
                 continue
             previous_warning = False
 
@@ -519,8 +519,8 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                     )
                 except (PyPresenceException, ConnectionRefusedError) as e:
                     logger.debug(e)
-                    await await_connection(discord_rpc, refresh_rate)
-                    await asyncio.sleep(refresh_rate)
+                    await await_connection(discord_rpc, polling_rate)
+                    await asyncio.sleep(polling_rate)
                     continue
 
                 if media_changed:
@@ -539,14 +539,14 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                 await discord_rpc.clear()
             except (PyPresenceException, ConnectionRefusedError) as e:
                 logger.debug(e)
-                await await_connection(discord_rpc, refresh_rate)
-                await asyncio.sleep(refresh_rate)
+                await await_connection(discord_rpc, polling_rate)
+                await asyncio.sleep(polling_rate)
                 continue
             logger.info('Activity Cleared')
             previous_activity = previous_start = None
             previous_playstate = False
 
-        await asyncio.sleep(refresh_rate)
+        await asyncio.sleep(polling_rate)
 
 
 def start_discord_rpc(
@@ -554,7 +554,7 @@ def start_discord_rpc(
 ) -> None:
     config = load_config(ini_path)
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
-    refresh_rate = max(1, config.getint('REFRESH_RATE', 5))
+    polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
 
     logger.setLevel(log_level)
@@ -576,7 +576,7 @@ def start_discord_rpc(
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     try:
-        asyncio.run(monitor_activity(config, refresh_rate, seek_threshold))
+        asyncio.run(monitor_activity(config, polling_rate, seek_threshold))
     except KeyboardInterrupt:
         pass
 
