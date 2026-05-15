@@ -45,20 +45,24 @@ def load_config(ini_path: str) -> SectionProxy:
 
 
 async def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, str | None]:
+    jf_host = config['JELLYFIN_HOST']
+    jf_username = config['JELLYFIN_USERNAME']
+    jf_api_key = config['JELLYFIN_API_KEY']
+
     initial_attempt = True
     while True:
         try:
-            url = config['JELLYFIN_HOST'] + '/Users'
-            headers = {'Accept': 'application/json', 'X-Emby-Token': config['JELLYFIN_API_KEY']}
+            url = jf_host + '/Users'
+            headers = {'Accept': 'application/json', 'X-Emby-Token': jf_api_key}
             user_data = requests.get(url, headers=headers, verify=True)
             user_data.raise_for_status()
 
             user_id = None
             for user in user_data.json():
-                if config['JELLYFIN_USERNAME'] in user['Name']:
+                if jf_username in user['Name']:
                     user_id = user['Id']
             if user_id is None:
-                logger.error(f'Username Not Found: {config["JELLYFIN_USERNAME"]}')
+                logger.error(f'Username Not Found: {jf_username}')
                 sys.exit(0)
 
             client = JellyfinClient()
@@ -68,8 +72,8 @@ async def get_jf_api(config: SectionProxy, refresh_rate: int) -> tuple[api.API, 
                 {
                     'Servers': [
                         {
-                            'address': config['JELLYFIN_HOST'],
-                            'AccessToken': config['JELLYFIN_API_KEY'],
+                            'address': jf_host,
+                            'AccessToken': jf_api_key,
                             'UserId': user_id,
                             'DateLastAccessed': 0,
                         }
@@ -250,6 +254,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
     await await_connection(discord_rpc, refresh_rate)
 
     jf_api, server_name = await get_jf_api(config, refresh_rate)
+    jf_username = config['JELLYFIN_USERNAME']
 
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
@@ -258,27 +263,43 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
     languages = re.split(r'[\s,]+', config.get('POSTER_LANGUAGES', ''))
 
-    if config.get('TMDB_API_KEY'):
-        check_tmdb_api(config['TMDB_API_KEY'])
+    if tmdb_api_key := config.get('TMDB_API_KEY'):
+        check_tmdb_api(tmdb_api_key)
+
+    media_types = [m.strip() for m in config['MEDIA_TYPES'].split(',')]
+    jf_media_types = set()
+    if 'Shows' in media_types:
+        jf_media_types.add('Episode')
+    if 'Movies' in media_types:
+        jf_media_types.add('Movie')
+    if 'Music' in media_types:
+        jf_media_types.add('Audio')
 
     activity = previous_activity = previous_start = None
     previous_warning = previous_playstate = False
     cached_kwargs: dict[str, Any] = {}
     while True:
         try:
-            session = next(
-                session
-                for session in jf_api.sessions()
-                if config['JELLYFIN_USERNAME'] == session['UserName']
-            )
-        except (StopIteration, KeyError):
-            await asyncio.sleep(refresh_rate)
-            continue
+            sessions = jf_api.sessions() or []
         except (RequestException, JSONDecodeError, HTTPException) as e:
             logger.debug(e)
             jf_api, server_name = await get_jf_api(config, refresh_rate)
             await asyncio.sleep(refresh_rate)
             continue
+
+        user_sessions = [s for s in sessions if s.get('UserName') == jf_username]
+        if not user_sessions:
+            await asyncio.sleep(refresh_rate)
+            continue
+
+        session = user_sessions[0]
+        for user_session in user_sessions:
+            if not (item := user_session.get('NowPlayingItem')):
+                continue
+            media_type = item.get('Type')
+            if media_type in jf_media_types:
+                session = user_session
+                break
 
         if 'NowPlayingItem' in session:
             try:
@@ -305,13 +326,9 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
             try:
                 state = details = None
                 media_dict = session['NowPlayingItem']
-                media_types = config['MEDIA_TYPES'].split(',')
                 match media_type := media_dict['Type']:
                     case 'Episode':
                         activity_type = ActivityType.WATCHING
-                        if 'Shows' not in media_types:
-                            await asyncio.sleep(refresh_rate)
-                            continue
                         season = media_dict['ParentIndexNumber']
                         episode = media_dict['IndexNumber']
                         details = media_dict['SeriesName']
@@ -319,16 +336,10 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                         activity = f'{details} {state.split(" - ")[0]}'
                     case 'Movie':
                         activity_type = ActivityType.WATCHING
-                        if 'Movies' not in media_types:
-                            await asyncio.sleep(refresh_rate)
-                            continue
                         details = media_dict['Name']
                         activity = details
                     case 'Audio':
                         activity_type = ActivityType.LISTENING
-                        if 'Music' not in media_types:
-                            await asyncio.sleep(refresh_rate)
-                            continue
                         if 'Artists' in media_dict and media_dict['Artists']:
                             state = ', '.join(media_dict['Artists'])
                         if 'Album' in media_dict and media_dict['Album']:
@@ -344,6 +355,19 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                         if not previous_warning:
                             logger.warning(f'Unsupported Media Type "{media_type}". Skipping...')
                             previous_warning = True
+
+                        if previous_activity is not None:
+                            try:
+                                await discord_rpc.clear()
+                            except (PyPresenceException, ConnectionRefusedError) as e:
+                                logger.debug(e)
+                                await await_connection(discord_rpc, refresh_rate)
+                                await asyncio.sleep(refresh_rate)
+                                continue
+                            logger.info('Activity Cleared (Unsupported Media)')
+                            previous_activity = previous_start = None
+                            previous_playstate = False
+
                         await asyncio.sleep(refresh_rate)
                         continue  # raise NotImplementedError()
                 if len(details) < 2:  # e.g., Chinese characters
@@ -378,7 +402,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                 poster_url = 'large_image'
                 state_url = large_url = details_url = None
 
-                if media_type == 'Episode' and config.get('TMDB_API_KEY'):
+                if media_type == 'Episode' and tmdb_api_key:
                     tmdb_id = None
                     if 'SeriesId' in media_dict:
                         try:
@@ -391,9 +415,7 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                     if not tmdb_id and find_best_match:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'SeriesName' in media_dict:
-                            tmdb_id = get_series_id(
-                                config['TMDB_API_KEY'], media_dict['SeriesName']
-                            )
+                            tmdb_id = get_series_id(tmdb_api_key, media_dict['SeriesName'])
                         if not tmdb_id:
                             logger.warning('TMDB ID Search Failed. Skipping...')
                     elif not tmdb_id:
@@ -403,33 +425,29 @@ async def monitor_activity(config: SectionProxy, refresh_rate: int, seek_thresho
                         details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
                         season = media_dict['ParentIndexNumber']
                         if season_over_series:
-                            poster_url = get_season_poster(
-                                config['TMDB_API_KEY'], tmdb_id, languages, season
-                            )
+                            poster_url = get_season_poster(tmdb_api_key, tmdb_id, languages, season)
                         else:
-                            poster_url = get_series_poster(
-                                config['TMDB_API_KEY'], tmdb_id, languages
-                            )
+                            poster_url = get_series_poster(tmdb_api_key, tmdb_id, languages)
                         if 'IndexNumber' in media_dict:
                             episode = media_dict['IndexNumber']
                             state_url = f'{details_url}/season/{season}/episode/{episode}'
                         large_url = f'{details_url}/season/{season}'
 
-                elif media_type == 'Movie' and config.get('TMDB_API_KEY'):
+                elif media_type == 'Movie' and tmdb_api_key:
                     movie_ids = media_dict.get('ProviderIds', {})
                     tmdb_id = movie_ids.get('Tmdb') or movie_ids.get('TheMovieDb')
 
                     if not tmdb_id and find_best_match:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'Name' in media_dict:
-                            tmdb_id = get_movie_id(config['TMDB_API_KEY'], media_dict['Name'])
+                            tmdb_id = get_movie_id(tmdb_api_key, media_dict['Name'])
                         if not tmdb_id:
                             logger.warning('TMDB ID Search Failed. Skipping...')
                     elif not tmdb_id:
                         logger.warning('No TMDB ID Found. Skipping...')
 
                     if tmdb_id:
-                        poster_url = get_movie_poster(config['TMDB_API_KEY'], tmdb_id, languages)
+                        poster_url = get_movie_poster(tmdb_api_key, tmdb_id, languages)
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
                         large_url = details_url
 
