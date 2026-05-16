@@ -44,6 +44,11 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
+def get_media_types(config: SectionProxy):
+    media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music')
+    return [m.strip() for m in re.split(r'[,;|]', media_types) if m.strip()]
+
+
 async def get_jf_api(config: SectionProxy, polling_rate: int) -> tuple[api.API, str | None]:
     jf_host = config['JELLYFIN_HOST']
     jf_username = config['JELLYFIN_USERNAME']
@@ -266,7 +271,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
     if tmdb_api_key := config.get('TMDB_API_KEY'):
         check_tmdb_api(tmdb_api_key)
 
-    media_types = [m.strip() for m in config['MEDIA_TYPES'].split(',')]
+    media_types = get_media_types(config)
     jf_media_types = set()
     if 'Shows' in media_types:
         jf_media_types.add('Episode')

@@ -4,6 +4,7 @@ import multiprocessing as mp
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -19,7 +20,7 @@ import requests
 from PIL import Image
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import __version__, load_config, start_discord_rpc
+from jellyfin_rpc import __version__, get_media_types, load_config, start_discord_rpc
 
 button_connect_text = ''
 logger = logging.getLogger('GUI')
@@ -63,6 +64,13 @@ class RPCLogger:
         self.frame = frame
         self.log_queue = log_queue
         self.text_widget = text_widget
+
+        self.text_widget.tag_config('DEBUG', foreground='#95A5A6')
+        self.text_widget.tag_config('INFO', foreground='#3DAEE9')
+        self.text_widget.tag_config('WARNING', foreground='#F67400')
+        self.text_widget.tag_config('ERROR', foreground='#DA4453')
+        self.text_widget.tag_config('CRITICAL', foreground='#DA4453')
+
         self.frame.after(100, self.poll_log_queue)
 
     def poll_log_queue(self) -> None:
@@ -74,7 +82,12 @@ class RPCLogger:
     def display_record(self, record: LogRecord) -> None:
         message = self.format_log_record(record)
         self.text_widget.configure(state='normal')
+        start_index = self.text_widget.index('end-1c')
         self.text_widget.insert(ctk.END, message)
+
+        end_index = f'{start_index}+{len(record.levelname)}c'
+        self.text_widget.tag_add(record.levelname, start_index, end_index)
+
         if message.rstrip().endswith('Need Help?'):
             tk_text = self.text_widget._textbox
             tk_text.tag_add('link', '1.6', '1.16')
@@ -90,11 +103,13 @@ class RPCLogger:
             )
             tk_text.tag_bind('link', '<Enter>', lambda event: event.widget.config(cursor='hand2'))
             tk_text.tag_bind('link', '<Leave>', lambda event: event.widget.config(cursor=''))
+
         self.text_widget.configure(state='disabled')
         self.text_widget.see(ctk.END)
 
     def format_log_record(self, record: LogRecord) -> str:
-        return f'{record.levelname}: {record.getMessage()}\n'
+        message = record.getMessage().replace('"', '\n', 1).rstrip('"')
+        return f'{record.levelname}: {message}\n'
 
 
 def save_config(
@@ -241,6 +256,15 @@ if sys.platform == 'win32':
             return False
 
 
+def open_file(filepath: str) -> None:
+    if sys.platform == 'win32':
+        os.startfile(filepath)
+    elif sys.platform == 'darwin':
+        subprocess.call(('open', filepath))
+    else:
+        subprocess.call(('xdg-open', filepath))
+
+
 def parse_version(version_tag: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version_tag.lstrip('v').split('.'))
 
@@ -353,11 +377,6 @@ def main() -> None:
         target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
     ).start()
 
-    label_connection_settings = ctk.CTkLabel(
-        master=col1, text='Connection Settings', font=font_header
-    )
-    label_connection_settings.pack(pady=(0, 5), padx=10)
-
     label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
     label_host.pack(anchor='w', padx=10)
     var_jf_host = ctk.StringVar(value=jf_host)
@@ -392,11 +411,9 @@ def main() -> None:
     )
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
-    label_status_monitor = ctk.CTkLabel(master=col1, text='Status Monitor', font=font_header)
-    label_status_monitor.pack(pady=(10, 5), padx=10)
     textbox_status_monitor = ctk.CTkTextbox(master=col1)
     textbox_status_monitor.configure(state='disabled')
-    textbox_status_monitor.pack(pady=(0, 5), padx=10, fill='both', expand=True)
+    textbox_status_monitor.pack(pady=5, padx=10, fill='both', expand=True)
 
     log_queue: Queue[LogRecord] = mp.Queue()
     logger.setLevel(log_level)
@@ -413,7 +430,7 @@ def main() -> None:
     label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
     label_media_settings.pack(pady=(0, 0), padx=10)
 
-    media_types = [m.strip() for m in config.get('MEDIA_TYPES', 'Movies,Shows,Music').split(',')]
+    media_types = get_media_types(config)
     var_movies = ctk.IntVar(value=int('Movies' in media_types))
     checkbox_movies = ctk.CTkCheckBox(
         master=col2, text='Show Watching for Movies', variable=var_movies
@@ -583,6 +600,30 @@ def main() -> None:
         master=container_log_level, values=log_level_values, variable=var_log_level, width=116
     )
     optionmenu_log_level.pack(side='right')
+
+    container_open_files = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_open_files.pack(fill='x', padx=10, pady=5)
+
+    frame_open_buttons = ctk.CTkFrame(master=container_open_files, fg_color='transparent')
+    frame_open_buttons.pack(anchor='center')
+
+    button_open_ini = ctk.CTkButton(
+        master=frame_open_buttons,
+        text='Open INI',
+        width=80,
+        height=28,
+        command=lambda: open_file(ini_path),
+    )
+    button_open_ini.pack(side='left', padx=5)
+
+    button_open_log = ctk.CTkButton(
+        master=frame_open_buttons,
+        text='Open Log',
+        width=80,
+        height=28,
+        command=lambda: open_file(log_path),
+    )
+    button_open_log.pack(side='left', padx=5)
 
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
     global button_connect_text
