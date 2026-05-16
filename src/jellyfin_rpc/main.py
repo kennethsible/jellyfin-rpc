@@ -44,13 +44,13 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
-def get_media_types(config: SectionProxy):
-    media_types = config.get('MEDIA_TYPES', 'Movies,Shows,Music')
-    return [m.strip() for m in re.split(r'[,;|]', media_types) if m.strip()]
+def parse_iterable(config: SectionProxy, option: str) -> list[str]:
+    option_split = re.split(r'[,;|]', config.get(option, ''))
+    return [x.strip() for x in option_split if x.strip()]
 
 
-async def get_jf_api(config: SectionProxy, polling_rate: int) -> tuple[api.API, str | None]:
-    jf_host = config['JELLYFIN_HOST']
+async def get_jf_api(config: SectionProxy, polling_rate: int) -> tuple[api.API, str | None, str]:
+    jf_host = config['JELLYFIN_HOST'].rstrip('/')
     jf_username = config['JELLYFIN_USERNAME']
     jf_api_key = config['JELLYFIN_API_KEY']
 
@@ -101,7 +101,7 @@ async def get_jf_api(config: SectionProxy, polling_rate: int) -> tuple[api.API, 
         except KeyError as e:
             logger.error(f'Missing Key in INI Config: {e}')
             sys.exit(0)
-        return client.jellyfin, server_name
+        return client.jellyfin, server_name, user_id
 
 
 def check_tmdb_api(api_key: str) -> None:
@@ -223,7 +223,7 @@ def get_release_group_cover(group_id: str) -> str:
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
         logger.debug(e)
         logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
-    return 'large_image'
+        return 'large_image'
 
 
 def get_release_cover(group_id: str, release_id: str | None = None) -> str:
@@ -258,20 +258,25 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
     discord_rpc = AioPresence(client_id)
     await await_connection(discord_rpc, polling_rate)
 
-    jf_api, server_name = await get_jf_api(config, polling_rate)
+    jf_host = config['JELLYFIN_HOST'].rstrip('/')
+    jf_api_key = config['JELLYFIN_API_KEY']
     jf_username = config['JELLYFIN_USERNAME']
+    jf_api, server_name, user_id = await get_jf_api(config, polling_rate)
+
+    libraries_whitelist = parse_iterable(config, 'LIBRARIES_WHITELIST')
+    libraries_blacklist = parse_iterable(config, 'LIBRARIES_BLACKLIST')
 
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
     find_best_match = config.getboolean('FIND_BEST_MATCH', True)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
-    languages = re.split(r'[\s,]+', config.get('POSTER_LANGUAGES', ''))
+    languages = re.split(r'[\s,;|]+', config.get('POSTER_LANGUAGES', ''))
 
     if tmdb_api_key := config.get('TMDB_API_KEY'):
         check_tmdb_api(tmdb_api_key)
 
-    media_types = get_media_types(config)
+    media_types = parse_iterable(config, 'MEDIA_TYPES')
     jf_media_types = set()
     if 'Shows' in media_types:
         jf_media_types.add('Episode')
@@ -282,13 +287,15 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
 
     activity = previous_activity = previous_start = None
     previous_warning = previous_playstate = False
+    cached_item_id = cached_library = None
     cached_kwargs: dict[str, Any] = {}
+
     while True:
         try:
             sessions = jf_api.sessions() or []
         except (RequestException, JSONDecodeError, HTTPException) as e:
             logger.debug(e)
-            jf_api, server_name = await get_jf_api(config, polling_rate)
+            jf_api, server_name, user_id = await get_jf_api(config, polling_rate)
             await asyncio.sleep(polling_rate)
             continue
 
@@ -331,6 +338,54 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
             try:
                 state = details = None
                 media_dict = session['NowPlayingItem']
+
+                if libraries_whitelist or libraries_blacklist:
+                    item_id, library = media_dict.get('Id'), None
+                    if item_id == cached_item_id:
+                        library = cached_library
+                    elif item_id:
+                        try:
+                            ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
+                            headers = {'Accept': 'application/json', 'X-Emby-Token': jf_api_key}
+                            response = requests.get(
+                                ancestors_url, headers=headers, params={'userId': user_id}
+                            )
+                            response.raise_for_status()
+                            ancestors = response.json()
+                            for ancestor in ancestors:
+                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
+                                    library = ancestor.get('Name')
+                                    break
+                            if library:
+                                cached_item_id, cached_library = item_id, library
+                        except (RequestException, JSONDecodeError, HTTPException) as e:
+                            logger.debug(e)
+                            logger.error('Library Name Retrieval Failed. Skipping...')
+
+                    is_allowed = True
+                    if library:
+                        if libraries_whitelist and library not in libraries_whitelist:
+                            is_allowed = False
+                        if libraries_blacklist and library in libraries_blacklist:
+                            is_allowed = False
+                    elif libraries_whitelist:
+                        is_allowed = False
+
+                    if not is_allowed:
+                        if previous_activity is not None:
+                            try:
+                                await discord_rpc.clear()
+                            except (PyPresenceException, ConnectionRefusedError) as e:
+                                logger.debug(e)
+                                await await_connection(discord_rpc, polling_rate)
+                                await asyncio.sleep(polling_rate)
+                                continue
+                            logger.info('Activity Cleared (Library Blocked)')
+                            previous_activity = previous_start = None
+                            previous_playstate = False
+                        await asyncio.sleep(polling_rate)
+                        continue
+
                 match media_type := media_dict['Type']:
                     case 'Episode':
                         activity_type = ActivityType.WATCHING
@@ -360,7 +415,6 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                         if not previous_warning:
                             logger.warning(f'Unsupported Media Type "{media_type}". Skipping...')
                             previous_warning = True
-
                         if previous_activity is not None:
                             try:
                                 await discord_rpc.clear()
@@ -372,9 +426,9 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                             logger.info('Activity Cleared (Unsupported Media)')
                             previous_activity = previous_start = None
                             previous_playstate = False
-
                         await asyncio.sleep(polling_rate)
                         continue  # raise NotImplementedError()
+
                 if len(details) < 2:  # e.g., Chinese characters
                     details += ' '
             except KeyError as e:

@@ -20,7 +20,7 @@ import requests
 from PIL import Image
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import __version__, get_media_types, load_config, start_discord_rpc
+from jellyfin_rpc import __version__, load_config, parse_iterable, start_discord_rpc
 
 button_connect_text = ''
 logger = logging.getLogger('GUI')
@@ -127,6 +127,8 @@ def save_config(
         'JELLYFIN_API_KEY',
         'JELLYFIN_USERNAME',
         'TMDB_API_KEY',
+        'LIBRARIES_WHITELIST',
+        'LIBRARIES_BLACKLIST',
         'POSTER_LANGUAGES',
     ):
         config.set('DEFAULT', key, entries[key]['entry'].get())
@@ -430,7 +432,7 @@ def main() -> None:
     label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
     label_media_settings.pack(pady=(0, 0), padx=10)
 
-    media_types = get_media_types(config)
+    media_types = parse_iterable(config, 'MEDIA_TYPES')
     var_movies = ctk.IntVar(value=int('Movies' in media_types))
     checkbox_movies = ctk.CTkCheckBox(
         master=col2, text='Show Watching for Movies', variable=var_movies
@@ -505,6 +507,37 @@ def main() -> None:
     )
     checkbox_find_best_match.pack(anchor='w', pady=5, padx=10)
 
+    label_library_settings = ctk.CTkLabel(master=col3, text='Library Settings', font=font_header)
+    label_library_settings.pack(pady=(0, 0), padx=10)
+
+    container_whitelist = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_whitelist.pack(fill='x', padx=10, pady=5)
+
+    label_whitelist = ctk.CTkLabel(master=container_whitelist, text='Whitelist:')
+    label_whitelist.pack(side='left', padx=(0, 10))
+
+    var_whitelist = ctk.StringVar(value=poster_languages)
+    entry_whitelist = ctk.CTkEntry(
+        master=container_whitelist,
+        width=165,
+        textvariable=var_whitelist if var_whitelist.get() else None,
+    )
+    entry_whitelist.pack(side='right')
+
+    container_blacklist = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_blacklist.pack(fill='x', padx=10, pady=5)
+
+    label_blacklist = ctk.CTkLabel(master=container_blacklist, text='Blacklist:')
+    label_blacklist.pack(side='left', padx=(0, 10))
+
+    var_blacklist = ctk.StringVar(value=poster_languages)
+    entry_blacklist = ctk.CTkEntry(
+        master=container_blacklist,
+        width=165,
+        textvariable=var_blacklist if var_blacklist.get() else None,
+    )
+    entry_blacklist.pack(side='right')
+
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(0, 0), padx=10)
 
@@ -536,30 +569,27 @@ def main() -> None:
     label_advanced_settings = ctk.CTkLabel(master=col3, text='Advanced Settings', font=font_header)
     label_advanced_settings.pack(pady=(10, 0), padx=10)
 
-    container_advanced_settings = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_advanced_settings.pack(fill='x', padx=10, pady=5)
+    container_polling_rate = ctk.CTkFrame(master=col3, fg_color='transparent')
+    container_polling_rate.pack(fill='x', padx=10, pady=5)
 
-    label_polling_rate = ctk.CTkLabel(master=container_advanced_settings, text='Polling Rate:')
+    label_polling_rate = ctk.CTkLabel(master=container_polling_rate, text='Polling Rate:')
     label_polling_rate.pack(side='left', padx=(0, 10))
 
     var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
 
     button_polling_rate_inc = ctk.CTkButton(
-        master=container_advanced_settings, text='+', width=28, height=28
+        master=container_polling_rate, text='+', width=28, height=28
     )
     button_polling_rate_inc.pack(side='right', padx=(5, 0))
 
     entry_polling_rate = ctk.CTkEntry(
-        master=container_advanced_settings,
-        textvariable=var_polling_rate,
-        width=50,
-        justify='center',
+        master=container_polling_rate, textvariable=var_polling_rate, width=50, justify='center'
     )
     entry_polling_rate.configure(state='disabled')
     entry_polling_rate.pack(side='right')
 
     button_polling_rate_dec = ctk.CTkButton(
-        master=container_advanced_settings, text='-', width=28, height=28
+        master=container_polling_rate, text='-', width=28, height=28
     )
     button_polling_rate_dec.pack(side='right', padx=(0, 5))
 
@@ -614,7 +644,7 @@ def main() -> None:
         height=28,
         command=lambda: open_file(ini_path),
     )
-    button_open_ini.pack(side='left', padx=5)
+    button_open_ini.pack(side='left', padx=5, pady=5)
 
     button_open_log = ctk.CTkButton(
         master=frame_open_buttons,
@@ -623,7 +653,7 @@ def main() -> None:
         height=28,
         command=lambda: open_file(log_path),
     )
-    button_open_log.pack(side='left', padx=5)
+    button_open_log.pack(side='left', padx=5, pady=5)
 
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
     global button_connect_text
@@ -639,6 +669,8 @@ def main() -> None:
         'JELLYFIN_API_KEY': {'entry': entry_jf_api_key, 'obfuscate': True},
         'JELLYFIN_USERNAME': {'entry': entry_jf_username, 'obfuscate': False},
         'TMDB_API_KEY': {'entry': entry_tmdb_api_key, 'obfuscate': True},
+        'LIBRARIES_WHITELIST': {'entry': entry_whitelist, 'obfuscate': False},
+        'LIBRARIES_BLACKLIST': {'entry': entry_blacklist, 'obfuscate': False},
         'POSTER_LANGUAGES': {'entry': entry_languages, 'obfuscate': False},
     }
     checkboxes = {
