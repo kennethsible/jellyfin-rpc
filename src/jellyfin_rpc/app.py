@@ -112,6 +112,71 @@ class RPCLogger:
         return f'{record.levelname}: {message}\n'
 
 
+class LibrarySelectorWindow(ctk.CTkToplevel):
+    def __init__(self, parent, host, api_key, username, var_library_ids, on_save_callback):
+        super().__init__(parent)
+        self.title("Select Libraries")
+        self.geometry("250x400")
+        self.transient(parent)
+        self.grab_set()
+
+        self.host = host
+        self.api_key = api_key
+        self.username = username
+        self.var_library_ids = var_library_ids
+        self.on_save_callback = on_save_callback
+        self.checkbox_map = {}
+
+        self.scroll_frame = ctk.CTkScrollableFrame(master=self, label_text="Available Libraries")
+        self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.btn_save = ctk.CTkButton(master=self, text="Save Selection", command=self.save_selection)
+        self.btn_save.pack(pady=10)
+
+        self.load_libraries()
+
+    def load_libraries(self):
+        try:
+            headers = {'Accept': 'application/json', 'X-Emby-Token': self.api_key}
+            u_resp = requests.get(f"{self.host}/Users", headers=headers, timeout=5)
+            u_resp.raise_for_status()
+            user_id = next((u['Id'] for u in u_resp.json() if self.username in u['Name']), None)
+
+            if not user_id:
+                ctk.CTkLabel(self.scroll_frame, text="User not found!").pack()
+                return
+
+            libs_resp = requests.get(f"{self.host}/Users/{user_id}/Views", headers=headers, timeout=5)
+            libs_resp.raise_for_status()
+            libraries = libs_resp.json().get('Items', [])
+
+            active_ids = [x.strip() for x in self.var_library_ids.get().split(';') if x.strip()]
+
+            for lib in libraries:
+                lib_name = lib.get('Name', 'Unknown')
+                lib_id = lib.get('Id')
+                is_checked = lib_id in active_ids
+                var_check = ctk.BooleanVar(value=is_checked)
+
+                cb = ctk.CTkCheckBox(master=self.scroll_frame, text=lib_name, variable=var_check)
+                cb.pack(anchor="w", pady=5, padx=10)
+                self.checkbox_map[lib_id] = var_check
+
+            if not libraries:
+                ctk.CTkLabel(self.scroll_frame, text="No libraries found.").pack()
+
+        except Exception as e:
+            logger.error(f"Failed to load libraries: {e}")
+            ctk.CTkLabel(self.scroll_frame, text="Error loading libraries.").pack()
+
+    def save_selection(self):
+        selected_ids = [lib_id for lib_id, var in self.checkbox_map.items() if var.get()]
+        joined_ids = ";".join(selected_ids)
+        self.var_library_ids.set(joined_ids)
+        self.on_save_callback()
+        self.destroy()
+
+
 def save_config(
     ini_path: str,
     entries: dict[str, dict[str, Any]],
@@ -119,22 +184,29 @@ def save_config(
     var_log_level: ctk.StringVar,
     var_polling_rate: ctk.StringVar,
     var_seek_threshold: ctk.StringVar,
+    var_library_mode: ctk.StringVar,
+    var_library_ids: ctk.StringVar,
 ) -> None:
     config = ConfigParser()
     config.read(ini_path)
+
+    if 'DEFAULT' not in config:
+        config['DEFAULT'] = {}
+
     for key in (
         'JELLYFIN_HOST',
         'JELLYFIN_API_KEY',
         'JELLYFIN_USERNAME',
         'TMDB_API_KEY',
-        'LIBRARIES_WHITELIST',
-        'LIBRARIES_BLACKLIST',
         'POSTER_LANGUAGES',
     ):
-        config.set('DEFAULT', key, entries[key]['entry'].get())
-    config.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
-    config.set('DEFAULT', 'polling_rate', var_polling_rate.get().rstrip('s'))
-    config.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
+        config['DEFAULT'][key] = entries[key]['entry'].get()
+
+    config['DEFAULT']['LIBRARY_MODE'] = var_library_mode.get().lower()
+    config['DEFAULT']['LIBRARY_IDS'] = var_library_ids.get()
+    config['DEFAULT']['LOG_LEVEL'] = var_log_level.get()
+    config['DEFAULT']['polling_rate'] = var_polling_rate.get().rstrip('s')
+    config['DEFAULT']['SEEK_THRESHOLD'] = var_seek_threshold.get().rstrip('s')
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -143,7 +215,7 @@ def save_config(
         media_types.append('Shows')
     if checkboxes['MUSIC']._variable.get():
         media_types.append('Music')
-    config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
+    config['DEFAULT']['MEDIA_TYPES'] = ','.join(media_types)
 
     for key in (
         'START_MINIMIZED',
@@ -154,8 +226,9 @@ def save_config(
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
         'SHOW_JELLYFIN_ICON',
+        'DISABLE_LOGFILE',
     ):
-        config.set('DEFAULT', key, str(bool(checkboxes[key]._variable.get())).lower())
+        config['DEFAULT'][key] = str(bool(checkboxes[key]._variable.get())).lower()
 
     with open(ini_path, 'w') as ini_file:
         config.write(ini_file)
@@ -302,7 +375,7 @@ def main() -> None:
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
-    root.geometry('780x510')
+    root.geometry('780x520')
     gui_queue: queue.Queue[str] = queue.Queue()
 
     frame_main = ctk.CTkFrame(master=root)
@@ -347,6 +420,8 @@ def main() -> None:
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
+    library_mode = config.get('LIBRARY_MODE', 'blacklist').lower()
+    libraries = config.get('LIBRARIES', '')
     poster_languages = config.get('POSTER_LANGUAGES')
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
@@ -374,10 +449,6 @@ def main() -> None:
         '<Button-1>',
         lambda _: webbrowser.open_new_tab('https://github.com/kennethsible/jellyfin-rpc/releases'),
     )
-
-    threading.Thread(
-        target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
-    ).start()
 
     label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
     label_host.pack(anchor='w', padx=10)
@@ -420,13 +491,21 @@ def main() -> None:
     log_queue: Queue[LogRecord] = mp.Queue()
     logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-    file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
-    file_hdlr.setFormatter(formatter)
+
+    disable_logfile = config.getboolean('DISABLE_LOGFILE', False)
+
     stream_hdlr = logging.StreamHandler(sys.stdout)
     stream_hdlr.setFormatter(formatter)
     queue_hdlr = handlers.QueueHandler(log_queue)
-    for hdlr in (file_hdlr, stream_hdlr, queue_hdlr):
-        logger.addHandler(hdlr)
+
+    logger.addHandler(stream_hdlr)
+    logger.addHandler(queue_hdlr)
+
+    if not disable_logfile:
+        file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
+        file_hdlr.setFormatter(formatter)
+        logger.addHandler(file_hdlr)
+
     RPCLogger(frame_main, log_queue, textbox_status_monitor)
 
     label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
@@ -510,33 +589,79 @@ def main() -> None:
     label_library_settings = ctk.CTkLabel(master=col3, text='Library Settings', font=font_header)
     label_library_settings.pack(pady=(0, 0), padx=10)
 
-    container_whitelist = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_whitelist.pack(fill='x', padx=10, pady=5)
+    raw_mode = config.get('library_mode', 'blacklist')
+    initial_mode = str(raw_mode).strip().capitalize()
+    if initial_mode not in ["Whitelist", "Blacklist"]:
+        initial_mode = "Blacklist"
 
-    label_whitelist = ctk.CTkLabel(master=container_whitelist, text='Whitelist:')
-    label_whitelist.pack(side='left', padx=(0, 10))
+    var_library_mode = ctk.StringVar(value=initial_mode)
+    var_library_ids = ctk.StringVar(value=config.get('library_ids', ''))
 
-    var_whitelist = ctk.StringVar(value=poster_languages)
-    entry_whitelist = ctk.CTkEntry(
-        master=container_whitelist,
-        width=165,
-        textvariable=var_whitelist if var_whitelist.get() else None,
+    def on_mode_changed(value):
+        var_library_mode.set(value)
+
+        save_config(
+            ini_path,
+            entries,
+            checkboxes,
+            var_log_level,
+            var_polling_rate,
+            var_seek_threshold,
+            var_library_mode,
+            var_library_ids,
+        )
+
+        on_click(
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
+        )
+
+    segmented_library_mode = ctk.CTkSegmentedButton(
+        master=col3,
+        values=["Blacklist", "Whitelist"],
+        variable=var_library_mode,
+        command=on_mode_changed
     )
-    entry_whitelist.pack(side='right')
+    segmented_library_mode.pack(fill='x', padx=10, pady=5)
 
-    container_blacklist = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_blacklist.pack(fill='x', padx=10, pady=5)
+    var_library_ids = ctk.StringVar(value=config.get('LIBRARY_IDS', ''))
 
-    label_blacklist = ctk.CTkLabel(master=container_blacklist, text='Blacklist:')
-    label_blacklist.pack(side='left', padx=(0, 10))
+    def open_library_selector():
+        host = entry_jf_host.get().rstrip('/')
+        api_key = entry_jf_api_key.get()
+        user = entry_jf_username.get()
 
-    var_blacklist = ctk.StringVar(value=poster_languages)
-    entry_blacklist = ctk.CTkEntry(
-        master=container_blacklist,
-        width=165,
-        textvariable=var_blacklist if var_blacklist.get() else None,
-    )
-    entry_blacklist.pack(side='right')
+        if not host or not api_key:
+            logger.error("Jellyfin Host and API Key required to load libraries!")
+            return
+
+        def trigger_save():
+            save_config(
+                ini_path,
+                entries,
+                checkboxes,
+                var_log_level,
+                var_polling_rate,
+                var_seek_threshold,
+                var_library_mode,
+                var_library_ids,
+            )
+
+            on_click(
+                cast(ctk.CTkButton, context['button_connect']),
+                entries,
+                rpc_process,
+                only_disconnect=True,
+            )
+
+            logger.info('Library configuration updated successfully.')
+
+        LibrarySelectorWindow(root, host, api_key, user, var_library_ids, trigger_save)
+
+    button_select_libs = ctk.CTkButton(master=col3, text="Select Libraries...", command=open_library_selector)
+    button_select_libs.pack(fill='x', padx=10, pady=5)
 
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(0, 0), padx=10)
@@ -631,6 +756,12 @@ def main() -> None:
     )
     optionmenu_log_level.pack(side='right')
 
+    var_disable_logfile = ctk.BooleanVar(value=config.getboolean('DISABLE_LOGFILE', False))
+    checkbox_disable_logfile = ctk.CTkCheckBox(
+        master=col3, text='Disable Logfile', variable=var_disable_logfile
+    )
+    checkbox_disable_logfile.pack(anchor='w', padx=10, pady=(10, 0))
+
     container_open_files = ctk.CTkFrame(master=col3, fg_color='transparent')
     container_open_files.pack(fill='x', padx=10, pady=5)
 
@@ -669,8 +800,6 @@ def main() -> None:
         'JELLYFIN_API_KEY': {'entry': entry_jf_api_key, 'obfuscate': True},
         'JELLYFIN_USERNAME': {'entry': entry_jf_username, 'obfuscate': False},
         'TMDB_API_KEY': {'entry': entry_tmdb_api_key, 'obfuscate': True},
-        'LIBRARIES_WHITELIST': {'entry': entry_whitelist, 'obfuscate': False},
-        'LIBRARIES_BLACKLIST': {'entry': entry_blacklist, 'obfuscate': False},
         'POSTER_LANGUAGES': {'entry': entry_languages, 'obfuscate': False},
     }
     checkboxes = {
@@ -685,6 +814,7 @@ def main() -> None:
         'SHOW_WHEN_PAUSED': checkbox_paused,
         'SHOW_SERVER_NAME': checkbox_server_name,
         'SHOW_JELLYFIN_ICON': checkbox_jf_icon,
+        'DISABLE_LOGFILE': checkbox_disable_logfile,
     }
 
     for key, checkbox in checkboxes.items():
@@ -767,7 +897,8 @@ def main() -> None:
 
     def on_click_callback() -> None:
         save_config(
-            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold
+            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold,
+            var_library_mode, var_library_ids
         )
         on_click(
             cast(ctk.CTkButton, context['button_connect']),
@@ -778,7 +909,8 @@ def main() -> None:
 
     def on_close_callback() -> None:
         save_config(
-            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold
+            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold,
+            var_library_mode, var_library_ids
         )
         on_close(root, rpc_process, context['tray_icon'])
 
