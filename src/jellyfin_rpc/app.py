@@ -660,7 +660,7 @@ def main() -> None:
 
         LibrarySelectorWindow(root, host, api_key, user, var_library_ids, trigger_save)
 
-    button_select_libs = ctk.CTkButton(master=col3, text="Select Libraries...", command=open_library_selector)
+    button_select_libs = ctk.CTkButton(master=col3, text="Select Libraries", command=open_library_selector)
     button_select_libs.pack(fill='x', padx=10, pady=5)
 
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
