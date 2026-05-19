@@ -263,8 +263,8 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
     jf_username = config['JELLYFIN_USERNAME']
     jf_api, server_name, user_id = await get_jf_api(config, polling_rate)
 
-    libraries_whitelist = parse_iterable(config, 'LIBRARIES_WHITELIST')
-    libraries_blacklist = parse_iterable(config, 'LIBRARIES_BLACKLIST')
+    library_mode = config.get('LIBRARY_MODE', 'blacklist').lower().strip()
+    library_ids = [x.strip() for x in config.get('LIBRARY_IDS', '').split(';') if x.strip()]
 
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
@@ -339,10 +339,12 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                 state = details = None
                 media_dict = session['NowPlayingItem']
 
-                if libraries_whitelist or libraries_blacklist:
-                    item_id, library = media_dict.get('Id'), None
+                if library_ids or library_mode == 'whitelist':
+                    item_id = media_dict.get('Id')
+                    ancestor_ids = []
+
                     if item_id == cached_item_id:
-                        library = cached_library
+                        ancestor_ids = cached_library
                     elif item_id:
                         try:
                             ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
@@ -352,24 +354,24 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                             )
                             response.raise_for_status()
                             ancestors = response.json()
-                            for ancestor in ancestors:
-                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
-                                    library = ancestor.get('Name')
-                                    break
-                            if library:
-                                cached_item_id, cached_library = item_id, library
+
+                            ancestor_ids = [
+                                ancestor.get('Id') for ancestor in ancestors
+                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder')
+                            ]
+                            if ancestor_ids:
+                                cached_item_id, cached_library = item_id, ancestor_ids
                         except (RequestException, JSONDecodeError, HTTPException) as e:
                             logger.debug(e)
-                            logger.error('Library Name Retrieval Failed. Skipping...')
+                            logger.error('Library ID Retrieval Failed. Skipping...')
 
                     is_allowed = True
-                    if library:
-                        if libraries_whitelist and library not in libraries_whitelist:
+                    if library_mode == 'whitelist':
+                        if not any(lib_id in library_ids for lib_id in ancestor_ids):
                             is_allowed = False
-                        if libraries_blacklist and library in libraries_blacklist:
+                    elif library_mode == 'blacklist':
+                        if any(lib_id in library_ids for lib_id in ancestor_ids):
                             is_allowed = False
-                    elif libraries_whitelist:
-                        is_allowed = False
 
                     if not is_allowed:
                         if previous_activity is not None:
@@ -618,10 +620,13 @@ def start_discord_rpc(
 
     logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-    if log_path is not None:
+
+    disable_logfile = config.getboolean('DISABLE_LOGFILE', fallback=False)
+    if log_path is not None and not disable_logfile:
         file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
         file_hdlr.setFormatter(formatter)
         logger.addHandler(file_hdlr)
+
     stream_hdlr = logging.StreamHandler(sys.stdout)
     stream_hdlr.setFormatter(formatter)
     logger.addHandler(stream_hdlr)
