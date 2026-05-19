@@ -304,7 +304,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
             await asyncio.sleep(polling_rate)
             continue
 
-        session = user_sessions[0]
+        session: dict[str, Any] = {}
         for user_session in user_sessions:
             if not (item := user_session.get('NowPlayingItem')):
                 continue
