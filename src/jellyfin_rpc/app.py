@@ -287,7 +287,7 @@ def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root
             def show_label_update() -> None:
                 label_update.configure(text=label_text, font=label_font)
                 label_update.pack(before=frame_grid, pady=(5, 0), padx=10)
-                root.geometry('780x540')
+                root.geometry('810x540')
 
             label_update.after(0, show_label_update)
 
@@ -302,7 +302,7 @@ def main() -> None:
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
-    root.geometry('780x510')
+    root.geometry('810x510')
     gui_queue: queue.Queue[str] = queue.Queue()
 
     frame_main = ctk.CTkFrame(master=root)
@@ -344,10 +344,9 @@ def main() -> None:
     jf_host = config.get('JELLYFIN_HOST')
     jf_api_key = config.get('JELLYFIN_API_KEY')
     jf_username = config.get('JELLYFIN_USERNAME')
-    log_level = config.get('LOG_LEVEL', 'INFO').upper()
-    polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
-    seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     poster_languages = config.get('POSTER_LANGUAGES')
+    libraries_whitelist = config.get('LIBRARIES_WHITELIST')
+    libraries_blacklist = config.get('LIBRARIES_BLACKLIST')
     season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
     find_best_match = config.getboolean('FIND_BEST_MATCH', True)
@@ -356,6 +355,9 @@ def main() -> None:
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    log_level = config.get('LOG_LEVEL', 'INFO').upper()
+    polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
+    seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
 
     frame_grid = ctk.CTkFrame(master=frame_main, fg_color='transparent')
     frame_grid.pack(fill='both', expand=True, padx=10, pady=5)
@@ -513,30 +515,32 @@ def main() -> None:
     container_whitelist = ctk.CTkFrame(master=col3, fg_color='transparent')
     container_whitelist.pack(fill='x', padx=10, pady=5)
 
-    label_whitelist = ctk.CTkLabel(master=container_whitelist, text='Whitelist:')
+    label_whitelist = ctk.CTkLabel(
+        master=container_whitelist, width=60, anchor='w', text='Whitelist:'
+    )
     label_whitelist.pack(side='left', padx=(0, 10))
 
-    var_whitelist = ctk.StringVar(value=poster_languages)
+    var_whitelist = ctk.StringVar(value=libraries_whitelist)
     entry_whitelist = ctk.CTkEntry(
         master=container_whitelist,
-        width=165,
         textvariable=var_whitelist if var_whitelist.get() else None,
     )
-    entry_whitelist.pack(side='right')
+    entry_whitelist.pack(side='left', fill='x', expand=True)
 
     container_blacklist = ctk.CTkFrame(master=col3, fg_color='transparent')
     container_blacklist.pack(fill='x', padx=10, pady=5)
 
-    label_blacklist = ctk.CTkLabel(master=container_blacklist, text='Blacklist:')
+    label_blacklist = ctk.CTkLabel(
+        master=container_blacklist, width=60, anchor='w', text='Blacklist:'
+    )
     label_blacklist.pack(side='left', padx=(0, 10))
 
-    var_blacklist = ctk.StringVar(value=poster_languages)
+    var_blacklist = ctk.StringVar(value=libraries_blacklist)
     entry_blacklist = ctk.CTkEntry(
         master=container_blacklist,
-        width=165,
         textvariable=var_blacklist if var_blacklist.get() else None,
     )
-    entry_blacklist.pack(side='right')
+    entry_blacklist.pack(side='left', fill='x', expand=True)
 
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(0, 0), padx=10)
