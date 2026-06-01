@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import signal
 import sys
@@ -30,6 +31,43 @@ logger = logging.getLogger('RPC')
 pkg_metadata = metadata('jellyfin-rpc')
 contact_info = parseaddr(pkg_metadata['Author-email'])[1]
 USER_AGENT = f'Jellyfin-RPC/{pkg_metadata["Version"]} ( {contact_info} )'
+
+TIMEOUT = 10
+CACHE_TTL = 30 * 86400
+
+_cache_path: str | None = None
+_cache: dict[str, list[Any]] = {}
+
+
+def init_cache(path: str) -> None:
+    global _cache_path
+    _cache_path = path
+    try:
+        with open(path, encoding='utf-8') as f:
+            _cache.update(json.load(f))
+    except (OSError, JSONDecodeError):
+        pass
+
+
+def cache_get(key: str) -> str | None:
+    entry = _cache.get(key)
+    if not entry:
+        return None
+    url, ts = entry
+    if time.time() - ts > CACHE_TTL:
+        return None
+    return cast(str, url)
+
+
+def cache_put(key: str, url: str) -> None:
+    _cache[key] = [url, int(time.time())]
+    if _cache_path is None:
+        return
+    try:
+        with open(_cache_path, 'w', encoding='utf-8') as f:
+            json.dump(_cache, f)
+    except OSError as e:
+        logger.debug(e)
 
 
 def load_config(ini_path: str) -> SectionProxy:
@@ -116,26 +154,38 @@ def check_tmdb_api(api_key: str) -> None:
         logger.warning('TMDB API Connection Failed. Skipping...')
 
 
-def get_series_id(api_key: str, title: str) -> str | None:
+def get_series_id(api_key: str, title: str, year: int | None = None) -> str | None:
     search_url = 'https://api.themoviedb.org/3/search/tv'
     search_params = {'api_key': api_key, 'query': title}
     try:
-        response = requests.get(search_url, params=search_params)
+        response = requests.get(search_url, params=search_params, timeout=TIMEOUT)
         response.raise_for_status()
-        return cast(str, response.json()['results'][0]['id'])
+        results = response.json()['results']
+        if year:
+            for r in results[:5]:
+                date = r.get('first_air_date') or ''
+                if date[:4].isdigit() and abs(int(date[:4]) - year) <= 1:
+                    return cast(str, r['id'])
+        return cast(str, results[0]['id'])
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
         logger.debug(e)
         logger.warning('TMDB API Connection Failed. Skipping...')
     return None
 
 
-def get_movie_id(api_key: str, title: str) -> str | None:
+def get_movie_id(api_key: str, title: str, year: int | None = None) -> str | None:
     search_url = 'https://api.themoviedb.org/3/search/movie'
     search_params = {'api_key': api_key, 'query': title}
     try:
-        response = requests.get(search_url, params=search_params)
+        response = requests.get(search_url, params=search_params, timeout=TIMEOUT)
         response.raise_for_status()
-        return cast(str, response.json()['results'][0]['id'])
+        results = response.json()['results']
+        if year:
+            for r in results[:5]:
+                date = r.get('release_date') or ''
+                if date[:4].isdigit() and abs(int(date[:4]) - year) <= 1:
+                    return cast(str, r['id'])
+        return cast(str, results[0]['id'])
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
         logger.debug(e)
         logger.warning('TMDB API Connection Failed. Skipping...')
@@ -150,7 +200,7 @@ def get_music_id(artist: str, album: str) -> str | None:
     album_query = f'releasegroup:({album}) OR alias:({album}'
     params = {'query': f'({artist_query}) AND ({album_query})', 'fmt': 'json'}
     try:
-        response = requests.get(search_url, headers=headers, params=params)
+        response = requests.get(search_url, headers=headers, params=params, timeout=TIMEOUT)
         response.raise_for_status()
         return cast(str, response.json()['release-groups'][0]['id'])
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
@@ -159,29 +209,36 @@ def get_music_id(artist: str, album: str) -> str | None:
     return None
 
 
-def select_poster(posters: list[dict[str, str]], languages: list[str]) -> dict[str, str]:
-    matched_posters: list[dict[str, str]] = []
-    for lang_code in languages:
-        for poster in posters:
-            if poster.get('iso_639_1') == (lang_code or None):
-                matched_posters.append(poster)
-        if matched_posters:
-            break
-    matched_posters.sort(key=lambda x: x['vote_count'], reverse=True)
-    return matched_posters[0] if matched_posters else posters[0]
+def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[str, Any]:
+    langs = languages if '' in languages else languages + ['']
+    for code in langs:
+        bucket = [p for p in posters if p.get('iso_639_1') == (code or None)]
+        if bucket:
+            bucket.sort(
+                key=lambda p: (p.get('vote_count', 0), p.get('vote_average', 0), p.get('width', 0)),
+                reverse=True,
+            )
+            return bucket[0]
+    return posters[0]
 
 
 def get_series_poster(api_key: str, tmdb_id: str, languages: list[str]) -> str:
+    cache_key = f'tv:{tmdb_id}:' + ','.join(languages)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached or 'large_image'
     images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/images'
-    images_params = {'api_key': api_key}
     try:
-        response = requests.get(images_url, params=images_params)
+        response = requests.get(images_url, params={'api_key': api_key}, timeout=TIMEOUT)
         response.raise_for_status()
         poster = select_poster(json.loads(response.text)['posters'], languages)
-        return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        url = 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        cache_put(cache_key, url)
+        return url
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
         logger.debug(e)
         logger.warning('No Poster Available on TMDB. Skipping...')
+        cache_put(cache_key, '')
         return 'large_image'
 
 
@@ -190,50 +247,87 @@ def get_season_poster(
 ) -> str:
     if season is None:
         return get_series_poster(api_key, tmdb_id, languages)
+    cache_key = f'tv:{tmdb_id}:s{season}:' + ','.join(languages)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached or get_series_poster(api_key, tmdb_id, languages)
     images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images'
-    images_params = {'api_key': api_key}
     try:
-        response = requests.get(images_url, params=images_params)
+        response = requests.get(images_url, params={'api_key': api_key}, timeout=TIMEOUT)
         response.raise_for_status()
         poster = select_poster(json.loads(response.text)['posters'], languages)
-        return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        url = 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        cache_put(cache_key, url)
+        return url
     except (RequestException, JSONDecodeError, KeyError, IndexError):
+        cache_put(cache_key, '')
         return get_series_poster(api_key, tmdb_id, languages)
 
 
 def get_movie_poster(api_key: str, tmdb_id: str, languages: list[str]) -> str:
+    cache_key = f'mv:{tmdb_id}:' + ','.join(languages)
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached or 'large_image'
     images_url = f'https://api.themoviedb.org/3/movie/{tmdb_id}/images'
-    images_params = {'api_key': api_key}
     try:
-        response = requests.get(images_url, params=images_params)
+        response = requests.get(images_url, params={'api_key': api_key}, timeout=TIMEOUT)
         response.raise_for_status()
         poster = select_poster(json.loads(response.text)['posters'], languages)
-        return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        url = 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        cache_put(cache_key, url)
+        return url
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
         logger.debug(e)
         logger.warning('No Poster Available on TMDB. Skipping...')
+        cache_put(cache_key, '')
         return 'large_image'
 
 
+def pick_cover(images: list[dict[str, Any]]) -> str:
+    for img in images:
+        if img.get('front') or 'Front' in (img.get('types') or []):
+            return cast(str, img['image'])
+    return cast(str, images[0]['image'])
+
+
 def get_release_group_cover(group_id: str) -> str:
+    cache_key = f'rg:{group_id}'
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached or 'large_image'
     try:
-        response = requests.get(f'https://coverartarchive.org/release-group/{group_id}')
+        response = requests.get(
+            f'https://coverartarchive.org/release-group/{group_id}', timeout=TIMEOUT
+        )
         response.raise_for_status()
-        return cast(str, json.loads(response.text)['images'][0]['image'])
+        url = pick_cover(json.loads(response.text)['images'])
+        cache_put(cache_key, url)
+        return url
     except (RequestException, JSONDecodeError, KeyError, IndexError) as e:
         logger.debug(e)
         logger.warning('No Cover Art Available on MusicBrainz. Skipping...')
+        cache_put(cache_key, '')
         return 'large_image'
 
 
 def get_release_cover(group_id: str, release_id: str | None = None) -> str:
     if not release_id:
         return get_release_group_cover(group_id)
+    cache_key = f'rel:{release_id}'
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached or get_release_group_cover(group_id)
     try:
-        response = requests.get(f'https://coverartarchive.org/release/{release_id}')
+        response = requests.get(
+            f'https://coverartarchive.org/release/{release_id}', timeout=TIMEOUT
+        )
         response.raise_for_status()
-        return cast(str, json.loads(response.text)['images'][0]['image'])
+        url = pick_cover(json.loads(response.text)['images'])
+        cache_put(cache_key, url)
+        return url
     except (RequestException, JSONDecodeError, KeyError, IndexError):
+        cache_put(cache_key, '')
         return get_release_group_cover(group_id)
 
 
@@ -463,18 +557,22 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
 
                 if media_type == 'Episode' and tmdb_api_key:
                     tmdb_id = None
+                    series_year = None
                     if 'SeriesId' in media_dict:
                         try:
                             series_item = jf_api.get_item(media_dict['SeriesId'])
                             series_ids = series_item.get('ProviderIds', {})
                             tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
+                            series_year = series_item.get('ProductionYear')
                         except (RequestException, JSONDecodeError, HTTPException):
                             pass
 
                     if not tmdb_id and find_best_match:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'SeriesName' in media_dict:
-                            tmdb_id = get_series_id(tmdb_api_key, media_dict['SeriesName'])
+                            tmdb_id = get_series_id(
+                                tmdb_api_key, media_dict['SeriesName'], series_year
+                            )
                         if not tmdb_id:
                             logger.warning('TMDB ID Search Failed. Skipping...')
                     elif not tmdb_id:
@@ -499,7 +597,11 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                     if not tmdb_id and find_best_match:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'Name' in media_dict:
-                            tmdb_id = get_movie_id(tmdb_api_key, media_dict['Name'])
+                            tmdb_id = get_movie_id(
+                                tmdb_api_key,
+                                media_dict['Name'],
+                                media_dict.get('ProductionYear'),
+                            )
                         if not tmdb_id:
                             logger.warning('TMDB ID Search Failed. Skipping...')
                     elif not tmdb_id:
@@ -615,6 +717,8 @@ def start_discord_rpc(
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
+
+    init_cache(os.path.join(os.path.dirname(os.path.abspath(ini_path)), 'poster_cache.json'))
 
     logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
