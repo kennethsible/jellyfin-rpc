@@ -519,7 +519,7 @@ async def activity_loop(
             playstate_changed = previous_playstate != session_paused
 
             seek_detected = False
-            if previous_start is not None and current_start is not None and not playstate_changed:
+            if not session_paused and previous_start is not None and current_start is not None:
                 if abs(current_start - previous_start) > seek_threshold:
                     seek_detected = True
 
