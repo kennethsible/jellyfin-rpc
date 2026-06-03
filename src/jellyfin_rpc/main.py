@@ -15,7 +15,8 @@ from typing import Any
 
 import aiohttp
 from aiohttp import ClientSession
-from aiohttp_client_cache import CacheBackend, CachedSession
+from aiohttp_client_cache import CacheBackend
+from aiohttp_client_cache.session import CachedSession
 from pypresence.exceptions import PyPresenceException
 from pypresence.presence import AioPresence
 from pypresence.types import ActivityType, StatusDisplayType
@@ -46,7 +47,7 @@ def get_delimited_list(config: SectionProxy, option: str) -> list[str]:
 
 
 async def get_jf_user_and_server(
-    session: ClientSession, config: SectionProxy, polling_rate: int
+    session: ClientSession, config: SectionProxy, show_server_name: bool, polling_rate: int
 ) -> tuple[str, str | None]:
     try:
         jf_host = config['JELLYFIN_HOST'].rstrip('/')
@@ -73,7 +74,7 @@ async def get_jf_user_and_server(
                 sys.exit(0)
 
             server_name = None
-            if config.getboolean('SHOW_SERVER_NAME', False):
+            if show_server_name:
                 async with session.get(f'{jf_host}/System/Info', headers=headers) as response:
                     response.raise_for_status()
                     system_info = await response.json()
@@ -169,7 +170,7 @@ def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[s
     def get_poster_score(poster: dict[str, Any]) -> tuple[float, int]:
         return float(poster.get('vote_average', 0.0)), int(poster.get('vote_count', 0))
 
-    posters_by_lang: dict[str, list[dict[str, Any]]] = {}
+    posters_by_lang = {}
     for poster in posters:
         lang_code = poster.get('iso_639_1') or None
         if lang_code not in posters_by_lang:
@@ -178,7 +179,7 @@ def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[s
 
     for lang_code in languages:
         target_lang = lang_code or None
-        if lang_code in posters_by_lang:
+        if target_lang in posters_by_lang:
             return max(posters_by_lang[target_lang], key=get_poster_score)
     return max(posters, key=get_poster_score)
 
@@ -243,6 +244,7 @@ async def get_movie_poster(
     except (ValueError, KeyError, IndexError) as e:
         logger.warning(f'TMDB API Parsing Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
+    return 'large_image'
 
 
 async def get_release_group_cover(session: ClientSession, group_id: str) -> str:
@@ -304,28 +306,33 @@ async def activity_loop(
     jf_api_key = config['JELLYFIN_API_KEY']
     jf_username = config['JELLYFIN_USERNAME']
     jf_headers = {'Accept': 'application/json', 'X-Emby-Token': jf_api_key}
-    user_id, server_name = await get_jf_user_and_server(jf_session, config, polling_rate)
 
-    libraries_whitelist = get_delimited_list(config, 'LIBRARIES_WHITELIST')
-    libraries_blacklist = get_delimited_list(config, 'LIBRARIES_BLACKLIST')
-
-    tmdb_over_jellyfin = config.getboolean('TMDB_OVER_JELLYFIN', False)
-    prefer_textless_posters = config.getboolean('PREFER_TEXTLESS_POSTERS', True)
-    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
-    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
-    find_best_match = config.getboolean('FIND_BEST_MATCH', True)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
+    show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+
+    user_id, server_name = await get_jf_user_and_server(
+        jf_session, config, show_server_name, polling_rate
+    )
+
+    if tmdb_api_key := config.get('TMDB_API_KEY'):
+        await check_tmdb_connection(cache_session, tmdb_api_key)
 
     languages = get_delimited_list(config, 'POSTER_LANGUAGES')
     for lang in languages:
         if len(lang) != 2 or not lang.isalpha():
             logger.warning(f'Invalid ISO 639-1 Language "{lang}"')
-    if prefer_textless_posters:
+    if config.getboolean('TEXTLESS_POSTERS', True):
         languages.insert(0, '')
 
-    if tmdb_api_key := config.get('TMDB_API_KEY'):
-        await check_tmdb_connection(cache_session, tmdb_api_key)
+    always_use_tmdb = config.getboolean('ALWAYS_USE_TMDB', False)
+    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
+
+    always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
+    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
+
+    whitelist = get_delimited_list(config, 'WHITELIST_LIBRARIES')
+    blacklist = get_delimited_list(config, 'BLACKLIST_LIBRARIES')
 
     media_types = get_delimited_list(config, 'MEDIA_TYPES')
     jf_media_types = set()
@@ -348,7 +355,9 @@ async def activity_loop(
                 sessions = await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.debug(f'Session Polling Error: {e}')
-            user_id, server_name = await get_jf_user_and_server(jf_session, config, polling_rate)
+            user_id, server_name = await get_jf_user_and_server(
+                jf_session, config, show_server_name, polling_rate
+            )
             await asyncio.sleep(polling_rate)
             continue
         except ValueError as e:
@@ -397,7 +406,7 @@ async def activity_loop(
                 media_dict = session_data['NowPlayingItem']
                 item_id = media_dict.get('Id')
 
-                if libraries_whitelist or libraries_blacklist:
+                if whitelist or blacklist:
                     library = None
                     if item_id == cached_item_id:
                         library = cached_library
@@ -421,11 +430,11 @@ async def activity_loop(
 
                     is_allowed = True
                     if library:
-                        if libraries_whitelist and library not in libraries_whitelist:
+                        if whitelist and library not in whitelist:
                             is_allowed = False
-                        if libraries_blacklist and library in libraries_blacklist:
+                        if blacklist and library in blacklist:
                             is_allowed = False
-                    elif libraries_whitelist:
+                    elif whitelist:
                         is_allowed = False
 
                     if not is_allowed:
@@ -536,24 +545,14 @@ async def activity_loop(
                         except aiohttp.ClientError, asyncio.TimeoutError, ValueError:
                             pass
 
-                    if not tmdb_id and tmdb_api_key and find_best_match:
+                    if not tmdb_id and tmdb_api_key:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'SeriesName' in media_dict:
                             tmdb_id = await get_series_id(
                                 cache_session, tmdb_api_key, media_dict['SeriesName']
                             )
 
-                    if tmdb_over_jellyfin and tmdb_api_key and tmdb_id:
-                        season = media_dict['ParentIndexNumber']
-                        if season_over_series:
-                            poster_url = await get_season_poster(
-                                cache_session, tmdb_api_key, tmdb_id, languages, season
-                            )
-                        else:
-                            poster_url = await get_series_poster(
-                                cache_session, tmdb_api_key, tmdb_id, languages
-                            )
-                    else:
+                    if not always_use_tmdb:
                         jf_season_id = media_dict.get('SeasonId')
                         jf_season_poster = (
                             f'{jf_host}/Items/{jf_season_id}/Images/Primary'
@@ -579,6 +578,16 @@ async def activity_loop(
                                 poster_url = await get_series_poster(
                                     cache_session, tmdb_api_key, tmdb_id, languages
                                 )
+                    elif tmdb_api_key and tmdb_id:
+                        season = media_dict['ParentIndexNumber']
+                        if season_over_series:
+                            poster_url = await get_season_poster(
+                                cache_session, tmdb_api_key, tmdb_id, languages, season
+                            )
+                        else:
+                            poster_url = await get_series_poster(
+                                cache_session, tmdb_api_key, tmdb_id, languages
+                            )
 
                     if tmdb_id:
                         details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
@@ -593,7 +602,7 @@ async def activity_loop(
                     movie_ids = media_dict.get('ProviderIds', {})
                     tmdb_id = movie_ids.get('Tmdb') or movie_ids.get('TheMovieDb')
 
-                    if not tmdb_id and tmdb_api_key and find_best_match:
+                    if not tmdb_id and tmdb_api_key:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'Name' in media_dict:
                             tmdb_id = await get_movie_id(
@@ -605,11 +614,7 @@ async def activity_loop(
                         if (item_id and is_https)
                         else None
                     )
-                    if tmdb_over_jellyfin and tmdb_api_key and tmdb_id:
-                        poster_url = await get_movie_poster(
-                            cache_session, tmdb_api_key, tmdb_id, languages
-                        )
-                    elif jf_movie_poster:
+                    if not always_use_tmdb and jf_movie_poster:
                         poster_url = jf_movie_poster
                     elif tmdb_api_key and tmdb_id:
                         poster_url = await get_movie_poster(
@@ -640,22 +645,22 @@ async def activity_loop(
                         except aiohttp.ClientError, asyncio.TimeoutError, ValueError:
                             pass
 
-                    if not group_id and find_best_match:
+                    if not group_id:
                         logger.warning('No MusicBrainz ID Found. Searching...')
                         if 'AlbumArtist' in media_dict and 'Album' in media_dict:
                             group_id = await get_music_id(
                                 cache_session, media_dict['AlbumArtist'], media_dict['Album']
                             )
 
+                    release_id = None
                     jf_album_cover = (
                         f'{jf_host}/Items/{album_id}/Images/Primary'
                         if (album_id and is_https)
                         else None
                     )
-                    if jf_album_cover:
+                    if not always_use_musicbrainz and jf_album_cover:
                         poster_url = jf_album_cover
                     elif group_id:
-                        release_id = None
                         if release_over_group:
                             release_id = music_ids.get('MusicBrainzAlbum')
                             if not release_id and album_id:
@@ -715,7 +720,7 @@ async def activity_loop(
                     logger.info(f'"{activity}"')
                 elif playstate_changed:
                     playstate = 'Paused' if session_paused else 'Resumed'
-                    logger.debug(f'PlayState Changed ({playstate})')
+                    logger.debug(f'PlayState {playstate}')
                 elif seek_detected:
                     logger.debug('Seek Detected')
 

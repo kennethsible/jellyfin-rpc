@@ -128,14 +128,14 @@ def save_config(
         'JELLYFIN_API_KEY',
         'JELLYFIN_USERNAME',
         'TMDB_API_KEY',
-        'LIBRARIES_WHITELIST',
-        'LIBRARIES_BLACKLIST',
         'POSTER_LANGUAGES',
+        'WHITELIST_LIBRARIES',
+        'BLACKLIST_LIBRARIES',
     ):
         config.set('DEFAULT', key, entries[key]['entry'].get())
-    config.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
-    config.set('DEFAULT', 'polling_rate', var_polling_rate.get().rstrip('s'))
+    config.set('DEFAULT', 'POLLING_RATE', var_polling_rate.get().rstrip('s'))
     config.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
+    config.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -147,14 +147,16 @@ def save_config(
     config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
     for key in (
-        'START_MINIMIZED',
-        'MINIMIZE_ON_CLOSE',
-        'SEASON_OVER_SERIES',
-        'RELEASE_OVER_GROUP',
-        'FIND_BEST_MATCH',
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
         'SHOW_JELLYFIN_ICON',
+        'ALWAYS_USE_TMDB',
+        'TEXTLESS_POSTERS',
+        'SEASON_OVER_SERIES',
+        'ALWAYS_USE_MUSICBRAINZ',
+        'RELEASE_OVER_GROUP',
+        'START_MINIMIZED',
+        'MINIMIZE_ON_CLOSE',
     ):
         config.set('DEFAULT', key, str(bool(checkboxes[key]._variable.get())).lower())
 
@@ -288,7 +290,7 @@ def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root
             def show_label_update() -> None:
                 label_update.configure(text=label_text, font=label_font)
                 label_update.pack(before=frame_grid, pady=(5, 0), padx=10)
-                root.geometry('810x540')
+                root.geometry('810x610')
 
             label_update.after(0, show_label_update)
 
@@ -303,7 +305,7 @@ def main() -> None:
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
-    root.geometry('810x510')
+    root.geometry('810x580')
     gui_queue: queue.Queue[str] = queue.Queue()
 
     frame_main = ctk.CTkFrame(master=root)
@@ -342,23 +344,33 @@ def main() -> None:
             shutil.copyfile(ini_bundle_path, ini_path)
 
     config = load_config(ini_path)
-    jf_host = config.get('JELLYFIN_HOST')
-    jf_api_key = config.get('JELLYFIN_API_KEY')
-    jf_username = config.get('JELLYFIN_USERNAME')
-    poster_languages = config.get('POSTER_LANGUAGES')
-    libraries_whitelist = config.get('LIBRARIES_WHITELIST')
-    libraries_blacklist = config.get('LIBRARIES_BLACKLIST')
-    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
-    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
-    find_best_match = config.getboolean('FIND_BEST_MATCH', True)
-    start_minimized = config.getboolean('START_MINIMIZED', True)
-    minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
+
+    jf_host = config.get('JELLYFIN_HOST', '')
+    jf_api_key = config.get('JELLYFIN_API_KEY', '')
+    jf_username = config.get('JELLYFIN_USERNAME', '')
+
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
-    log_level = config.get('LOG_LEVEL', 'INFO').upper()
+
+    tmdb_api_key = config.get('TMDB_API_KEY', '')
+    poster_languages = config.get('POSTER_LANGUAGES', '')
+    always_use_tmdb = config.getboolean('ALWAYS_USE_TMDB', False)
+    textless_posters = config.getboolean('TEXTLESS_POSTERS', True)
+    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
+
+    always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
+    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
+
+    whitelist = config.get('WHITELIST_LIBRARIES', '')
+    blacklist = config.get('BLACKLIST_LIBRARIES', '')
+
+    start_minimized = config.getboolean('START_MINIMIZED', True)
+    minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
+
     polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
+    log_level = config.get('LOG_LEVEL', 'INFO').upper()
 
     frame_grid = ctk.CTkFrame(master=frame_main, fg_color='transparent')
     frame_grid.pack(fill='both', expand=True, padx=10, pady=5)
@@ -381,6 +393,9 @@ def main() -> None:
     threading.Thread(
         target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
     ).start()
+
+    label_jellyfin_settings = ctk.CTkLabel(master=col1, text='Jellyfin Settings', font=font_header)
+    label_jellyfin_settings.pack(pady=(10, 0), padx=10)
 
     label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
     label_host.pack(anchor='w', padx=10)
@@ -406,15 +421,29 @@ def main() -> None:
     )
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
-    label_tmdb_api_key = ctk.CTkLabel(master=col1, text='TMDB API Key', font=font_label)
-    label_tmdb_api_key.pack(anchor='w', padx=10)
-    var_tmdb_api_key = ctk.StringVar(value=config.get('TMDB_API_KEY'))
-    entry_tmdb_api_key = ctk.CTkEntry(
-        master=col1,
-        textvariable=var_tmdb_api_key if var_tmdb_api_key.get() else None,
-        placeholder_text='Leave Blank to Disable',
+    container_open_files = ctk.CTkFrame(master=col1, fg_color='transparent')
+    container_open_files.pack(fill='x', padx=10, pady=5)
+
+    frame_open_buttons = ctk.CTkFrame(master=container_open_files, fg_color='transparent')
+    frame_open_buttons.pack(anchor='center')
+
+    button_open_ini = ctk.CTkButton(
+        master=frame_open_buttons,
+        text='Open INI',
+        width=80,
+        height=28,
+        command=lambda: open_file(ini_path),
     )
-    entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
+    button_open_ini.pack(side='left', padx=5, pady=5)
+
+    button_open_log = ctk.CTkButton(
+        master=frame_open_buttons,
+        text='Open Log',
+        width=80,
+        height=28,
+        command=lambda: open_file(log_path),
+    )
+    button_open_log.pack(side='left', padx=5, pady=5)
 
     textbox_status_monitor = ctk.CTkTextbox(master=col1)
     textbox_status_monitor.configure(state='disabled')
@@ -431,28 +460,6 @@ def main() -> None:
     for hdlr in (file_hdlr, stream_hdlr, queue_hdlr):
         logger.addHandler(hdlr)
     RPCLogger(frame_main, log_queue, textbox_status_monitor)
-
-    label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
-    label_media_settings.pack(pady=(0, 0), padx=10)
-
-    media_types = get_delimited_list(config, 'MEDIA_TYPES')
-    var_movies = ctk.IntVar(value=int('Movies' in media_types))
-    checkbox_movies = ctk.CTkCheckBox(
-        master=col2, text='Show Watching for Movies', variable=var_movies
-    )
-    checkbox_movies.pack(anchor='w', pady=5, padx=10)
-
-    var_shows = ctk.IntVar(value=int('Shows' in media_types))
-    checkbox_shows = ctk.CTkCheckBox(
-        master=col2, text='Show Watching for Shows', variable=var_shows
-    )
-    checkbox_shows.pack(anchor='w', pady=5, padx=10)
-
-    var_music = ctk.IntVar(value=int('Music' in media_types))
-    checkbox_music = ctk.CTkCheckBox(
-        master=col2, text='Show Listening for Music', variable=var_music
-    )
-    checkbox_music.pack(anchor='w', pady=5, padx=10)
 
     label_activity_settings = ctk.CTkLabel(master=col2, text='Activity Settings', font=font_header)
     label_activity_settings.pack(pady=(10, 0), padx=10)
@@ -475,8 +482,18 @@ def main() -> None:
     )
     checkbox_jf_icon.pack(anchor='w', pady=5, padx=10)
 
-    label_image_settings = ctk.CTkLabel(master=col2, text='Image Settings', font=font_header)
-    label_image_settings.pack(pady=(10, 0), padx=10)
+    label_poster_settings = ctk.CTkLabel(master=col2, text='Poster Settings', font=font_header)
+    label_poster_settings.pack(pady=(10, 0), padx=10)
+
+    label_tmdb_api_key = ctk.CTkLabel(master=col2, text='TMDB API Key', font=font_label)
+    label_tmdb_api_key.pack(anchor='w', padx=10)
+    var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key)
+    entry_tmdb_api_key = ctk.CTkEntry(
+        master=col2,
+        textvariable=var_tmdb_api_key if var_tmdb_api_key.get() else None,
+        placeholder_text='Leave Blank to Disable',
+    )
+    entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
     container_languages = ctk.CTkFrame(master=col2, fg_color='transparent')
     container_languages.pack(fill='x', padx=10, pady=5)
@@ -492,11 +509,32 @@ def main() -> None:
     )
     entry_languages.pack(side='right', fill='x', expand=True)
 
+    var_always_use_tmdb = ctk.IntVar(value=always_use_tmdb)
+    checkbox_always_use_tmdb = ctk.CTkCheckBox(
+        master=col2, text='Always Use The Movie Database', variable=var_always_use_tmdb
+    )
+    checkbox_always_use_tmdb.pack(anchor='w', pady=5, padx=10)
+
+    var_textless_posters = ctk.IntVar(value=textless_posters)
+    checkbox_textless_posters = ctk.CTkCheckBox(
+        master=col2, text='Prefer Textless TMDB Posters', variable=var_textless_posters
+    )
+    checkbox_textless_posters.pack(anchor='w', pady=5, padx=10)
+
     var_season_over_series = ctk.IntVar(value=season_over_series)
     checkbox_season_over_series = ctk.CTkCheckBox(
         master=col2, text='Prefer Season Poster Over Series', variable=var_season_over_series
     )
     checkbox_season_over_series.pack(anchor='w', pady=5, padx=10)
+
+    label_cover_settings = ctk.CTkLabel(master=col2, text='Album Cover Settings', font=font_header)
+    label_cover_settings.pack(pady=(10, 0), padx=10)
+
+    var_always_use_musicbrainz = ctk.IntVar(value=always_use_musicbrainz)
+    checkbox_always_use_musicbrainz = ctk.CTkCheckBox(
+        master=col2, text='Always Use Cover Art Archive', variable=var_always_use_musicbrainz
+    )
+    checkbox_always_use_musicbrainz.pack(anchor='w', pady=5, padx=10)
 
     var_release_over_group = ctk.IntVar(value=release_over_group)
     checkbox_release_over_group = ctk.CTkCheckBox(
@@ -504,14 +542,8 @@ def main() -> None:
     )
     checkbox_release_over_group.pack(anchor='w', pady=5, padx=10)
 
-    var_find_best_match = ctk.IntVar(value=find_best_match)
-    checkbox_find_best_match = ctk.CTkCheckBox(
-        master=col2, text='Find Best Match for Missing IDs', variable=var_find_best_match
-    )
-    checkbox_find_best_match.pack(anchor='w', pady=5, padx=10)
-
     label_library_settings = ctk.CTkLabel(master=col3, text='Library Settings', font=font_header)
-    label_library_settings.pack(pady=(0, 0), padx=10)
+    label_library_settings.pack(pady=(10, 0), padx=10)
 
     container_whitelist = ctk.CTkFrame(master=col3, fg_color='transparent')
     container_whitelist.pack(fill='x', padx=10, pady=5)
@@ -521,7 +553,7 @@ def main() -> None:
     )
     label_whitelist.pack(side='left', padx=(0, 10))
 
-    var_whitelist = ctk.StringVar(value=libraries_whitelist)
+    var_whitelist = ctk.StringVar(value=whitelist)
     entry_whitelist = ctk.CTkEntry(
         master=container_whitelist,
         textvariable=var_whitelist if var_whitelist.get() else None,
@@ -537,13 +569,35 @@ def main() -> None:
     )
     label_blacklist.pack(side='left', padx=(0, 10))
 
-    var_blacklist = ctk.StringVar(value=libraries_blacklist)
+    var_blacklist = ctk.StringVar(value=blacklist)
     entry_blacklist = ctk.CTkEntry(
         master=container_blacklist,
         textvariable=var_blacklist if var_blacklist.get() else None,
         placeholder_text='Leave Blank to Disable',
     )
     entry_blacklist.pack(side='left', fill='x', expand=True)
+
+    label_media_settings = ctk.CTkLabel(master=col3, text='Media Settings', font=font_header)
+    label_media_settings.pack(pady=(0, 0), padx=10)
+
+    media_types = get_delimited_list(config, 'MEDIA_TYPES')
+    var_movies = ctk.IntVar(value=int('Movies' in media_types))
+    checkbox_movies = ctk.CTkCheckBox(
+        master=col3, text='Show Watching for Movies', variable=var_movies
+    )
+    checkbox_movies.pack(anchor='w', pady=5, padx=10)
+
+    var_shows = ctk.IntVar(value=int('Shows' in media_types))
+    checkbox_shows = ctk.CTkCheckBox(
+        master=col3, text='Show Watching for Shows', variable=var_shows
+    )
+    checkbox_shows.pack(anchor='w', pady=5, padx=10)
+
+    var_music = ctk.IntVar(value=int('Music' in media_types))
+    checkbox_music = ctk.CTkCheckBox(
+        master=col3, text='Show Listening for Music', variable=var_music
+    )
+    checkbox_music.pack(anchor='w', pady=5, padx=10)
 
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(0, 0), padx=10)
@@ -638,30 +692,6 @@ def main() -> None:
     )
     optionmenu_log_level.pack(side='right')
 
-    container_open_files = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_open_files.pack(fill='x', padx=10, pady=5)
-
-    frame_open_buttons = ctk.CTkFrame(master=container_open_files, fg_color='transparent')
-    frame_open_buttons.pack(anchor='center')
-
-    button_open_ini = ctk.CTkButton(
-        master=frame_open_buttons,
-        text='Open INI',
-        width=80,
-        height=28,
-        command=lambda: open_file(ini_path),
-    )
-    button_open_ini.pack(side='left', padx=5, pady=5)
-
-    button_open_log = ctk.CTkButton(
-        master=frame_open_buttons,
-        text='Open Log',
-        width=80,
-        height=28,
-        command=lambda: open_file(log_path),
-    )
-    button_open_log.pack(side='left', padx=5, pady=5)
-
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
     global button_connect_text
     button_connect_text = 'Connect'
@@ -676,8 +706,8 @@ def main() -> None:
         'JELLYFIN_API_KEY': {'entry': entry_jf_api_key, 'obfuscate': True},
         'JELLYFIN_USERNAME': {'entry': entry_jf_username, 'obfuscate': False},
         'TMDB_API_KEY': {'entry': entry_tmdb_api_key, 'obfuscate': True},
-        'LIBRARIES_WHITELIST': {'entry': entry_whitelist, 'obfuscate': False},
-        'LIBRARIES_BLACKLIST': {'entry': entry_blacklist, 'obfuscate': False},
+        'WHITELIST_LIBRARIES': {'entry': entry_whitelist, 'obfuscate': False},
+        'BLACKLIST_LIBRARIES': {'entry': entry_blacklist, 'obfuscate': False},
         'POSTER_LANGUAGES': {'entry': entry_languages, 'obfuscate': False},
     }
     checkboxes = {
@@ -688,10 +718,12 @@ def main() -> None:
         'MINIMIZE_ON_CLOSE': checkbox_minimize_on_close,
         'SEASON_OVER_SERIES': checkbox_season_over_series,
         'RELEASE_OVER_GROUP': checkbox_release_over_group,
-        'FIND_BEST_MATCH': checkbox_find_best_match,
         'SHOW_WHEN_PAUSED': checkbox_paused,
         'SHOW_SERVER_NAME': checkbox_server_name,
         'SHOW_JELLYFIN_ICON': checkbox_jf_icon,
+        'ALWAYS_USE_TMDB': checkbox_always_use_tmdb,
+        'ALWAYS_USE_MUSICBRAINZ': checkbox_always_use_musicbrainz,
+        'TEXTLESS_POSTERS': checkbox_textless_posters,
     }
 
     for key, checkbox in checkboxes.items():
