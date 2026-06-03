@@ -197,7 +197,7 @@ def get_season_poster(
         response.raise_for_status()
         poster = select_poster(json.loads(response.text)['posters'], languages)
         return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
-    except (RequestException, JSONDecodeError, KeyError, IndexError):
+    except RequestException, JSONDecodeError, KeyError, IndexError:
         return get_series_poster(api_key, tmdb_id, languages)
 
 
@@ -233,7 +233,7 @@ def get_release_cover(group_id: str, release_id: str | None = None) -> str:
         response = requests.get(f'https://coverartarchive.org/release/{release_id}')
         response.raise_for_status()
         return cast(str, json.loads(response.text)['images'][0]['image'])
-    except (RequestException, JSONDecodeError, KeyError, IndexError):
+    except RequestException, JSONDecodeError, KeyError, IndexError:
         return get_release_group_cover(group_id)
 
 
@@ -446,7 +446,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                     current_start = int(time.time() - position_ticks / 10_000_000)
                     runtime_ticks = int(media_dict['RunTimeTicks'])
                     current_end = int(current_start + runtime_ticks / 10_000_000)
-                except (KeyError, TypeError, ValueError):
+                except KeyError, TypeError, ValueError:
                     pass
 
             media_changed = previous_activity != activity
@@ -468,7 +468,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                             series_item = jf_api.get_item(media_dict['SeriesId'])
                             series_ids = series_item.get('ProviderIds', {})
                             tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
-                        except (RequestException, JSONDecodeError, HTTPException):
+                        except RequestException, JSONDecodeError, HTTPException:
                             pass
 
                     if not tmdb_id and find_best_match:
@@ -520,7 +520,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                             album_item = jf_api.get_item(media_dict['AlbumId'])
                             album_music_ids = album_item.get('ProviderIds', {})
                             group_id = album_music_ids.get('MusicBrainzReleaseGroup')
-                        except (RequestException, JSONDecodeError, HTTPException):
+                        except RequestException, JSONDecodeError, HTTPException:
                             pass
 
                     if not group_id and find_best_match:
@@ -542,7 +542,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                                         album_item = jf_api.get_item(media_dict['AlbumId'])
                                     album_music_ids = album_item.get('ProviderIds', {})
                                     release_id = album_music_ids.get('MusicBrainzAlbum')
-                                except (RequestException, JSONDecodeError, HTTPException):
+                                except RequestException, JSONDecodeError, HTTPException:
                                     pass
 
                         poster_url = get_release_cover(group_id, release_id)
@@ -558,9 +558,9 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
                 cached_kwargs = {
                     'activity_type': activity_type,
                     'status_display_type': StatusDisplayType.DETAILS,
-                    'state': state,
+                    'state': state[:128],
                     'state_url': state_url,
-                    'details': details,
+                    'details': details[:128],
                     'details_url': details_url,
                     'name': server_name,
                     'large_image': poster_url,
