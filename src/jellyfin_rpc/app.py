@@ -20,7 +20,8 @@ import requests
 from PIL import Image
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import __version__, load_config, parse_iterable, start_discord_rpc
+from jellyfin_rpc import __version__, start_discord_rpc
+from jellyfin_rpc.main import get_delimited_list, load_config
 
 button_connect_text = ''
 logger = logging.getLogger('GUI')
@@ -108,8 +109,8 @@ class RPCLogger:
         self.text_widget.see(ctk.END)
 
     def format_log_record(self, record: LogRecord) -> str:
-        message = record.getMessage().replace('"', '\n', 1).rstrip('"')
-        return f'{record.levelname}: {message}\n'
+        # message = record.getMessage().replace('"', '\n', 1).rstrip('"')
+        return f'{record.levelname}: {record.getMessage()}\n'
 
 
 def save_config(
@@ -411,7 +412,7 @@ def main() -> None:
     entry_tmdb_api_key = ctk.CTkEntry(
         master=col1,
         textvariable=var_tmdb_api_key if var_tmdb_api_key.get() else None,
-        placeholder_text='Optional',
+        placeholder_text='Leave Blank to Disable',
     )
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -434,7 +435,7 @@ def main() -> None:
     label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
     label_media_settings.pack(pady=(0, 0), padx=10)
 
-    media_types = parse_iterable(config, 'MEDIA_TYPES')
+    media_types = get_delimited_list(config, 'MEDIA_TYPES')
     var_movies = ctk.IntVar(value=int('Movies' in media_types))
     checkbox_movies = ctk.CTkCheckBox(
         master=col2, text='Show Watching for Movies', variable=var_movies
@@ -487,7 +488,7 @@ def main() -> None:
     entry_languages = ctk.CTkEntry(
         master=container_languages,
         textvariable=var_languages if var_languages.get() else None,
-        placeholder_text='e.g., en ja',
+        placeholder_text='e.g., "en, ja"',
     )
     entry_languages.pack(side='right', fill='x', expand=True)
 
@@ -524,6 +525,7 @@ def main() -> None:
     entry_whitelist = ctk.CTkEntry(
         master=container_whitelist,
         textvariable=var_whitelist if var_whitelist.get() else None,
+        placeholder_text='Leave Blank to Disable',
     )
     entry_whitelist.pack(side='left', fill='x', expand=True)
 
@@ -539,6 +541,7 @@ def main() -> None:
     entry_blacklist = ctk.CTkEntry(
         master=container_blacklist,
         textvariable=var_blacklist if var_blacklist.get() else None,
+        placeholder_text='Leave Blank to Disable',
     )
     entry_blacklist.pack(side='left', fill='x', expand=True)
 
