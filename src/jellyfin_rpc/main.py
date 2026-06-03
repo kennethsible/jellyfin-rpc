@@ -159,16 +159,22 @@ def get_music_id(artist: str, album: str) -> str | None:
     return None
 
 
-def select_poster(posters: list[dict[str, str]], languages: list[str]) -> dict[str, str]:
-    matched_posters: list[dict[str, str]] = []
+def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[str, Any]:
+    def get_poster_score(poster: dict[str, Any]) -> tuple[float, int]:
+        return float(poster.get('vote_average', 0.0)), int(poster.get('vote_count', 0))
+
+    posters_by_lang: dict[str, list[dict[str, Any]]] = {}
+    for poster in posters:
+        lang_code = poster.get('iso_639_1') or None
+        if lang_code not in posters_by_lang:
+            posters_by_lang[lang_code] = []
+        posters_by_lang[lang_code].append(poster)
+
     for lang_code in languages:
-        for poster in posters:
-            if poster.get('iso_639_1') == (lang_code or None):
-                matched_posters.append(poster)
-        if matched_posters:
-            break
-    matched_posters.sort(key=lambda x: x['vote_count'], reverse=True)
-    return matched_posters[0] if matched_posters else posters[0]
+        target_lang = lang_code or None
+        if lang_code in posters_by_lang:
+            return max(posters_by_lang[target_lang], key=get_poster_score)
+    return max(posters, key=get_poster_score)
 
 
 def get_series_poster(api_key: str, tmdb_id: str, languages: list[str]) -> str:
