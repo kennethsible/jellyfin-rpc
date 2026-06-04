@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 import platform
 
 from PyInstaller.utils.hooks import collect_data_files
@@ -38,7 +39,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch=os.getenv('MACOS_ARCH'),
     codesign_identity=None,
     entitlements_file=None,
     icon=['images/icon.ico'],
@@ -47,8 +48,6 @@ exe = EXE(
 if platform.system() == 'Darwin':
     coll = COLLECT(
         exe,
-        a.binaries,
-        a.datas,
         strip=False,
         upx=True,
         upx_exclude=[],
