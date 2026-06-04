@@ -352,18 +352,18 @@ def main() -> None:
     jf_api_key = config.get('JELLYFIN_API_KEY', '')
     jf_username = config.get('JELLYFIN_USERNAME', '')
 
-    show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
+    show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
 
     tmdb_api_key = config.get('TMDB_API_KEY', '')
     poster_languages = config.get('POSTER_LANGUAGES', '')
     always_use_tmdb = config.getboolean('ALWAYS_USE_TMDB', False)
-    textless_posters = config.getboolean('TEXTLESS_POSTERS', True)
-    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
+    textless_posters = config.getboolean('TEXTLESS_POSTERS', False)
+    season_over_series = config.getboolean('SEASON_OVER_SERIES', False)
 
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
-    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
+    release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
     whitelist = config.get('WHITELIST_LIBRARIES', '')
     blacklist = config.get('BLACKLIST_LIBRARIES', '')
@@ -475,13 +475,13 @@ def main() -> None:
 
     var_server_name = ctk.IntVar(value=show_server_name)
     checkbox_server_name = ctk.CTkCheckBox(
-        master=col2, text='Show Server Name in Activity', variable=var_server_name
+        master=col2, text='Show Jellyfin Server Name', variable=var_server_name
     )
     checkbox_server_name.pack(anchor='w', pady=5, padx=10)
 
     var_jf_icon = ctk.IntVar(value=show_jf_icon)
     checkbox_jf_icon = ctk.CTkCheckBox(
-        master=col2, text='Show Jellyfin Icon in Activity', variable=var_jf_icon
+        master=col2, text='Show Small Jellyfin Icon Image', variable=var_jf_icon
     )
     checkbox_jf_icon.pack(anchor='w', pady=5, padx=10)
 

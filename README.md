@@ -1,9 +1,10 @@
+<!-- markdownlint-disable MD033 MD041 -->
 # Discord RPC for Jellyfin
 
 Jellyfin RPC updates your Discord status with what you're watching or listening to on your Jellyfin server. Make sure your Discord client is open and that your [Activity Privacy](https://support.discord.com/hc/en-us/articles/7931156448919-Activity-Sharing-on-Discord-FAQ) settings are configured correctly.
 
-![jellyfin_rpc_series](images/jellyfin_rpc_series.png)
-![jellyfin_rpc_movie](images/jellyfin_rpc_music.png)
+<img src="images/jellyfin_rpc_series.png" alt="jellyfin_rpc_series" width="300">
+<img src="images/jellyfin_rpc_music.png" alt="jellyfin_rpc_movie" width="300">
 
 ## Installation
 

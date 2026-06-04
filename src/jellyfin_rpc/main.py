@@ -168,9 +168,14 @@ async def get_music_id(session: ClientSession, artist: str, album: str) -> str |
     return None
 
 
-def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[str, Any]:
+def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[str, Any] | None:
+    if not posters:
+        return None
+
     def get_poster_score(poster: dict[str, Any]) -> tuple[float, int]:
-        return float(poster.get('vote_average', 0.0)), int(poster.get('vote_count', 0))
+        return float(poster.get('vote_average', 0.0)), int(
+            poster.get('vote_count', 0), int(poster.get('width', 0))
+        )
 
     posters_by_lang = {}
     for poster in posters:
@@ -189,15 +194,23 @@ def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[s
 async def get_series_poster(
     session: ClientSession, api_key: str, tmdb_id: str, languages: list[str]
 ) -> str:
-    images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/images'
-    images_params = {'api_key': api_key}
     try:
-        async with session.get(images_url, params=images_params) as response:
-            response.raise_for_status()
-            data = await response.json()
-            if poster := select_poster(data['posters'], languages):
-                return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
-            logger.warning('No Poster Available on TMDB. Skipping...')
+        if languages:
+            images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/images'
+            async with session.get(images_url, params={'api_key': api_key}) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if poster := select_poster(data['posters'], languages):
+                    return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+                logger.warning('No Poster Available on TMDB. Skipping...')
+        else:
+            series_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}'
+            async with session.get(series_url, params={'api_key': api_key}) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if poster_path := data.get('poster_path'):
+                    return 'https://image.tmdb.org/t/p/w185/' + poster_path
+                logger.warning('No Poster Available on TMDB. Skipping...')
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
@@ -216,30 +229,50 @@ async def get_season_poster(
 ) -> str:
     if season is None:
         return await get_series_poster(session, api_key, tmdb_id, languages)
-    images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images'
-    images_params = {'api_key': api_key}
+
     try:
-        async with session.get(images_url, params=images_params) as response:
-            response.raise_for_status()
-            data = await response.json()
-            poster = select_poster(data['posters'], languages)
-            return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+        if languages:
+            images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images'
+            async with session.get(images_url, params={'api_key': api_key}) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if poster := select_poster(data['posters'], languages):
+                    return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+                logger.warning('No Poster Available on TMDB. Skipping...')
+        else:
+            season_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}'
+            async with session.get(season_url, params={'api_key': api_key}) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if poster_path := data.get('poster_path'):
+                    return 'https://image.tmdb.org/t/p/w185/' + poster_path
+                logger.warning('No Poster Available on TMDB. Skipping...')
     except aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError:
-        return await get_series_poster(session, api_key, tmdb_id, languages)
+        pass
+
+    return await get_series_poster(session, api_key, tmdb_id, languages)
 
 
 async def get_movie_poster(
     session: ClientSession, api_key: str, tmdb_id: str, languages: list[str]
 ) -> str:
-    images_url = f'https://api.themoviedb.org/3/movie/{tmdb_id}/images'
-    images_params = {'api_key': api_key}
     try:
-        async with session.get(images_url, params=images_params) as response:
-            response.raise_for_status()
-            data = await response.json()
-            if poster := select_poster(data['posters'], languages):
-                return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
-            logger.warning('No Poster Available on TMDB. Skipping...')
+        if languages:
+            images_url = f'https://api.themoviedb.org/3/movie/{tmdb_id}/images'
+            async with session.get(images_url, params={'api_key': api_key}) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if poster := select_poster(data['posters'], languages):
+                    return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+                logger.warning('No Poster Available on TMDB. Skipping...')
+        else:
+            movie_url = f'https://api.themoviedb.org/3/movie/{tmdb_id}'
+            async with session.get(movie_url, params={'api_key': api_key}) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if poster_path := data.get('poster_path'):
+                    return 'https://image.tmdb.org/t/p/w185/' + poster_path
+                logger.warning('No Poster Available on TMDB. Skipping...')
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
@@ -324,14 +357,14 @@ async def activity_loop(
     for lang in languages:
         if len(lang) != 2 or not lang.isalpha():
             logger.warning(f'Invalid ISO 639-1 Language "{lang}"')
-    if config.getboolean('TEXTLESS_POSTERS', True):
+    if config.getboolean('TEXTLESS_POSTERS', False):
         languages.insert(0, '')
 
     always_use_tmdb = config.getboolean('ALWAYS_USE_TMDB', False)
-    season_over_series = config.getboolean('SEASON_OVER_SERIES', True)
+    season_over_series = config.getboolean('SEASON_OVER_SERIES', False)
 
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
-    release_over_group = config.getboolean('RELEASE_OVER_GROUP', True)
+    release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
     whitelist = get_delimited_list(config, 'WHITELIST_LIBRARIES')
     blacklist = get_delimited_list(config, 'BLACKLIST_LIBRARIES')
