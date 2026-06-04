@@ -3,6 +3,7 @@ import asyncio
 import logging
 import re
 import signal
+import ssl
 import sys
 import time
 from configparser import ConfigParser, SectionProxy
@@ -14,6 +15,7 @@ from types import FrameType
 from typing import Any
 
 import aiohttp
+import certifi
 from aiohttp import ClientSession
 from aiohttp_client_cache import CacheBackend
 from aiohttp_client_cache.session import CachedSession
@@ -526,7 +528,6 @@ async def activity_loop(
             if media_changed:
                 poster_url = 'large_image'
                 state_url = large_url = details_url = None
-
                 is_https = jf_host.startswith('https://')
 
                 if media_type == 'Episode':
@@ -748,7 +749,10 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
     await await_connection(discord_rpc, polling_rate)
 
     timeout = aiohttp.ClientTimeout(5.0)
-    jf_connector, cache_connector = aiohttp.TCPConnector(), aiohttp.TCPConnector()
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    jf_connector = aiohttp.TCPConnector(ssl=ssl_context)
+    cache_connector = aiohttp.TCPConnector(ssl=ssl_context)
+
     async with (
         ClientSession(timeout=timeout, connector=jf_connector) as jf_session,
         CachedSession(

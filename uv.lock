@@ -294,6 +294,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiohttp-client-cache" },
+    { name = "certifi" },
     { name = "pypresence" },
     { name = "requests" },
 ]
@@ -316,6 +317,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.0" },
     { name = "aiohttp-client-cache", specifier = ">=0.14.3" },
+    { name = "certifi", specifier = ">=2026.5.20" },
     { name = "customtkinter", marker = "extra == 'gui'", specifier = ">=5.2.2" },
     { name = "pyinstaller", marker = "extra == 'gui'", specifier = ">=6.20.0" },
     { name = "pypresence", git = "https://github.com/qwertyquerty/pypresence" },

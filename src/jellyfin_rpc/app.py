@@ -14,6 +14,7 @@ from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from typing import Any, Callable, TypedDict, cast
 
+import certifi
 import customtkinter as ctk
 import pystray
 import requests
@@ -277,7 +278,9 @@ def parse_version(version_tag: str) -> tuple[int, ...]:
 def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
     try:
         response = requests.get(
-            'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest', timeout=5
+            'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest',
+            timeout=5,
+            verify=certifi.where(),
         )
         response.raise_for_status()
         version_tag = response.json()['tag_name'].lstrip('v')

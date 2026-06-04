@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 import platform
 
+from PyInstaller.utils.hooks import collect_data_files
+
 a = Analysis(
     ['src/jellyfin_rpc/app.py'],
     pathex=[],
@@ -9,7 +11,7 @@ a = Analysis(
         ('jellyfin_rpc.ini', '.'),
         ('images/icon.png', '.'),
         ('images/icon.ico', '.'),
-    ],
+    ] + collect_data_files('certifi'),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
