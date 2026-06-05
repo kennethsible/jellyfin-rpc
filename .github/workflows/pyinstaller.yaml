@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux-x86_64
           - os: windows-latest
             platform: windows-amd64
@@ -29,7 +29,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install Python 3.14 (Linux Only)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -38,7 +38,7 @@ jobs:
           sudo apt-get install -y python3.14-tk libpython3.14
           uv venv .venv --python /usr/bin/python3.14 --seed
       - name: Install Python 3.14 (macOS/Windows)
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os != 'ubuntu-22.04'
         run: uv python install 3.14
       - name: Install Dependencies
         run: uv sync --extra gui --no-dev
