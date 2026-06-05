@@ -28,7 +28,7 @@ jobs:
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           enable-cache: true
-      - name: Install System Python 3.14 (Linux Only)
+      - name: Install Python 3.14 (Linux Only)
         if: matrix.os == 'ubuntu-latest'
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -36,14 +36,10 @@ jobs:
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
           sudo apt-get install -y python3.14-tk libpython3.14
-      - name: Create Python Environment
-        shell: bash
-        run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            uv venv .venv --python /usr/bin/python3.14 --seed
-          else
-            uv venv .venv --python 3.14
-          fi
+          uv venv .venv --python /usr/bin/python3.14 --seed
+      - name: Install Python 3.14 (macOS/Windows)
+        if: matrix.os != 'ubuntu-latest'
+        run: uv python install 3.14
       - name: Install Dependencies
         run: uv sync --extra gui --no-dev
       - name: Build PyInstaller Executable

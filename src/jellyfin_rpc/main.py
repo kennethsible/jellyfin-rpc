@@ -2,16 +2,15 @@ import argparse
 import asyncio
 import logging
 import re
-import signal
 import ssl
 import sys
 import time
 from configparser import ConfigParser, SectionProxy
+from contextlib import suppress
 from email.utils import parseaddr
 from importlib.metadata import metadata
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
-from types import FrameType
 from typing import Any
 
 import aiohttp
@@ -391,14 +390,16 @@ async def activity_loop(
                 response.raise_for_status()
                 sessions = await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.debug(f'Session Polling Error: {e}')
+            logger.error(f'Session Polling Error: {type(e).__name__}')
+            logger.debug(e)
             user_id, server_name = await get_jf_user_and_server(
                 jf_session, config, show_server_name, polling_rate
             )
             await asyncio.sleep(polling_rate)
             continue
         except ValueError as e:
-            logger.debug(f'Session Parsing Error: {e}')
+            logger.error(f'Session Parsing Error: {type(e).__name__}')
+            logger.debug(e)
             await asyncio.sleep(polling_rate)
             continue
 
@@ -428,7 +429,8 @@ async def activity_loop(
                     try:
                         await discord_rpc.clear()
                     except (PyPresenceException, OSError, KeyError) as e:
-                        logger.debug(f'Activity Clear Error: {e}')
+                        logger.error(f'RPC Clear Error: {type(e).__name__}')
+                        logger.debug(e)
                         await await_connection(discord_rpc, polling_rate)
                         await asyncio.sleep(polling_rate)
                         continue
@@ -462,7 +464,9 @@ async def activity_loop(
                             if library:
                                 cached_item_id, cached_library = item_id, library
                         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
-                            logger.error('Library Retrieval Failed. Skipping...')
+                            logger.error(
+                                f'Library Retrieval Failed ({type(e).__name__}). Skipping...'
+                            )
                             logger.debug(e)
 
                     is_allowed = True
@@ -479,7 +483,8 @@ async def activity_loop(
                             try:
                                 await discord_rpc.clear()
                             except (PyPresenceException, OSError, KeyError) as e:
-                                logger.debug(f'Activity Clear Error: {e}')
+                                logger.error(f'RPC Clear Error: {type(e).__name__}')
+                                logger.debug(e)
                                 await await_connection(discord_rpc, polling_rate)
                                 await asyncio.sleep(polling_rate)
                                 continue
@@ -522,7 +527,8 @@ async def activity_loop(
                             try:
                                 await discord_rpc.clear()
                             except (PyPresenceException, OSError, KeyError) as e:
-                                logger.debug(f'Activity Clear Error: {e}')
+                                logger.error(f'RPC Clear Error: {type(e).__name__}')
+                                logger.debug(e)
                                 await await_connection(discord_rpc, polling_rate)
                                 await asyncio.sleep(polling_rate)
                                 continue
@@ -747,7 +753,8 @@ async def activity_loop(
                         small_image=small_image,
                     )
                 except (PyPresenceException, OSError, KeyError) as e:
-                    logger.debug(f'Activity Update Error: {e}')
+                    logger.error(f'RPC Update Error: {type(e).__name__}')
+                    logger.debug(e)
                     await await_connection(discord_rpc, polling_rate)
                     await asyncio.sleep(polling_rate)
                     continue
@@ -767,7 +774,8 @@ async def activity_loop(
             try:
                 await discord_rpc.clear()
             except (PyPresenceException, OSError, KeyError) as e:
-                logger.debug(f'Activity Clear Error: {e}')
+                logger.error(f'RPC Clear Error: {type(e).__name__}')
+                logger.debug(e)
                 await await_connection(discord_rpc, polling_rate)
                 await asyncio.sleep(polling_rate)
                 continue
@@ -788,15 +796,21 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
     jf_connector = aiohttp.TCPConnector(ssl=ssl_context)
     cache_connector = aiohttp.TCPConnector(ssl=ssl_context)
 
-    async with (
-        ClientSession(timeout=timeout, connector=jf_connector) as jf_session,
-        CachedSession(
-            cache=CacheBackend(), timeout=timeout, connector=cache_connector
-        ) as cache_session,
-    ):
-        await activity_loop(
-            jf_session, cache_session, discord_rpc, config, polling_rate, seek_threshold
-        )
+    try:
+        async with (
+            ClientSession(connector=jf_connector, timeout=timeout) as jf_session,
+            CachedSession(
+                cache=CacheBackend(), connector=cache_connector, timeout=timeout
+            ) as cache_session,
+        ):
+            await activity_loop(
+                jf_session, cache_session, discord_rpc, config, polling_rate, seek_threshold
+            )
+    except KeyboardInterrupt, asyncio.CancelledError:
+        pass
+    finally:
+        with suppress(PyPresenceException, OSError, RuntimeError):
+            await discord_rpc.close()
 
 
 def start_discord_rpc(
@@ -826,15 +840,7 @@ def start_discord_rpc(
         queue_hdlr.setLevel(log_level)
         logger.addHandler(queue_hdlr)
 
-    def handle_shutdown(signum: int, frame: FrameType | None) -> None:
-        raise KeyboardInterrupt()
-
-    signal.signal(signal.SIGTERM, handle_shutdown)
-
-    try:
-        asyncio.run(monitor_activity(config, polling_rate, seek_threshold))
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(monitor_activity(config, polling_rate, seek_threshold))
 
 
 def main() -> None:

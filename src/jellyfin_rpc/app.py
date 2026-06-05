@@ -110,7 +110,6 @@ class RPCLogger:
         self.text_widget.see(ctk.END)
 
     def format_log_record(self, record: LogRecord) -> str:
-        # message = record.getMessage().replace('"', '\n', 1).rstrip('"')
         return f'{record.levelname}: {record.getMessage()}\n'
 
 
@@ -195,8 +194,10 @@ def on_click(
     button_connect.update()
 
 
-def on_maximize(label: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
-    threading.Thread(target=check_for_updates, args=(label, frame_grid, root), daemon=True).start()
+def on_maximize(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
+    threading.Thread(
+        target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
+    ).start()
     root.after(0, root.deiconify)
 
 
@@ -207,7 +208,7 @@ def on_close(
     if tray_icon is not None:
         tray_icon.visible = False
         tray_icon.stop()
-    root.quit()
+    root.destroy()
 
 
 def set_close_behavior(
