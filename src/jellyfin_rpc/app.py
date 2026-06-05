@@ -839,7 +839,7 @@ def main() -> None:
         root.createcommand(
             '::tk::mac::ReopenApplication', lambda: on_maximize(label_update, frame_grid, root)
         )
-    elif sys.platform == 'windows':
+    elif sys.platform == 'win32':
         tray_icon = pystray.Icon(
             'jellyfin-rpc',
             Image.open(png_bundle_path),
