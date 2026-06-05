@@ -341,6 +341,9 @@ async def activity_loop(
     jf_username = config['JELLYFIN_USERNAME']
     jf_headers = {'Accept': 'application/json', 'X-Emby-Token': jf_api_key}
 
+    library_mode = config.get('LIBRARY_MODE', 'blacklist').lower().strip()
+    library_ids = [x.strip() for x in config.get('LIBRARY_IDS', '').split(';') if x.strip()]
+
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
@@ -445,10 +448,12 @@ async def activity_loop(
                 media_dict = session_data['NowPlayingItem']
                 item_id = media_dict.get('Id')
 
-                if whitelist or blacklist:
-                    library = None
+                if library_ids or library_mode == 'whitelist':
+                    item_id = media_dict.get('Id')
+                    ancestor_ids = []
+
                     if item_id == cached_item_id:
-                        library = cached_library
+                        ancestor_ids = cached_library
                     elif item_id:
                         try:
                             ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
@@ -457,27 +462,25 @@ async def activity_loop(
                             ) as response:
                                 response.raise_for_status()
                                 ancestors = await response.json()
-                            for ancestor in ancestors:
-                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
-                                    library = ancestor.get('Name')
-                                    break
-                            if library:
-                                cached_item_id, cached_library = item_id, library
+
+                            ancestor_ids = [
+                                ancestor.get('Id') for ancestor in ancestors
+                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder')
+                            ]
+                            if ancestor_ids:
+                                cached_item_id, cached_library = item_id, ancestor_ids
                         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
-                            logger.error(
-                                f'Library Retrieval Failed ({type(e).__name__}). Skipping...'
-                            )
+                            logger.error(f'Library ID Retrieval Failed ({type(e).__name__}). Skipping...')
                             logger.debug(e)
+                            ancestor_ids = []
 
                     is_allowed = True
-                    if library:
-                        if whitelist and library not in whitelist:
+                    if library_mode == 'whitelist':
+                        if not any(lib_id in library_ids for lib_id in ancestor_ids):
                             is_allowed = False
-                        if blacklist and library in blacklist:
+                    elif library_mode == 'blacklist':
+                        if any(lib_id in library_ids for lib_id in ancestor_ids):
                             is_allowed = False
-                    elif whitelist:
-                        is_allowed = False
-
                     if not is_allowed:
                         if previous_activity is not None:
                             try:
@@ -822,9 +825,9 @@ def start_discord_rpc(
 
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-    logger.setLevel(logging.DEBUG)
 
-    if log_path is not None:
+    disable_logfile = config.getboolean('DISABLE_LOGFILE', fallback=False)
+    if log_path is not None and not disable_logfile:
         file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
         file_hdlr.setFormatter(formatter)
         file_hdlr.setLevel(logging.DEBUG)
