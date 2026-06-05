@@ -361,6 +361,8 @@ async def activity_loop(
         languages.insert(0, '')
 
     always_use_tmdb = config.getboolean('ALWAYS_USE_TMDB', False)
+    if always_use_tmdb and not tmdb_api_key:
+        logger.warning('Missing TMDB API Key')
     season_over_series = config.getboolean('SEASON_OVER_SERIES', False)
 
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
