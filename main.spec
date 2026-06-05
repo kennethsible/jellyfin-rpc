@@ -1,5 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
 import platform
+
+from PyInstaller.utils.hooks import collect_data_files
 
 a = Analysis(
     ['src/jellyfin_rpc/app.py'],
@@ -9,7 +12,7 @@ a = Analysis(
         ('jellyfin_rpc.ini', '.'),
         ('images/icon.png', '.'),
         ('images/icon.ico', '.'),
-    ],
+    ] + collect_data_files('certifi'),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -36,7 +39,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch=os.getenv('MACOS_ARCH'),
     codesign_identity=None,
     entitlements_file=None,
     icon=['images/icon.ico'],
@@ -45,8 +48,6 @@ exe = EXE(
 if platform.system() == 'Darwin':
     coll = COLLECT(
         exe,
-        a.binaries,
-        a.datas,
         strip=False,
         upx=True,
         upx_exclude=[],
