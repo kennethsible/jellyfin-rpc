@@ -10,8 +10,8 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ## Installation
 
-- For Windows and macOS, download the [latest release](https://github.com/kennethsible/jellyfin-rpc/releases) for the GUI.
-- For Linux, use [pip](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://pip.pypa.io/en/stable/installation/&ved=2ahUKEwitg4Hr2fuTAxWQkIkEHchVE1gQFnoECCYQAQ&usg=AOvVaw31Hu8kE5Z4dpEnAanOzEpL) to install the CLI tool and refer to the [CLI usage](#cli-usage).
+- For Windows, macOS, and Linux, download the latest release from GitHub ([see here](https://github.com/kennethsible/jellyfin-rpc/releases)).
+- Alternatively, use [pip](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://pip.pypa.io/en/stable/installation/&ved=2ahUKEwitg4Hr2fuTAxWQkIkEHchVE1gQFnoECCYQAQ&usg=AOvVaw31Hu8kE5Z4dpEnAanOzEpL) to install the CLI tool and refer to the [CLI usage](#cli-usage) section.
 
     ```bash
     pip install git+https://github.com/kennethsible/jellyfin-rpc.git
@@ -23,8 +23,9 @@ To generate a Jellyfin API key, go to the server dashboard and select **API Keys
 
 If you prefer to use the CLI over the GUI (or you're on Linux), fill out the included [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you run into any issues, please change `log_level` in the INI to `DEBUG` and include the output in your GitHub Issue.
 
-- `%AppData%\Jellyfin RPC`
-- `~/Library/Application Support/Jellyfin RPC`
+- `%AppData%\Jellyfin RPC` (Windows)
+- `~/Library/Application Support/Jellyfin RPC` (macOS)
+- `~/.config/Jellyfin RPC` (Linux)
 
 > [!IMPORTANT]
 > [**TMDB**](https://www.themoviedb.org/) can **optionally** be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [**MusicBrainz**](https://musicbrainz.org/) and the [**Cover Art Archive**](https://coverartarchive.org/) can be used to fetch album covers.
@@ -55,6 +56,9 @@ options:
 ```
 
 ### Local Build Instructions
+
+> [!NOTE]
+> For Linux builds, consult the GitHub Actions workflow for PyInstaller ([see here](https://github.com/kennethsible/jellyfin-rpc/blob/main/.github/workflows/pyinstaller.yaml)). You should use the system Python installation, as uv does not currently include font support ([astral-sh/uv/issues/15668](https://github.com/astral-sh/uv/issues/15668)).
 
 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 

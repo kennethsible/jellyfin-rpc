@@ -214,7 +214,10 @@ def set_close_behavior(
     root: ctk.CTk, on_close_callback: Callable[[], None], withdraw: bool
 ) -> None:
     if withdraw:
-        root.protocol('WM_DELETE_WINDOW', root.withdraw)
+        if sys.platform == 'linux':
+            root.protocol('WM_DELETE_WINDOW', root.iconify)
+        else:
+            root.protocol('WM_DELETE_WINDOW', root.withdraw)
     else:
         root.protocol('WM_DELETE_WINDOW', on_close_callback)
 
@@ -303,8 +306,11 @@ def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root
 
 
 def main() -> None:
-    ctk.set_appearance_mode('system')
-    ctk.deactivate_automatic_dpi_awareness()
+    if sys.platform != 'linux':
+        ctk.set_appearance_mode('system')
+        ctk.deactivate_automatic_dpi_awareness()
+    else:
+        ctk.set_appearance_mode('dark')
 
     root = ctk.CTk()
     root.title('Jellyfin RPC')
@@ -313,6 +319,7 @@ def main() -> None:
 
     frame_main = ctk.CTkFrame(master=root)
     frame_main.pack(fill='both', expand=True)
+
     font_header = ctk.CTkFont(family='Roboto', size=14, weight='bold')
     font_label = ctk.CTkFont(size=12)
 
@@ -331,6 +338,8 @@ def main() -> None:
         data_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
     elif sys.platform == 'darwin':
         data_dir = os.path.expanduser('~/Library/Application Support')
+    else:
+        data_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
     if data_dir:
         data_dir = os.path.join(data_dir, 'Jellyfin RPC')
         os.makedirs(data_dir, exist_ok=True)
@@ -824,12 +833,12 @@ def main() -> None:
         )
         on_close(root, rpc_process, context['tray_icon'])
 
+    tray_icon = None
     if sys.platform == 'darwin':
-        tray_icon = None
         root.createcommand(
             '::tk::mac::ReopenApplication', lambda: on_maximize(label_update, frame_grid, root)
         )
-    else:
+    elif sys.platform == 'windows':
         tray_icon = pystray.Icon(
             'jellyfin-rpc',
             Image.open(png_bundle_path),
@@ -851,7 +860,10 @@ def main() -> None:
     if jf_host and jf_api_key and jf_username:
         on_click_callback()
         if start_minimized and button_connect_text == 'Disconnect':
-            root.withdraw()
+            if sys.platform == 'linux':
+                root.iconify()
+            else:
+                root.withdraw()
     else:
         logger.info('Need Help?')
 
