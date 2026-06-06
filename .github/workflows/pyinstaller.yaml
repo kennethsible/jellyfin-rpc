@@ -51,6 +51,35 @@ jobs:
             export MACOS_ARCH="x86_64"
           fi
           uv run pyinstaller main.spec --noconfirm
+      - name: Generate Desktop Launcher (Linux Only)
+        if: matrix.os == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          cp images/icon.png dist/icon.png
+
+          cat << 'EOF' > dist/jellyfin-rpc.desktop
+          [Desktop Entry]
+          Type=Application
+          Version=$(uv version --short)
+          Name=Jellyfin RPC
+          Comment=Discord Rich Presence for Jellyfin
+          Exec="/opt/jellyfin-rpc/Jellyfin RPC"
+          Icon=/opt/jellyfin-rpc/icon.png
+          Terminal=false
+          Categories=Network;Utility;
+          StartupWMClass=Jellyfin RPC
+          EOF
+
+          cat << 'EOF' > dist/install.sh
+          #!/usr/bin/env bash
+          set -e
+          sudo mkdir -p /opt/jellyfin-rpc
+          sudo cp -r ./* /opt/jellyfin-rpc/
+          sudo cp /opt/jellyfin-rpc/jellyfin-rpc.desktop /usr/share/applications/
+          sudo chmod +x /usr/share/applications/jellyfin-rpc.desktop
+          EOF
+
+          chmod +x dist/install.sh
       - name: Isolate App Bundle (macOS Only)
         if: startsWith(matrix.os, 'macos')
         run: |
