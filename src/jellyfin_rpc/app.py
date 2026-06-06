@@ -90,9 +90,9 @@ class RPCLogger:
         end_index = f'{start_index}+{len(record.levelname)}c'
         self.text_widget.tag_add(record.levelname, start_index, end_index)
 
-        if message.rstrip().endswith('Need Help?'):
+        if message.rstrip().endswith('Getting Started?'):
             tk_text = self.text_widget._textbox
-            tk_text.tag_add('link', '1.6', '1.16')
+            tk_text.tag_add('link', '1.6', '1.22')
             mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
             link_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
             tk_text.tag_configure('link', foreground=link_color, underline=True)
@@ -302,31 +302,30 @@ def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root
             label_update.after(0, show_label_update)
 
     except (RequestException, JSONDecodeError, KeyError) as e:
+        logger.warning(f'GitHub Version Check Failed ({type(e).__name__}). Skipping...')
         logger.debug(e)
-        logger.warning('Connection to GitHub Failed. Skipping Version Check...')
+
+
+def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[LogRecord]:
+    logger.setLevel(log_level)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+
+    if log_path:
+        file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
+        file_hdlr.setFormatter(formatter)
+        logger.addHandler(file_hdlr)
+
+    stream_hdlr = logging.StreamHandler(sys.stdout)
+    stream_hdlr.setFormatter(formatter)
+    logger.addHandler(stream_hdlr)
+
+    log_queue: Queue[LogRecord] = mp.Queue()
+    queue_hdlr = handlers.QueueHandler(log_queue)
+    logger.addHandler(queue_hdlr)
+    return log_queue
 
 
 def main() -> None:
-    if sys.platform != 'linux':
-        ctk.set_appearance_mode('system')
-        ctk.deactivate_automatic_dpi_awareness()
-    else:
-        ctk.set_appearance_mode('dark')
-
-    root = ctk.CTk()
-    root.title('Jellyfin RPC')
-    root.geometry('810x580')
-    gui_queue: queue.Queue[str] = queue.Queue()
-
-    frame_main = ctk.CTkFrame(master=root)
-    frame_main.pack(fill='both', expand=True)
-
-    font_header = ctk.CTkFont(family='Roboto', size=14, weight='bold')
-    font_label = ctk.CTkFont(size=12)
-
-    frame_bottom = ctk.CTkFrame(master=frame_main, fg_color='transparent')
-    frame_bottom.pack(side='bottom', fill='x')
-
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
     ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
@@ -384,11 +383,30 @@ def main() -> None:
     polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
+    log_queue = setup_logging(log_level, log_path)
+
+    color_theme = 'dark' if sys.platform == 'linux' else 'system'
+    appearance_mode = config.get('APPEARANCE_MODE', color_theme)
+    ctk.set_appearance_mode(appearance_mode)
+
+    root = ctk.CTk()
+    root.title('Jellyfin RPC')
+    root.rowconfigure(0, weight=1)
+    root.columnconfigure(0, weight=1)
+
+    frame_main = ctk.CTkFrame(master=root)
+    frame_main.grid(row=0, column=0, sticky='nsew')
+    frame_main.grid_rowconfigure(0, weight=1)
+    frame_main.grid_rowconfigure(1, weight=0)
+    frame_main.grid_columnconfigure(0, weight=1)
 
     frame_grid = ctk.CTkFrame(master=frame_main, fg_color='transparent')
-    frame_grid.pack(fill='both', expand=True, padx=10, pady=5)
-    frame_grid.grid_columnconfigure((0, 1, 2), weight=1, uniform='column')
+    frame_grid.grid(row=0, column=0, sticky='nsew', padx=10, pady=5)
     frame_grid.grid_rowconfigure(0, weight=1)
+    frame_grid.grid_columnconfigure((0, 1, 2), weight=1, uniform='column')
+
+    frame_bottom = ctk.CTkFrame(master=frame_main, fg_color='transparent')
+    frame_bottom.grid(row=1, column=0, sticky='ew', padx=10, pady=10)
 
     col1 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
     col1.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
@@ -407,11 +425,15 @@ def main() -> None:
         target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
     ).start()
 
+    font_header = ctk.CTkFont(family='Roboto', size=14, weight='bold')
+    font_label = ctk.CTkFont(size=12)
+
     label_jellyfin_settings = ctk.CTkLabel(master=col1, text='Jellyfin Settings', font=font_header)
     label_jellyfin_settings.pack(pady=(10, 0), padx=10)
 
     label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
     label_host.pack(anchor='w', padx=10)
+
     var_jf_host = ctk.StringVar(value=jf_host)
     entry_jf_host = ctk.CTkEntry(
         master=col1, textvariable=var_jf_host if var_jf_host.get() else None
@@ -420,6 +442,7 @@ def main() -> None:
 
     label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
     label_jf_api_key.pack(anchor='w', padx=10)
+
     var_jf_api_key = ctk.StringVar(value=jf_api_key)
     entry_jf_api_key = ctk.CTkEntry(
         master=col1, textvariable=var_jf_api_key if var_jf_api_key.get() else None
@@ -428,78 +451,45 @@ def main() -> None:
 
     label_jf_username = ctk.CTkLabel(master=col1, text='Jellyfin Username', font=font_label)
     label_jf_username.pack(anchor='w', padx=10)
+
     var_jf_username = ctk.StringVar(value=jf_username)
     entry_jf_username = ctk.CTkEntry(
         master=col1, textvariable=var_jf_username if var_jf_username.get() else None
     )
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
-    container_open_files = ctk.CTkFrame(master=col1, fg_color='transparent')
-    container_open_files.pack(fill='x', padx=10, pady=5)
+    label_whitelist = ctk.CTkLabel(master=col1, text='Library Whitelist')
+    label_whitelist.pack(anchor='w', padx=10)
 
-    frame_open_buttons = ctk.CTkFrame(master=container_open_files, fg_color='transparent')
-    frame_open_buttons.pack(anchor='center')
-
-    button_open_ini = ctk.CTkButton(
-        master=frame_open_buttons,
-        text='Open INI',
-        width=80,
-        height=28,
-        command=lambda: open_file(ini_path),
+    var_whitelist = ctk.StringVar(value=whitelist)
+    entry_whitelist = ctk.CTkEntry(
+        master=col1,
+        textvariable=var_whitelist if var_whitelist.get() else None,
+        placeholder_text='Leave Blank to Disable',
     )
-    button_open_ini.pack(side='left', padx=5, pady=5)
+    entry_whitelist.pack(pady=(0, 5), padx=10, fill='x')
 
-    button_open_log = ctk.CTkButton(
-        master=frame_open_buttons,
-        text='Open Log',
-        width=80,
-        height=28,
-        command=lambda: open_file(log_path),
+    label_blacklist = ctk.CTkLabel(master=col1, text='Library Blacklist')
+    label_blacklist.pack(anchor='w', padx=10)
+
+    var_blacklist = ctk.StringVar(value=blacklist)
+    entry_blacklist = ctk.CTkEntry(
+        master=col1,
+        textvariable=var_blacklist if var_blacklist.get() else None,
+        placeholder_text='Leave Blank to Disable',
     )
-    button_open_log.pack(side='left', padx=5, pady=5)
+    entry_blacklist.pack(pady=(0, 5), padx=10, fill='x')
 
-    textbox_status_monitor = ctk.CTkTextbox(master=col1)
+    textbox_status_monitor = ctk.CTkTextbox(master=col1, height=100)
     textbox_status_monitor.configure(state='disabled')
-    textbox_status_monitor.pack(pady=5, padx=10, fill='both', expand=True)
-
-    log_queue: Queue[LogRecord] = mp.Queue()
-    logger.setLevel(log_level)
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-    file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
-    file_hdlr.setFormatter(formatter)
-    stream_hdlr = logging.StreamHandler(sys.stdout)
-    stream_hdlr.setFormatter(formatter)
-    queue_hdlr = handlers.QueueHandler(log_queue)
-    for hdlr in (file_hdlr, stream_hdlr, queue_hdlr):
-        logger.addHandler(hdlr)
-    RPCLogger(frame_main, log_queue, textbox_status_monitor)
-
-    label_activity_settings = ctk.CTkLabel(master=col2, text='Activity Settings', font=font_header)
-    label_activity_settings.pack(pady=(10, 0), padx=10)
-
-    var_paused = ctk.IntVar(value=show_when_paused)
-    checkbox_paused = ctk.CTkCheckBox(
-        master=col2, text='Show Activity When Paused', variable=var_paused
-    )
-    checkbox_paused.pack(anchor='w', pady=5, padx=10)
-
-    var_server_name = ctk.IntVar(value=show_server_name)
-    checkbox_server_name = ctk.CTkCheckBox(
-        master=col2, text='Show Jellyfin Server Name', variable=var_server_name
-    )
-    checkbox_server_name.pack(anchor='w', pady=5, padx=10)
-
-    var_jf_icon = ctk.IntVar(value=show_jf_icon)
-    checkbox_jf_icon = ctk.CTkCheckBox(
-        master=col2, text='Show Small Jellyfin Icon Image', variable=var_jf_icon
-    )
-    checkbox_jf_icon.pack(anchor='w', pady=5, padx=10)
+    textbox_status_monitor.pack(pady=(10, 0), padx=10, fill='both', expand=True)
 
     label_poster_settings = ctk.CTkLabel(master=col2, text='Poster Settings', font=font_header)
     label_poster_settings.pack(pady=(10, 0), padx=10)
 
     label_tmdb_api_key = ctk.CTkLabel(master=col2, text='TMDB API Key', font=font_label)
     label_tmdb_api_key.pack(anchor='w', padx=10)
+
     var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key)
     entry_tmdb_api_key = ctk.CTkEntry(
         master=col2,
@@ -508,112 +498,95 @@ def main() -> None:
     )
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
-    container_languages = ctk.CTkFrame(master=col2, fg_color='transparent')
-    container_languages.pack(fill='x', padx=10, pady=5)
-
-    label_languages = ctk.CTkLabel(master=container_languages, text='Poster Language(s):')
-    label_languages.pack(side='left', padx=(0, 10))
+    label_languages = ctk.CTkLabel(master=col2, text='Poster Language(s)')
+    label_languages.pack(anchor='w', padx=10)
 
     var_languages = ctk.StringVar(value=poster_languages)
     entry_languages = ctk.CTkEntry(
-        master=container_languages,
+        master=col2,
         textvariable=var_languages if var_languages.get() else None,
-        placeholder_text='e.g., "en, ja"',
+        placeholder_text='Leave Blank to Disable',
     )
-    entry_languages.pack(side='right', fill='x', expand=True)
+    entry_languages.pack(pady=(0, 5), padx=10, fill='x')
 
     var_always_use_tmdb = ctk.IntVar(value=always_use_tmdb)
     checkbox_always_use_tmdb = ctk.CTkCheckBox(
         master=col2, text='Always Use The Movie Database', variable=var_always_use_tmdb
     )
-    checkbox_always_use_tmdb.pack(anchor='w', pady=5, padx=10)
-
-    var_textless_posters = ctk.IntVar(value=textless_posters)
-    checkbox_textless_posters = ctk.CTkCheckBox(
-        master=col2, text='Prefer Textless TMDB Posters', variable=var_textless_posters
-    )
-    checkbox_textless_posters.pack(anchor='w', pady=5, padx=10)
+    checkbox_always_use_tmdb.pack(anchor='w', pady=5, padx=10, fill='x')
 
     var_season_over_series = ctk.IntVar(value=season_over_series)
     checkbox_season_over_series = ctk.CTkCheckBox(
         master=col2, text='Prefer Season Poster Over Series', variable=var_season_over_series
     )
-    checkbox_season_over_series.pack(anchor='w', pady=5, padx=10)
+    checkbox_season_over_series.pack(anchor='w', pady=5, padx=10, fill='x')
+
+    var_textless_posters = ctk.IntVar(value=textless_posters)
+    checkbox_textless_posters = ctk.CTkCheckBox(
+        master=col2, text='Prefer Textless TMDB Posters', variable=var_textless_posters
+    )
+    checkbox_textless_posters.pack(anchor='w', pady=5, padx=10, fill='x')
 
     label_cover_settings = ctk.CTkLabel(master=col2, text='Album Cover Settings', font=font_header)
     label_cover_settings.pack(pady=(10, 0), padx=10)
 
     var_always_use_musicbrainz = ctk.IntVar(value=always_use_musicbrainz)
     checkbox_always_use_musicbrainz = ctk.CTkCheckBox(
-        master=col2, text='Always Use Cover Art Archive', variable=var_always_use_musicbrainz
+        master=col2, text='Always Use The Cover Art Archive', variable=var_always_use_musicbrainz
     )
-    checkbox_always_use_musicbrainz.pack(anchor='w', pady=5, padx=10)
+    checkbox_always_use_musicbrainz.pack(anchor='w', pady=5, padx=10, fill='x')
 
     var_release_over_group = ctk.IntVar(value=release_over_group)
     checkbox_release_over_group = ctk.CTkCheckBox(
         master=col2, text='Prefer Release Cover Over Group', variable=var_release_over_group
     )
-    checkbox_release_over_group.pack(anchor='w', pady=5, padx=10)
+    checkbox_release_over_group.pack(anchor='w', pady=5, padx=10, fill='x')
 
-    label_library_settings = ctk.CTkLabel(master=col3, text='Library Settings', font=font_header)
-    label_library_settings.pack(pady=(10, 0), padx=10)
-
-    container_whitelist = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_whitelist.pack(fill='x', padx=10, pady=5)
-
-    label_whitelist = ctk.CTkLabel(
-        master=container_whitelist, width=60, anchor='w', text='Whitelist:'
-    )
-    label_whitelist.pack(side='left', padx=(0, 10))
-
-    var_whitelist = ctk.StringVar(value=whitelist)
-    entry_whitelist = ctk.CTkEntry(
-        master=container_whitelist,
-        textvariable=var_whitelist if var_whitelist.get() else None,
-        placeholder_text='Leave Blank to Disable',
-    )
-    entry_whitelist.pack(side='left', fill='x', expand=True)
-
-    container_blacklist = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_blacklist.pack(fill='x', padx=10, pady=5)
-
-    label_blacklist = ctk.CTkLabel(
-        master=container_blacklist, width=60, anchor='w', text='Blacklist:'
-    )
-    label_blacklist.pack(side='left', padx=(0, 10))
-
-    var_blacklist = ctk.StringVar(value=blacklist)
-    entry_blacklist = ctk.CTkEntry(
-        master=container_blacklist,
-        textvariable=var_blacklist if var_blacklist.get() else None,
-        placeholder_text='Leave Blank to Disable',
-    )
-    entry_blacklist.pack(side='left', fill='x', expand=True)
-
-    label_media_settings = ctk.CTkLabel(master=col3, text='Media Settings', font=font_header)
-    label_media_settings.pack(pady=(0, 0), padx=10)
+    label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
+    label_media_settings.pack(pady=(10, 0), padx=10)
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     var_movies = ctk.IntVar(value=int('Movies' in media_types))
     checkbox_movies = ctk.CTkCheckBox(
-        master=col3, text='Show Watching for Movies', variable=var_movies
+        master=col2, text='Show Watching Activity for Movies', variable=var_movies
     )
-    checkbox_movies.pack(anchor='w', pady=5, padx=10)
+    checkbox_movies.pack(anchor='w', pady=5, padx=10, fill='x')
 
     var_shows = ctk.IntVar(value=int('Shows' in media_types))
     checkbox_shows = ctk.CTkCheckBox(
-        master=col3, text='Show Watching for Shows', variable=var_shows
+        master=col2, text='Show Watching Activity for Shows', variable=var_shows
     )
-    checkbox_shows.pack(anchor='w', pady=5, padx=10)
+    checkbox_shows.pack(anchor='w', pady=5, padx=10, fill='x')
 
     var_music = ctk.IntVar(value=int('Music' in media_types))
     checkbox_music = ctk.CTkCheckBox(
-        master=col3, text='Show Listening for Music', variable=var_music
+        master=col2, text='Show Listening Activity for Music', variable=var_music
     )
-    checkbox_music.pack(anchor='w', pady=5, padx=10)
+    checkbox_music.pack(anchor='w', pady=5, padx=10, fill='x')
+
+    label_activity_settings = ctk.CTkLabel(master=col3, text='Activity Settings', font=font_header)
+    label_activity_settings.pack(pady=(10, 0), padx=10)
+
+    var_paused = ctk.IntVar(value=show_when_paused)
+    checkbox_paused = ctk.CTkCheckBox(
+        master=col3, text='Show Activity While Paused', variable=var_paused
+    )
+    checkbox_paused.pack(anchor='w', pady=5, padx=10, fill='x')
+
+    var_server_name = ctk.IntVar(value=show_server_name)
+    checkbox_server_name = ctk.CTkCheckBox(
+        master=col3, text='Show Jellyfin Server Name (Title)', variable=var_server_name
+    )
+    checkbox_server_name.pack(anchor='w', pady=5, padx=10, fill='x')
+
+    var_jf_icon = ctk.IntVar(value=show_jf_icon)
+    checkbox_jf_icon = ctk.CTkCheckBox(
+        master=col3, text='Show Jellyfin Logo (Small Image)', variable=var_jf_icon
+    )
+    checkbox_jf_icon.pack(anchor='w', pady=5, padx=10, fill='x')
 
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
-    label_system_settings.pack(pady=(0, 0), padx=10)
+    label_system_settings.pack(pady=(10, 0), padx=10)
 
     if sys.platform == 'win32':
         var_startup_status = ctk.IntVar(value=int(get_startup_status()))
@@ -623,13 +596,13 @@ def main() -> None:
             variable=var_startup_status,
             command=lambda: set_startup_status(bool(var_startup_status.get())),
         )
-        checkbox_startup_status.pack(anchor='w', pady=5, padx=10)
+        checkbox_startup_status.pack(anchor='w', pady=5, padx=10, fill='x')
 
     var_start_minimized = ctk.IntVar(value=start_minimized)
     checkbox_start_minimized = ctk.CTkCheckBox(
         master=col3, text='Start Minimized (If Connected)', variable=var_start_minimized
     )
-    checkbox_start_minimized.pack(anchor='w', pady=5, padx=10)
+    checkbox_start_minimized.pack(anchor='w', pady=5, padx=10, fill='x')
 
     background_type = 'Dock' if sys.platform == 'darwin' else 'Tray'
     var_minimize_on_close = ctk.IntVar(value=minimize_on_close)
@@ -638,74 +611,85 @@ def main() -> None:
         text=f'Close Button Minimizes to {background_type}',
         variable=var_minimize_on_close,
     )
-    checkbox_minimize_on_close.pack(anchor='w', pady=5, padx=10)
+    checkbox_minimize_on_close.pack(anchor='w', pady=5, padx=10, fill='x')
 
     label_advanced_settings = ctk.CTkLabel(master=col3, text='Advanced Settings', font=font_header)
     label_advanced_settings.pack(pady=(10, 0), padx=10)
 
-    container_polling_rate = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_polling_rate.pack(fill='x', padx=10, pady=5)
+    frame_advanced_settings = ctk.CTkFrame(master=col3, fg_color='transparent')
+    frame_advanced_settings.pack(fill='x', padx=10, pady=5)
+    frame_advanced_settings.grid_columnconfigure(0, weight=1)
+    frame_advanced_settings.grid_columnconfigure(1, weight=0)
+    frame_advanced_settings.grid_columnconfigure(2, weight=0)
+    frame_advanced_settings.grid_columnconfigure(3, weight=0)
 
-    label_polling_rate = ctk.CTkLabel(master=container_polling_rate, text='Polling Rate:')
-    label_polling_rate.pack(side='left', padx=(0, 10))
-
-    var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
-
-    button_polling_rate_inc = ctk.CTkButton(
-        master=container_polling_rate, text='+', width=28, height=28
-    )
-    button_polling_rate_inc.pack(side='right', padx=(5, 0))
-
-    entry_polling_rate = ctk.CTkEntry(
-        master=container_polling_rate, textvariable=var_polling_rate, width=50, justify='center'
-    )
-    entry_polling_rate.configure(state='disabled')
-    entry_polling_rate.pack(side='right')
+    label_polling_rate = ctk.CTkLabel(master=frame_advanced_settings, text='Polling Rate:')
+    label_polling_rate.grid(row=0, column=0, pady=5, sticky='w')
 
     button_polling_rate_dec = ctk.CTkButton(
-        master=container_polling_rate, text='-', width=28, height=28
+        master=frame_advanced_settings, text='-', width=28, height=28
     )
-    button_polling_rate_dec.pack(side='right', padx=(0, 5))
+    button_polling_rate_dec.grid(row=0, column=1, padx=(0, 5), pady=5, sticky='e')
 
-    container_seek_threshold = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_seek_threshold.pack(fill='x', padx=10, pady=5)
-
-    label_seek_threshold = ctk.CTkLabel(master=container_seek_threshold, text='Seek Threshold:')
-    label_seek_threshold.pack(side='left', padx=(0, 10))
-
-    var_seek_threshold = ctk.StringVar(value=f'{seek_threshold}s')
-
-    button_seek_threshold_inc = ctk.CTkButton(
-        master=container_seek_threshold, text='+', width=28, height=28
+    var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
+    entry_polling_rate = ctk.CTkEntry(
+        master=frame_advanced_settings, textvariable=var_polling_rate, width=50, justify='center'
     )
-    button_seek_threshold_inc.pack(side='right', padx=(5, 0))
+    entry_polling_rate.configure(state='disabled')
+    entry_polling_rate.grid(row=0, column=2, pady=5, sticky='e')
 
-    entry_seek_threshold = ctk.CTkEntry(
-        master=container_seek_threshold, textvariable=var_seek_threshold, width=50, justify='center'
+    button_polling_rate_inc = ctk.CTkButton(
+        master=frame_advanced_settings, text='+', width=28, height=28
     )
-    entry_seek_threshold.configure(state='disabled')
-    entry_seek_threshold.pack(side='right')
+    button_polling_rate_inc.grid(row=0, column=3, padx=(5, 0), pady=5, sticky='e')
+
+    label_seek_threshold = ctk.CTkLabel(master=frame_advanced_settings, text='Seek Threshold:')
+    label_seek_threshold.grid(row=1, column=0, pady=5, sticky='w')
 
     button_seek_threshold_dec = ctk.CTkButton(
-        master=container_seek_threshold, text='-', width=28, height=28
+        master=frame_advanced_settings, text='-', width=28, height=28
     )
-    button_seek_threshold_dec.pack(side='right', padx=(0, 5))
+    button_seek_threshold_dec.grid(row=1, column=1, padx=(0, 5), pady=5, sticky='e')
 
-    container_log_level = ctk.CTkFrame(master=col3, fg_color='transparent')
-    container_log_level.pack(fill='x', padx=10, pady=5)
+    var_seek_threshold = ctk.StringVar(value=f'{seek_threshold}s')
+    entry_seek_threshold = ctk.CTkEntry(
+        master=frame_advanced_settings, textvariable=var_seek_threshold, width=50, justify='center'
+    )
+    entry_seek_threshold.configure(state='disabled')
+    entry_seek_threshold.grid(row=1, column=2, pady=5, sticky='e')
 
-    label_log_level = ctk.CTkLabel(master=container_log_level, text='Log Level:')
-    label_log_level.pack(side='left', padx=(0, 10))
+    button_seek_threshold_inc = ctk.CTkButton(
+        master=frame_advanced_settings, text='+', width=28, height=28
+    )
+    button_seek_threshold_inc.grid(row=1, column=3, padx=(5, 0), pady=5, sticky='e')
 
+    label_log_level = ctk.CTkLabel(master=frame_advanced_settings, text='Log Level:')
+    label_log_level.grid(row=2, column=0, pady=5, sticky='w')
+
+    values_log_level = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     var_log_level = ctk.StringVar(value=log_level)
-    log_level_values = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-
     optionmenu_log_level = ctk.CTkOptionMenu(
-        master=container_log_level, values=log_level_values, variable=var_log_level, width=116
+        master=frame_advanced_settings, values=values_log_level, variable=var_log_level, width=0
     )
-    optionmenu_log_level.pack(side='right')
+    optionmenu_log_level.grid(row=2, column=1, columnspan=3, pady=5, sticky='ew')
 
+    frame_open_buttons = ctk.CTkFrame(master=col3, fg_color='transparent')
+    frame_open_buttons.pack(anchor='center')
+    frame_open_buttons.grid_columnconfigure((0, 1), weight=1, uniform='open_buttons')
+
+    button_open_ini = ctk.CTkButton(
+        master=frame_open_buttons, text='Open INI', width=100, command=lambda: open_file(ini_path)
+    )
+    button_open_ini.grid(row=0, column=0, padx=5, sticky='ew')
+
+    button_open_log = ctk.CTkButton(
+        master=frame_open_buttons, text='Open Log', width=100, command=lambda: open_file(log_path)
+    )
+    button_open_log.grid(row=0, column=1, padx=5, sticky='ew')
+
+    RPCLogger(frame_main, log_queue, textbox_status_monitor)
     rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
+
     global button_connect_text
     button_connect_text = 'Connect'
 
@@ -756,7 +740,7 @@ def main() -> None:
                 )
             )
 
-    def set_log_level(level: str) -> None:
+    def set_log_level(level: str) -> None:  # TODO
         logger.setLevel(level)
         on_click(
             cast(ctk.CTkButton, context['button_connect']),
@@ -835,6 +819,7 @@ def main() -> None:
         on_close(root, rpc_process, context['tray_icon'])
 
     tray_icon = None
+    gui_queue: queue.Queue[str] = queue.Queue()
     if sys.platform == 'darwin':
         root.createcommand(
             '::tk::mac::ReopenApplication', lambda: on_maximize(label_update, frame_grid, root)
@@ -866,7 +851,7 @@ def main() -> None:
             else:
                 root.withdraw()
     else:
-        logger.info('Need Help?')
+        logger.info('Getting Started?')
 
     def poll_process_status() -> None:
         if rpc_process.has_failed():
@@ -889,11 +874,15 @@ def main() -> None:
         finally:
             root.after(100, lambda: poll_gui_queue())
 
-    poll_gui_queue()
+    if tray_icon:
+        poll_gui_queue()
 
     if sys.platform == 'win32':
         root.iconbitmap(ico_bundle_path)
-    root.resizable(False, False)
+    root.update_idletasks()
+    root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
+    root.resizable(True, True)
+
     set_close_behavior(root, on_close_callback, minimize_on_close)
     root.mainloop()
 
