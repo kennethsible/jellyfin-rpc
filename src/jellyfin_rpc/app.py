@@ -22,7 +22,7 @@ from PIL import Image
 from requests.exceptions import RequestException
 
 from jellyfin_rpc import __version__, start_discord_rpc
-from jellyfin_rpc.main import get_delimited_list, load_config
+from jellyfin_rpc.main import load_config, parse_delimited_list
 
 button_connect_text = ''
 logger = logging.getLogger('GUI')
@@ -593,7 +593,7 @@ def main() -> None:
     label_media_settings = ctk.CTkLabel(master=col3, text='Media Settings', font=font_header)
     label_media_settings.pack(pady=(0, 0), padx=10)
 
-    media_types = get_delimited_list(config, 'MEDIA_TYPES')
+    media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     var_movies = ctk.IntVar(value=int('Movies' in media_types))
     checkbox_movies = ctk.CTkCheckBox(
         master=col3, text='Show Watching for Movies', variable=var_movies

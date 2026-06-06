@@ -1,16 +1,18 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.8.0"
+version = "1.8.1"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ken Sible", email = "ksible@outlook.com" }]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.14.0",
     "aiohttp-client-cache>=0.14.3",
     "requests>=2.34.2",
     "certifi>=2026.5.20",
+    "langcodes>=3.5.1",
+    "language_data>=1.4.0",
     "pypresence@git+https://github.com/qwertyquerty/pypresence",
 ]
 
@@ -18,7 +20,7 @@ dependencies = [
 gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.20.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.15", "mypy>=2.1.0", "types-requests"]
+dev = ["ruff>=0.15.16", "mypy>=2.1.0", "types-requests"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"

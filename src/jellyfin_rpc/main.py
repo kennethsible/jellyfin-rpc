@@ -18,6 +18,7 @@ import certifi
 from aiohttp import ClientSession
 from aiohttp_client_cache import CacheBackend
 from aiohttp_client_cache.session import CachedSession
+from langcodes import Language
 from pypresence.exceptions import PyPresenceException
 from pypresence.presence import AioPresence
 from pypresence.types import ActivityType, StatusDisplayType
@@ -42,9 +43,16 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
-def get_delimited_list(config: SectionProxy, option: str) -> list[str]:
+def parse_delimited_list(config: SectionProxy, option: str) -> list[str]:
     option_split = re.split(r'[,;|]', config.get(option, ''))
     return [x.strip() for x in option_split if x.strip()]
+
+
+def get_lang_code(lang_str: str) -> str | None:
+    try:
+        return Language.find(lang_str.strip()).language
+    except (ImportError, LookupError):
+        return None
 
 
 async def get_jf_user_and_server(
@@ -248,7 +256,7 @@ async def get_season_poster(
                 if poster_path := data.get('poster_path'):
                     return 'https://image.tmdb.org/t/p/w185/' + poster_path
                 logger.warning('No Poster Available on TMDB. Skipping...')
-    except aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError):
         pass
 
     return await get_series_poster(session, api_key, tmdb_id, languages)
@@ -310,7 +318,7 @@ async def get_release_cover(
             response.raise_for_status()
             data = await response.json()
             return data['images'][0]['image']
-    except aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError:
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError):
         return await get_release_group_cover(session, group_id)
 
 
@@ -354,10 +362,13 @@ async def activity_loop(
     if tmdb_api_key := config.get('TMDB_API_KEY'):
         await check_tmdb_connection(cache_session, tmdb_api_key)
 
-    languages = get_delimited_list(config, 'POSTER_LANGUAGES')
-    for lang in languages:
-        if len(lang) != 2 or not lang.isalpha():
-            logger.warning(f'Invalid ISO 639-1 Language "{lang}"')
+    languages = parse_delimited_list(config, 'POSTER_LANGUAGES')
+    for i, lang in enumerate(languages):
+        lang_code = get_lang_code(lang) or lang
+        if lang_code != lang:
+            languages[i] = lang_code
+        if len(lang_code) != 2 or not lang_code.isalpha():
+            logger.warning(f'Invalid ISO 639-1 Language "{lang_code}"')
     if config.getboolean('TEXTLESS_POSTERS', False):
         languages.insert(0, '')
 
@@ -369,10 +380,10 @@ async def activity_loop(
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
-    whitelist = get_delimited_list(config, 'WHITELIST_LIBRARIES')
-    blacklist = get_delimited_list(config, 'BLACKLIST_LIBRARIES')
+    whitelist = parse_delimited_list(config, 'WHITELIST_LIBRARIES')
+    blacklist = parse_delimited_list(config, 'BLACKLIST_LIBRARIES')
 
-    media_types = get_delimited_list(config, 'MEDIA_TYPES')
+    media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     jf_media_types = set()
     if 'Shows' in media_types:
         jf_media_types.add('Episode')
@@ -557,7 +568,7 @@ async def activity_loop(
                     current_start = int(time.time() - position_ticks / 10_000_000)
                     runtime_ticks = int(media_dict['RunTimeTicks'])
                     current_end = int(current_start + runtime_ticks / 10_000_000)
-                except KeyError, TypeError, ValueError:
+                except (KeyError, TypeError, ValueError):
                     pass
 
             media_changed = previous_activity != activity
@@ -586,7 +597,7 @@ async def activity_loop(
                                 series_item = await response.json()
                                 series_ids = series_item.get('ProviderIds', {})
                                 tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
-                        except aiohttp.ClientError, asyncio.TimeoutError, ValueError:
+                        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                             pass
 
                     if not tmdb_id and tmdb_api_key:
@@ -686,7 +697,7 @@ async def activity_loop(
                                 album_item = await response.json()
                                 album_music_ids = album_item.get('ProviderIds', {})
                                 group_id = album_music_ids.get('MusicBrainzReleaseGroup')
-                        except aiohttp.ClientError, asyncio.TimeoutError, ValueError:
+                        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                             pass
 
                     if not group_id:
@@ -719,7 +730,7 @@ async def activity_loop(
                                             album_item = await response.json()
                                     album_music_ids = album_item.get('ProviderIds', {})
                                     release_id = album_music_ids.get('MusicBrainzAlbum')
-                                except aiohttp.ClientError, asyncio.TimeoutError, ValueError:
+                                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                                     pass
                         poster_url = await get_release_cover(cache_session, group_id, release_id)
 
@@ -808,7 +819,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
             await activity_loop(
                 jf_session, cache_session, discord_rpc, config, polling_rate, seek_threshold
             )
-    except KeyboardInterrupt, asyncio.CancelledError:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
         with suppress(PyPresenceException, OSError, RuntimeError):
