@@ -171,9 +171,11 @@ def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[s
     if not posters:
         return None
 
-    def get_poster_score(poster: dict[str, Any]) -> tuple[float, int]:
-        return float(poster.get('vote_average', 0.0)), int(
-            poster.get('vote_count', 0), int(poster.get('width', 0))
+    def get_poster_score(poster: dict[str, Any]) -> tuple[float, int, int]:
+        return (
+            poster.get('vote_average', 0.0),
+            poster.get('vote_count', 0),
+            poster.get('width', 0),
         )
 
     posters_by_lang = {}
@@ -810,7 +812,7 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
         pass
     finally:
         with suppress(PyPresenceException, OSError, RuntimeError):
-            await discord_rpc.close()
+            discord_rpc.close()
 
 
 def start_discord_rpc(
