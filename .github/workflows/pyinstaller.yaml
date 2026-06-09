@@ -55,36 +55,46 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         shell: bash
         run: |
-          cp images/icon.png dist/icon.png
+          mv "dist/Jellyfin RPC" dist/jellyfin-rpc
+          mkdir -p "dist/Jellyfin RPC"
+          mv dist/jellyfin-rpc "dist/Jellyfin RPC/"
+          cp images/icon.png "dist/Jellyfin RPC/jellyfin-rpc.png"
 
-          cat << 'EOF' > dist/jellyfin-rpc.desktop
+          cat << 'EOF' > "dist/Jellyfin RPC/jellyfin-rpc.desktop"
           [Desktop Entry]
           Type=Application
           Version=$(uv version --short)
           Name=Jellyfin RPC
           Comment=Discord Rich Presence for Jellyfin
-          Exec="/opt/jellyfin-rpc/Jellyfin RPC"
-          Icon=/opt/jellyfin-rpc/icon.png
+          Exec=/opt/jellyfin-rpc/jellyfin-rpc
+          Icon=/opt/jellyfin-rpc/jellyfin-rpc.png
           Terminal=false
           Categories=Network;Utility;
-          StartupWMClass=Jellyfin RPC
+          StartupWMClass=jellyfin-rpc
           EOF
 
-          cat << 'EOF' > dist/install.sh
+          cat << 'EOF' > "dist/Jellyfin RPC/install.sh"
           #!/usr/bin/env bash
           set -e
+
+          cd "$(dirname "$0")"
           sudo mkdir -p /opt/jellyfin-rpc
-          sudo cp -r ./* /opt/jellyfin-rpc/
-          sudo cp /opt/jellyfin-rpc/jellyfin-rpc.desktop /usr/share/applications/
-          sudo chmod +x /usr/share/applications/jellyfin-rpc.desktop
+          sudo chmod +x jellyfin-rpc.desktop
+          sudo cp jellyfin-rpc.desktop /usr/share/applications/
+          sudo cp jellyfin-rpc jellyfin-rpc.png /opt/jellyfin-rpc/
           EOF
 
-          chmod +x dist/install.sh
+          chmod +x "dist/Jellyfin RPC/install.sh"
       - name: Isolate App Bundle (macOS Only)
         if: startsWith(matrix.os, 'macos')
         run: |
           mkdir -p dist/app_bundle
           mv "dist/Jellyfin RPC.app" dist/app_bundle/
+      - name: Isolate Windows Binary (Windows Only)
+        if: startsWith(matrix.os, 'windows')
+        run: |
+          mkdir -p "dist/Jellyfin RPC"
+          mv "dist/Jellyfin RPC.exe" "dist/Jellyfin RPC/"
       - name: Prepare Artifact Name
         shell: bash
         run: |

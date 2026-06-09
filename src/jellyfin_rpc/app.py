@@ -149,7 +149,7 @@ def save_config(
     for key in (
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
-        'SHOW_JELLYFIN_ICON',
+        'SHOW_JELLYFIN_LOGO',
         'ALWAYS_USE_TMDB',
         'TEXTLESS_POSTERS',
         'SEASON_OVER_SERIES',
@@ -335,13 +335,15 @@ def main() -> None:
 
     data_dir = ''
     if sys.platform == 'win32':
-        data_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
+        root_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
+        data_dir = os.path.join(root_dir, 'Jellyfin RPC')
     elif sys.platform == 'darwin':
-        data_dir = os.path.expanduser('~/Library/Application Support')
+        root_dir = os.path.expanduser('~/Library/Application Support')
+        data_dir = os.path.join(root_dir, 'Jellyfin RPC')
     else:
-        data_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+        root_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+        data_dir = os.path.join(root_dir, 'jellyfin-rpc')
     if data_dir:
-        data_dir = os.path.join(data_dir, 'Jellyfin RPC')
         os.makedirs(data_dir, exist_ok=True)
         ini_path = os.path.join(data_dir, ini_name)
         log_path = os.path.join(data_dir, log_name)
@@ -363,7 +365,9 @@ def main() -> None:
 
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
-    show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO') or config.getboolean(
+        'SHOW_JELLYFIN_ICON', False
+    )
 
     tmdb_api_key = config.get('TMDB_API_KEY', '')
     poster_languages = config.get('POSTER_LANGUAGES', '')
@@ -380,7 +384,7 @@ def main() -> None:
     start_minimized = config.getboolean('START_MINIMIZED', True)
     minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
 
-    polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
+    polling_rate = max(1, config.getint('POLLING_RATE') or config.getint('REFRESH_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
@@ -389,7 +393,7 @@ def main() -> None:
     appearance_mode = config.get('APPEARANCE_MODE', color_theme)
     ctk.set_appearance_mode(appearance_mode)
 
-    root = ctk.CTk()
+    root = ctk.CTk(className='jellyfin-rpc')
     root.title('Jellyfin RPC')
     root.rowconfigure(0, weight=1)
     root.columnconfigure(0, weight=1)
@@ -579,11 +583,11 @@ def main() -> None:
     )
     checkbox_server_name.pack(anchor='w', pady=5, padx=10, fill='x')
 
-    var_jf_icon = ctk.IntVar(value=show_jf_icon)
-    checkbox_jf_icon = ctk.CTkCheckBox(
-        master=col3, text='Show Jellyfin Logo (Small Image)', variable=var_jf_icon
+    var_jf_logo = ctk.IntVar(value=show_jf_logo)
+    checkbox_jf_logo = ctk.CTkCheckBox(
+        master=col3, text='Show Jellyfin Logo (Small Image)', variable=var_jf_logo
     )
-    checkbox_jf_icon.pack(anchor='w', pady=5, padx=10, fill='x')
+    checkbox_jf_logo.pack(anchor='w', pady=5, padx=10, fill='x')
 
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(10, 0), padx=10)
@@ -717,7 +721,7 @@ def main() -> None:
         'RELEASE_OVER_GROUP': checkbox_release_over_group,
         'SHOW_WHEN_PAUSED': checkbox_paused,
         'SHOW_SERVER_NAME': checkbox_server_name,
-        'SHOW_JELLYFIN_ICON': checkbox_jf_icon,
+        'SHOW_JELLYFIN_LOGO': checkbox_jf_logo,
         'ALWAYS_USE_TMDB': checkbox_always_use_tmdb,
         'ALWAYS_USE_MUSICBRAINZ': checkbox_always_use_musicbrainz,
         'TEXTLESS_POSTERS': checkbox_textless_posters,

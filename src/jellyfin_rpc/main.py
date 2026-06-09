@@ -353,7 +353,9 @@ async def activity_loop(
 
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
-    show_jf_icon = config.getboolean('SHOW_JELLYFIN_ICON', False)
+    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO') or config.getboolean(
+        'SHOW_JELLYFIN_ICON', False
+    )
 
     user_id, server_name = await get_jf_user_and_server(
         jf_session, config, show_server_name, polling_rate
@@ -757,7 +759,7 @@ async def activity_loop(
                 }
 
             if media_changed or playstate_changed or seek_detected:
-                small_image = 'small_image' if show_jf_icon else None
+                small_image = 'small_image' if show_jf_logo else None
                 try:
                     await discord_rpc.update(
                         **cached_kwargs,
@@ -830,7 +832,7 @@ def start_discord_rpc(
     ini_path: str, log_path: str | None = None, log_queue: Queue[LogRecord] | None = None
 ) -> None:
     config = load_config(ini_path)
-    polling_rate = max(1, config.getint('POLLING_RATE', config.getint('REFRESH_RATE', 5)))
+    polling_rate = max(1, config.getint('POLLING_RATE') or config.getint('REFRESH_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
 
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
