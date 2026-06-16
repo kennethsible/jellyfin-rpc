@@ -54,9 +54,16 @@ def parse_delimited_list(config: SectionProxy, option: str) -> list[str]:
 
 
 def get_lang_code(lang_str: str) -> str | None:
+    lang_str = lang_str.strip()
     try:
-        return Language.find(lang_str.strip()).language
-    except (ImportError, LookupError):
+        lang = Language.get(lang_str)
+        if lang.language:
+            return lang.language
+    except (ImportError, LookupError, ValueError):
+        pass
+    try:
+        return Language.find(lang_str).language
+    except (ImportError, LookupError, ValueError):
         return None
 
 
