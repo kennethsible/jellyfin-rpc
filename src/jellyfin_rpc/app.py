@@ -439,27 +439,21 @@ def main() -> None:
     label_host.pack(anchor='w', padx=10)
 
     var_jf_host = ctk.StringVar(value=jf_host)
-    entry_jf_host = ctk.CTkEntry(
-        master=col1, textvariable=var_jf_host if var_jf_host.get() else None
-    )
+    entry_jf_host = ctk.CTkEntry(master=col1, textvariable=var_jf_host)
     entry_jf_host.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
     label_jf_api_key.pack(anchor='w', padx=10)
 
     var_jf_api_key = ctk.StringVar(value=jf_api_key)
-    entry_jf_api_key = ctk.CTkEntry(
-        master=col1, textvariable=var_jf_api_key if var_jf_api_key.get() else None
-    )
+    entry_jf_api_key = ctk.CTkEntry(master=col1, textvariable=var_jf_api_key)
     entry_jf_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_username = ctk.CTkLabel(master=col1, text='Jellyfin Username', font=font_label)
     label_jf_username.pack(anchor='w', padx=10)
 
     var_jf_username = ctk.StringVar(value=jf_username)
-    entry_jf_username = ctk.CTkEntry(
-        master=col1, textvariable=var_jf_username if var_jf_username.get() else None
-    )
+    entry_jf_username = ctk.CTkEntry(master=col1, textvariable=var_jf_username)
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
     label_whitelist = ctk.CTkLabel(master=col1, text='Library Whitelist')
@@ -467,9 +461,7 @@ def main() -> None:
 
     var_whitelist = ctk.StringVar(value=whitelist)
     entry_whitelist = ctk.CTkEntry(
-        master=col1,
-        textvariable=var_whitelist if var_whitelist.get() else None,
-        placeholder_text='Leave Blank to Disable',
+        master=col1, textvariable=var_whitelist, placeholder_text='Leave Blank to Disable'
     )
     entry_whitelist.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -478,9 +470,7 @@ def main() -> None:
 
     var_blacklist = ctk.StringVar(value=blacklist)
     entry_blacklist = ctk.CTkEntry(
-        master=col1,
-        textvariable=var_blacklist if var_blacklist.get() else None,
-        placeholder_text='Leave Blank to Disable',
+        master=col1, textvariable=var_blacklist, placeholder_text='Leave Blank to Disable'
     )
     entry_blacklist.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -496,9 +486,7 @@ def main() -> None:
 
     var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key)
     entry_tmdb_api_key = ctk.CTkEntry(
-        master=col2,
-        textvariable=var_tmdb_api_key if var_tmdb_api_key.get() else None,
-        placeholder_text='Leave Blank to Disable',
+        master=col2, textvariable=var_tmdb_api_key, placeholder_text='Leave Blank to Disable'
     )
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -507,9 +495,7 @@ def main() -> None:
 
     var_languages = ctk.StringVar(value=poster_languages)
     entry_languages = ctk.CTkEntry(
-        master=col2,
-        textvariable=var_languages if var_languages.get() else None,
-        placeholder_text='Leave Blank to Disable',
+        master=col2, textvariable=var_languages, placeholder_text='Leave Blank to Disable'
     )
     entry_languages.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -847,7 +833,7 @@ def main() -> None:
     )
     button_connect.pack(pady=(5, 10))
     context['button_connect'] = button_connect
-    if jf_host and jf_api_key and jf_username:
+    if jf_host:  # and jf_api_key and jf_username:
         on_click_callback()
         if start_minimized and button_connect_text == 'Disconnect':
             if sys.platform == 'linux':
@@ -858,6 +844,11 @@ def main() -> None:
         logger.info('Getting Started?')
 
     def poll_process_status() -> None:
+        status_text = textbox_status_monitor.get('1.0', 'end')
+        if not var_jf_api_key.get() and 'via Quick Connect' in status_text:
+            config = load_config(ini_path)
+            var_jf_api_key.set(config.get('JELLYFIN_API_KEY', ''))
+            var_jf_username.set(config.get('JELLYFIN_USERNAME', ''))
         if rpc_process.has_failed():
             on_click_callback()
         root.after(1000, lambda: poll_process_status())

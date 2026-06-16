@@ -1,14 +1,18 @@
 import argparse
 import asyncio
+import hashlib
 import logging
+import platform
 import re
 import ssl
 import sys
 import time
+import uuid
 from configparser import ConfigParser, SectionProxy
 from contextlib import suppress
 from email.utils import parseaddr
 from importlib.metadata import metadata
+from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from typing import Any
@@ -28,7 +32,8 @@ logger = logging.getLogger('RPC')
 
 pkg_metadata = metadata('jellyfin-rpc')
 contact_info = parseaddr(pkg_metadata['Author-email'])[1]
-USER_AGENT = f'Jellyfin-RPC/{pkg_metadata["Version"]} ( {contact_info} )'
+RPC_VERSION = pkg_metadata['Version']
+USER_AGENT = f'Jellyfin-RPC/{RPC_VERSION} ( {contact_info} )'
 
 
 def load_config(ini_path: str) -> SectionProxy:
@@ -55,8 +60,76 @@ def get_lang_code(lang_str: str) -> str | None:
         return None
 
 
+def get_device_id(config: SectionProxy) -> str:
+    if device_id := config.get('JELLYFIN_DEVICE_ID'):
+        return device_id
+    try:
+        hardware_str = f'Jellyfin-RPC-{uuid.getnode()}-{platform.node()}'
+        device_id = hashlib.sha256(hardware_str.encode('utf-8')).hexdigest()[:32]
+    except (OSError, AttributeError):
+        device_id = f'Jellyfin-RPC-Fallback-{uuid.uuid4().hex[:16]}'
+    config['JELLYFIN_DEVICE_ID'] = device_id
+    return device_id
+
+
+def build_auth_header(device_id: str, api_key: str | None = None) -> str:
+    client, device = 'Jellyfin RPC', 'Discord RPC'
+    base_auth = f'MediaBrowser Client="{client}", Device="{device}", DeviceId="{device_id}", Version="{RPC_VERSION}"'
+    if api_key:
+        base_auth += f', Token="{api_key}"'
+    return base_auth
+
+
+async def initiate_quick_connect(
+    session: ClientSession, jf_host: str, device_id: str
+) -> tuple[str, str]:
+    headers = {'Accept': 'application/json', 'Authorization': build_auth_header(device_id)}
+    try:
+        async with session.post(f'{jf_host}/QuickConnect/Initiate', headers=headers) as response:
+            response.raise_for_status()
+            init_data = await response.json()
+            secret = init_data['Secret']
+            code = init_data['Code']
+            logger.info(f'Quick Connect Code: {code}')
+    except (aiohttp.ClientError, asyncio.TimeoutError, JSONDecodeError, KeyError) as e:
+        logger.error(f'Failed to Initiate Quick Connect: {e}')
+        sys.exit(1)
+
+    while True:
+        try:
+            async with session.get(
+                f'{jf_host}/QuickConnect/Connect?secret={secret}', headers=headers
+            ) as response:
+                if response.status == 200:
+                    connect_data = await response.json()
+                    if connect_data.get('Authenticated') is True:
+                        break
+        except (aiohttp.ClientError, asyncio.TimeoutError, JSONDecodeError, KeyError):
+            pass
+        await asyncio.sleep(5)
+
+    try:
+        payload = {'Secret': secret}
+        async with session.post(
+            f'{jf_host}/Users/AuthenticateWithQuickConnect', headers=headers, json=payload
+        ) as response:
+            response.raise_for_status()
+            auth_data = await response.json()
+            token = auth_data['AccessToken']
+            username = auth_data['User']['Name']
+            logger.info(f'Successfully Authenticated via Quick Connect ({username})')
+            return token, username
+    except (aiohttp.ClientError, asyncio.TimeoutError, JSONDecodeError, KeyError) as e:
+        logger.error(f'Failed to Retrieve User Access Token: {e}')
+        sys.exit(1)
+
+
 async def get_jf_user_and_server(
-    session: ClientSession, config: SectionProxy, show_server_name: bool, polling_rate: int
+    session: ClientSession,
+    config: SectionProxy,
+    ini_path: str,
+    show_server_name: bool,
+    polling_rate: int,
 ) -> tuple[str, str | None]:
     try:
         jf_host = config['JELLYFIN_HOST'].rstrip('/')
@@ -64,10 +137,28 @@ async def get_jf_user_and_server(
         jf_api_key = config['JELLYFIN_API_KEY']
     except KeyError as e:
         logger.error(f'Missing Key in INI Config: {e}')
-        sys.exit(0)
+        sys.exit(1)
+
+    device_id = get_device_id(config)
+    if not jf_api_key:
+        jf_api_key, jf_username = await initiate_quick_connect(session, jf_host, device_id)
+
+        config['JELLYFIN_API_KEY'] = jf_api_key
+        config['JELLYFIN_USERNAME'] = jf_username
+
+        config_parser = ConfigParser()
+        config_parser.read(ini_path)
+        config_parser.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
+        config_parser.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
+        with open(ini_path, 'w') as ini_file:
+            config_parser.write(ini_file)
 
     initial_attempt = True
-    headers = {'Accept': 'application/json', 'X-Emby-Token': jf_api_key}
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': build_auth_header(device_id, jf_api_key),
+    }
+
     while True:
         try:
             async with session.get(f'{jf_host}/Users', headers=headers) as response:
@@ -79,8 +170,8 @@ async def get_jf_user_and_server(
                 if jf_username == user.get('Name', ''):
                     user_id = user.get('Id')
             if user_id is None:
-                logger.error(f'Username Not Found: {jf_username}')
-                sys.exit(0)
+                logger.error(f'Jellyfin User Not Found: {jf_username}')
+                sys.exit(1)
 
             server_name = None
             if show_server_name:
@@ -343,14 +434,11 @@ async def activity_loop(
     cache_session: ClientSession,
     discord_rpc: AioPresence,
     config: SectionProxy,
+    ini_path: str,
     polling_rate: int,
     seek_threshold: int,
 ) -> None:
     jf_host = config['JELLYFIN_HOST'].rstrip('/')
-    jf_api_key = config['JELLYFIN_API_KEY']
-    jf_username = config['JELLYFIN_USERNAME']
-    jf_headers = {'Accept': 'application/json', 'X-Emby-Token': jf_api_key}
-
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO') or config.getboolean(
@@ -358,8 +446,14 @@ async def activity_loop(
     )
 
     user_id, server_name = await get_jf_user_and_server(
-        jf_session, config, show_server_name, polling_rate
+        jf_session, config, ini_path, show_server_name, polling_rate
     )
+    jf_username = config['JELLYFIN_USERNAME']
+    jf_api_key = config['JELLYFIN_API_KEY']
+    jf_headers = {
+        'Accept': 'application/json',
+        'Authorization': build_auth_header(get_device_id(config), jf_api_key),
+    }
 
     if tmdb_api_key := config.get('TMDB_API_KEY'):
         await check_tmdb_connection(cache_session, tmdb_api_key)
@@ -408,8 +502,11 @@ async def activity_loop(
             logger.error(f'Session Polling Error: {type(e).__name__}')
             logger.debug(e)
             user_id, server_name = await get_jf_user_and_server(
-                jf_session, config, show_server_name, polling_rate
+                jf_session, config, ini_path, show_server_name, polling_rate
             )
+            jf_username = config['JELLYFIN_USERNAME']
+            jf_api_key = config['JELLYFIN_API_KEY']
+            jf_headers['Authorization'] = build_auth_header(get_device_id(config), jf_api_key)
             await asyncio.sleep(polling_rate)
             continue
         except ValueError as e:
@@ -801,7 +898,9 @@ async def activity_loop(
         await asyncio.sleep(polling_rate)
 
 
-async def monitor_activity(config: SectionProxy, polling_rate: int, seek_threshold: int) -> None:
+async def monitor_activity(
+    config: SectionProxy, init_path: str, polling_rate: int, seek_threshold: int
+) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
     discord_rpc = AioPresence(client_id)
     await await_connection(discord_rpc, polling_rate)
@@ -819,7 +918,13 @@ async def monitor_activity(config: SectionProxy, polling_rate: int, seek_thresho
             ) as cache_session,
         ):
             await activity_loop(
-                jf_session, cache_session, discord_rpc, config, polling_rate, seek_threshold
+                jf_session,
+                cache_session,
+                discord_rpc,
+                config,
+                init_path,
+                polling_rate,
+                seek_threshold,
             )
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
@@ -855,7 +960,7 @@ def start_discord_rpc(
         queue_hdlr.setLevel(log_level)
         logger.addHandler(queue_hdlr)
 
-    asyncio.run(monitor_activity(config, polling_rate, seek_threshold))
+    asyncio.run(monitor_activity(config, ini_path, polling_rate, seek_threshold))
 
 
 def main() -> None:
