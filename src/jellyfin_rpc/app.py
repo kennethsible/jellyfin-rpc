@@ -90,12 +90,14 @@ class RPCLogger:
         end_index = f'{start_index}+{len(record.levelname)}c'
         self.text_widget.tag_add(record.levelname, start_index, end_index)
 
-        if message.rstrip().endswith('Getting Started?'):
+        if message.rstrip().endswith('Open Setup Guide'):
             tk_text = self.text_widget._textbox
             tk_text.tag_add('link', '1.6', '1.22')
             mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
             link_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
-            tk_text.tag_configure('link', foreground=link_color, underline=True)
+            bold_font = ctk.CTkFont(family=tk_text.cget('font'))
+            bold_font.configure(weight='bold')
+            tk_text.tag_configure('link', foreground=link_color, font=bold_font)
             tk_text.tag_bind(
                 'link',
                 '<Button-1>',
@@ -439,21 +441,29 @@ def main() -> None:
     label_host.pack(anchor='w', padx=10)
 
     var_jf_host = ctk.StringVar(value=jf_host)
-    entry_jf_host = ctk.CTkEntry(master=col1, textvariable=var_jf_host)
+    entry_jf_host = ctk.CTkEntry(master=col1, textvariable=var_jf_host if jf_host else None)
     entry_jf_host.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
     label_jf_api_key.pack(anchor='w', padx=10)
 
     var_jf_api_key = ctk.StringVar(value=jf_api_key)
-    entry_jf_api_key = ctk.CTkEntry(master=col1, textvariable=var_jf_api_key)
+    entry_jf_api_key = ctk.CTkEntry(
+        master=col1,
+        textvariable=var_jf_api_key if jf_api_key else None,
+        placeholder_text='Leave Blank for Quick Connect',
+    )
     entry_jf_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_username = ctk.CTkLabel(master=col1, text='Jellyfin Username', font=font_label)
     label_jf_username.pack(anchor='w', padx=10)
 
     var_jf_username = ctk.StringVar(value=jf_username)
-    entry_jf_username = ctk.CTkEntry(master=col1, textvariable=var_jf_username)
+    entry_jf_username = ctk.CTkEntry(
+        master=col1,
+        textvariable=var_jf_username if jf_username else None,
+        placeholder_text='Leave Blank for Quick Connect',
+    )
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
     label_whitelist = ctk.CTkLabel(master=col1, text='Library Whitelist')
@@ -461,7 +471,9 @@ def main() -> None:
 
     var_whitelist = ctk.StringVar(value=whitelist)
     entry_whitelist = ctk.CTkEntry(
-        master=col1, textvariable=var_whitelist, placeholder_text='Leave Blank to Disable'
+        master=col1,
+        textvariable=var_whitelist if whitelist else None,
+        placeholder_text='Leave Blank to Disable',
     )
     entry_whitelist.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -470,7 +482,9 @@ def main() -> None:
 
     var_blacklist = ctk.StringVar(value=blacklist)
     entry_blacklist = ctk.CTkEntry(
-        master=col1, textvariable=var_blacklist, placeholder_text='Leave Blank to Disable'
+        master=col1,
+        textvariable=var_blacklist if blacklist else None,
+        placeholder_text='Leave Blank to Disable',
     )
     entry_blacklist.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -484,9 +498,11 @@ def main() -> None:
     label_tmdb_api_key = ctk.CTkLabel(master=col2, text='TMDB API Key', font=font_label)
     label_tmdb_api_key.pack(anchor='w', padx=10)
 
-    var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key)
+    var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key or None)
     entry_tmdb_api_key = ctk.CTkEntry(
-        master=col2, textvariable=var_tmdb_api_key, placeholder_text='Leave Blank to Disable'
+        master=col2,
+        textvariable=var_tmdb_api_key if tmdb_api_key else None,
+        placeholder_text='Leave Blank to Disable',
     )
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -495,7 +511,9 @@ def main() -> None:
 
     var_languages = ctk.StringVar(value=poster_languages)
     entry_languages = ctk.CTkEntry(
-        master=col2, textvariable=var_languages, placeholder_text='Leave Blank to Disable'
+        master=col2,
+        textvariable=var_languages if poster_languages else None,
+        placeholder_text='Leave Blank to Disable',
     )
     entry_languages.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -623,7 +641,10 @@ def main() -> None:
 
     var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
     entry_polling_rate = ctk.CTkEntry(
-        master=frame_advanced_settings, textvariable=var_polling_rate, width=50, justify='center'
+        master=frame_advanced_settings,
+        textvariable=var_polling_rate if polling_rate else None,
+        width=50,
+        justify='center',
     )
     entry_polling_rate.configure(state='disabled')
     entry_polling_rate.grid(row=0, column=2, pady=5, sticky='e')
@@ -643,7 +664,10 @@ def main() -> None:
 
     var_seek_threshold = ctk.StringVar(value=f'{seek_threshold}s')
     entry_seek_threshold = ctk.CTkEntry(
-        master=frame_advanced_settings, textvariable=var_seek_threshold, width=50, justify='center'
+        master=frame_advanced_settings,
+        textvariable=var_seek_threshold if seek_threshold else None,
+        width=50,
+        justify='center',
     )
     entry_seek_threshold.configure(state='disabled')
     entry_seek_threshold.grid(row=1, column=2, pady=5, sticky='e')
@@ -841,7 +865,7 @@ def main() -> None:
             else:
                 root.withdraw()
     else:
-        logger.info('Getting Started?')
+        logger.info('Open Setup Guide')
 
     def poll_process_status() -> None:
         status_text = textbox_status_monitor.get('1.0', 'end')

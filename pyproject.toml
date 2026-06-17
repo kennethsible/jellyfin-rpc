@@ -7,7 +7,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Ken Sible", email = "ksible@outlook.com" }]
 requires-python = ">=3.12"
 dependencies = [
-    "aiohttp>=3.14.0",
+    "aiohttp>=3.14.1",
     "aiohttp-client-cache>=0.14.3",
     "requests>=2.34.2",
     "certifi>=2026.5.20",
@@ -17,10 +17,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.20.0"]
+gui = ["customtkinter>=5.2.2", "pystray>=0.19.5", "pyinstaller>=6.21.0"]
 
 [dependency-groups]
-dev = ["ruff>=0.15.16", "mypy>=2.1.0", "types-requests"]
+dev = ["ruff>=0.15.17", "mypy>=2.1.0", "types-requests"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"
