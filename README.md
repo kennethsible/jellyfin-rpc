@@ -19,7 +19,7 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ## Configuration
 
-To generate a Jellyfin API key, go to the server dashboard and select **API Keys** under **Advanced**. The Jellyfin host can be either a public or a local URL for your server. However, with a local URL, posters and album covers won't be retrievable from your Jellyfin server. In that case, you will need to rely on public metadata providers (see below for details).
+The Jellyfin host can be either a public or a local URL for your server. However, with a local URL, posters and album covers won't be retrievable from your Jellyfin server. In that case, you will need to rely on public metadata providers (see below for details). After entering your Jellyfin host, click "Connect" and use [Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) to authenticate with a user access token. To generate an API key instead of Quick Connect, go to the server dashboard and select "API Keys" under "Advanced."
 
 If you prefer to use the CLI over the GUI (or you're on Linux), fill out the included [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you run into any issues, please change `log_level` in the INI to `DEBUG` and include the output in your GitHub Issue.
 
@@ -28,7 +28,7 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 - `~/.config/Jellyfin RPC` (Linux)
 
 > [!IMPORTANT]
-> [**TMDB**](https://www.themoviedb.org/) can **optionally** be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [**MusicBrainz**](https://musicbrainz.org/) and the [**Cover Art Archive**](https://coverartarchive.org/) can be used to fetch album covers.
+> [TMDB](https://www.themoviedb.org/) can **optionally** be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/) can be used to fetch album covers.
 
 - `show_when_paused` shows the activity with a paused timer instead of a progress bar. If disabled, the activity stops displaying when you pause your media.
 - `show_server_name` shows your server name as the activity name instead of saying 'Jellyfin'.
@@ -39,6 +39,8 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 - `season_over_series` controls whether season posters are preferred over series posters for shows.
 - `always_use_musicbrainz` controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider.
 - `release_over_group` controls whether release album covers are preferred over group album covers. The distinction between [release](https://musicbrainz.org/doc/Release) and [release group](https://musicbrainz.org/doc/Release_Group) is described in the MusicBrainz documentation. In short, a release is a specific *release* of an album that belongs to a *release group* (one per album).
+- `filter_mode` controls whether `filter_libraries` uses a whitelist (allowed) or blacklist (blocked).
+- `filter_libraries` is a comma-separated list of Jellyfin libraries to either whitelist or blacklist.
 
 ## GUI Screenshot
 
