@@ -157,7 +157,9 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
             'Authorization': build_auth_header(device_id, self.jf_api_key),
         }
         try:
-            response = requests.get(f'{self.jf_host}/Users', headers=headers, timeout=5)
+            response = requests.get(
+                f'{self.jf_host}/Users', headers=headers, timeout=5, verify=certifi.where()
+            )
             response.raise_for_status()
             users_data = response.json()
 
@@ -170,7 +172,10 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
                 return
 
             response = requests.get(
-                f'{self.jf_host}/Users/{user_id}/Views', headers=headers, timeout=5
+                f'{self.jf_host}/Users/{user_id}/Views',
+                headers=headers,
+                timeout=5,
+                verify=certifi.where(),
             )
             response.raise_for_status()
             views_data = response.json()
@@ -287,9 +292,11 @@ def on_click(
     button_connect.update()
 
 
-def on_maximize(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
+def on_maximize(
+    label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, frame_bottom: ctk.CTkFrame, root: ctk.CTk
+) -> None:
     threading.Thread(
-        target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
+        target=check_for_updates, args=(label_update, frame_grid, frame_bottom, root), daemon=True
     ).start()
     root.after(0, root.deiconify)
 
@@ -372,7 +379,9 @@ def parse_version(version_tag: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version_tag.lstrip('v').split('.'))
 
 
-def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root: ctk.CTk) -> None:
+def check_for_updates(
+    label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, frame_bottom: ctk.CTkFrame, root: ctk.CTk
+) -> None:
     try:
         response = requests.get(
             'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest',
@@ -389,8 +398,15 @@ def check_for_updates(label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, root
 
             def show_label_update() -> None:
                 label_update.configure(text=label_text, font=label_font)
-                label_update.pack(before=frame_grid, pady=(5, 0), padx=10)
-                root.geometry('810x610')
+                frame_grid.grid(row=1, column=0, sticky='nsew', padx=10, pady=5)
+                frame_bottom.grid(row=2, column=0, sticky='ew', padx=10, pady=10)
+                root.children['!ctkframe'].grid_rowconfigure(0, weight=0)
+                root.children['!ctkframe'].grid_rowconfigure(1, weight=1)
+                root.children['!ctkframe'].grid_rowconfigure(2, weight=0)
+                label_update.grid(row=0, column=0, pady=(10, 5), padx=10, sticky='ew')
+
+                root.update_idletasks()
+                root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
 
             label_update.after(0, show_label_update)
 
@@ -519,7 +535,7 @@ def main() -> None:
     )
 
     threading.Thread(
-        target=check_for_updates, args=(label_update, frame_grid, root), daemon=True
+        target=check_for_updates, args=(label_update, frame_grid, frame_bottom, root), daemon=True
     ).start()
 
     font_header = ctk.CTkFont(family='Roboto', size=14, weight='bold')
@@ -954,7 +970,8 @@ def main() -> None:
     gui_queue: queue.Queue[str] = queue.Queue()
     if sys.platform == 'darwin':
         root.createcommand(
-            '::tk::mac::ReopenApplication', lambda: on_maximize(label_update, frame_grid, root)
+            '::tk::mac::ReopenApplication',
+            lambda: on_maximize(label_update, frame_grid, frame_bottom, root),
         )
     elif sys.platform == 'win32':
         tray_icon = pystray.Icon(
@@ -1003,7 +1020,7 @@ def main() -> None:
                 case 'CONNECT':
                     on_click_callback()
                 case 'MAXIMIZE':
-                    on_maximize(label_update, frame_grid, root)
+                    on_maximize(label_update, frame_grid, frame_bottom, root)
                 case 'QUIT':
                     on_close_callback()
         except queue.Empty:
