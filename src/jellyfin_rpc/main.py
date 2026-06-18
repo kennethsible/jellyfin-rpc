@@ -483,8 +483,8 @@ async def activity_loop(
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
-    whitelist = parse_delimited_list(config, 'WHITELIST_LIBRARIES')
-    blacklist = parse_delimited_list(config, 'BLACKLIST_LIBRARIES')
+    filter_mode = config.get('FILTER_MODE', 'BLACKLIST').upper()
+    filter_libraries = parse_delimited_list(config, 'FILTER_LIBRARIES')
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     jf_media_types = set()
@@ -564,54 +564,54 @@ async def activity_loop(
                 media_dict = session_data['NowPlayingItem']
                 item_id = media_dict.get('Id')
 
-                if whitelist or blacklist:
-                    library = None
-                    if item_id == cached_item_id:
-                        library = cached_library
-                    elif item_id:
-                        try:
-                            ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
-                            async with jf_session.get(
-                                ancestors_url, headers=jf_headers, params={'userId': user_id}
-                            ) as response:
-                                response.raise_for_status()
-                                ancestors = await response.json()
-                            for ancestor in ancestors:
-                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
-                                    library = ancestor.get('Name')
-                                    break
-                            if library:
-                                cached_item_id, cached_library = item_id, library
-                        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
-                            logger.error(
-                                f'Library Retrieval Failed ({type(e).__name__}). Skipping...'
-                            )
-                            logger.debug(e)
+                library_id = None
+                if item_id == cached_item_id:
+                    library_id = cached_library
+                elif item_id:
+                    try:
+                        ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
+                        async with jf_session.get(
+                            ancestors_url, headers=jf_headers, params={'userId': user_id}
+                        ) as response:
+                            response.raise_for_status()
+                            ancestors = await response.json()
+                        for ancestor in ancestors:
+                            if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
+                                library_id = ancestor.get('Id')
+                                break
+                        if library_id:
+                            cached_item_id, cached_library = item_id, library_id
+                    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+                        logger.error(f'Library Retrieval Failed ({type(e).__name__}). Skipping...')
+                        logger.debug(e)
 
-                    is_allowed = True
-                    if library:
-                        if whitelist and library not in whitelist:
-                            is_allowed = False
-                        if blacklist and library in blacklist:
-                            is_allowed = False
-                    elif whitelist:
+                match filter_mode:
+                    case 'WHITELIST':
                         is_allowed = False
+                        if library_id and library_id in filter_libraries:
+                            is_allowed = True
+                    case 'BLACKLIST':
+                        is_allowed = True
+                        if library_id and library_id in filter_libraries:
+                            is_allowed = False
+                    case _:
+                        is_allowed = True
 
-                    if not is_allowed:
-                        if previous_activity is not None:
-                            try:
-                                await discord_rpc.clear()
-                            except (PyPresenceException, OSError, KeyError) as e:
-                                logger.error(f'RPC Clear Error: {type(e).__name__}')
-                                logger.debug(e)
-                                await await_connection(discord_rpc, polling_rate)
-                                await asyncio.sleep(polling_rate)
-                                continue
-                            logger.info('Activity Cleared (Library Blocked)')
-                            previous_activity = previous_start = None
-                            previous_playstate = False
-                        await asyncio.sleep(polling_rate)
-                        continue
+                if not is_allowed:
+                    if previous_activity is not None:
+                        try:
+                            await discord_rpc.clear()
+                        except (PyPresenceException, OSError, KeyError) as e:
+                            logger.error(f'RPC Clear Error: {type(e).__name__}')
+                            logger.debug(e)
+                            await await_connection(discord_rpc, polling_rate)
+                            await asyncio.sleep(polling_rate)
+                            continue
+                        logger.info('Activity Cleared (Library Blocked)')
+                        previous_activity = previous_start = None
+                        previous_playstate = False
+                    await asyncio.sleep(polling_rate)
+                    continue
 
                 match media_type := media_dict['Type']:
                     case 'Episode':

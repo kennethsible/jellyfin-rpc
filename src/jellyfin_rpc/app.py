@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from configparser import ConfigParser
+from configparser import ConfigParser, SectionProxy
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
@@ -22,7 +22,7 @@ from PIL import Image
 from requests.exceptions import RequestException
 
 from jellyfin_rpc import __version__, start_discord_rpc
-from jellyfin_rpc.main import load_config, parse_delimited_list
+from jellyfin_rpc.main import build_auth_header, get_device_id, load_config, parse_delimited_list
 
 button_connect_text = ''
 logger = logging.getLogger('GUI')
@@ -115,10 +115,101 @@ class RPCLogger:
         return f'{record.levelname}: {record.getMessage()}\n'
 
 
+class LibrarySelectorWindow(ctk.CTkToplevel):
+    def __init__(
+        self,
+        master: Any,
+        config: SectionProxy,
+        jf_host: str,
+        jf_api_key: str,
+        jf_username: str,
+        var_filter_mode: ctk.StringVar,
+        var_filter_libraries: ctk.StringVar,
+    ):
+        super().__init__(master)
+        self.title('Jellyfin RPC')
+        self.geometry('220x350')
+        self.transient(master)
+        self.grab_set()
+
+        self.jf_host = jf_host
+        self.jf_api_key = jf_api_key
+        self.jf_username = jf_username
+        self.var_filter_libraries = var_filter_libraries
+        self.checkbox_map: dict[str, ctk.BooleanVar] = {}
+
+        self.scroll_frame = ctk.CTkScrollableFrame(
+            master=self, label_text=f'{var_filter_mode.get()}ed Libraries'
+        )
+        self.scroll_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        self.button_save_selection = ctk.CTkButton(
+            master=self, text='Save Selection', command=self.save_selection
+        )
+        self.button_save_selection.pack(pady=(5, 10))
+
+        self.retrieve_libraries(config)
+
+    def retrieve_libraries(self, config: SectionProxy):
+        device_id = get_device_id(config)
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': build_auth_header(device_id, self.jf_api_key),
+        }
+        try:
+            response = requests.get(f'{self.jf_host}/Users', headers=headers, timeout=5)
+            response.raise_for_status()
+            users_data = response.json()
+
+            user_id = None
+            for user in users_data:
+                if self.jf_username == user.get('Name', ''):
+                    user_id = user.get('Id')
+            if user_id is None:
+                ctk.CTkLabel(self.scroll_frame, text=f'User Not Found: {self.jf_username}').pack()
+                return
+
+            response = requests.get(
+                f'{self.jf_host}/Users/{user_id}/Views', headers=headers, timeout=5
+            )
+            response.raise_for_status()
+            views_data = response.json()
+            libraries = views_data.get('Items', [])
+            if not libraries:
+                ctk.CTkLabel(self.scroll_frame, text='No Libraries Retrieved.').pack()
+                return
+
+            filter_libraries = [
+                x.strip() for x in self.var_filter_libraries.get().split(',') if x.strip()
+            ]
+            for library in libraries:
+                library_id = library.get('Id')
+                library_name = library.get('Name')
+
+                var_checkbox = ctk.BooleanVar(value=library_id in filter_libraries)
+                checkbox = ctk.CTkCheckBox(
+                    master=self.scroll_frame, text=library_name, variable=var_checkbox
+                )
+                checkbox.pack(anchor='w', pady=5, padx=10)
+
+                self.checkbox_map[library_id] = var_checkbox
+
+        except RequestException as e:
+            logger.error(f'Failed to Retrieve Libraries: {e}')
+            ctk.CTkLabel(self.scroll_frame, text='Error Retrieving Libraries.').pack()
+
+    def save_selection(self):
+        library_ids = [library_id for library_id, var in self.checkbox_map.items() if var.get()]
+        self.var_filter_libraries.set(','.join(library_ids))
+        self.destroy()
+
+
 def save_config(
     ini_path: str,
     entries: dict[str, dict[str, Any]],
     checkboxes: dict[str, ctk.CTkCheckBox],
+    var_filter_mode: ctk.StringVar,
+    var_filter_libraries: ctk.StringVar,
     var_log_level: ctk.StringVar,
     var_polling_rate: ctk.StringVar,
     var_seek_threshold: ctk.StringVar,
@@ -131,10 +222,10 @@ def save_config(
         'JELLYFIN_USERNAME',
         'TMDB_API_KEY',
         'POSTER_LANGUAGES',
-        'WHITELIST_LIBRARIES',
-        'BLACKLIST_LIBRARIES',
     ):
         config.set('DEFAULT', key, entries[key]['entry'].get())
+    config.set('DEFAULT', 'FILTER_MODE', var_filter_mode.get())
+    config.set('DEFAULT', 'FILTER_LIBRARIES', var_filter_libraries.get())
     config.set('DEFAULT', 'POLLING_RATE', var_polling_rate.get().rstrip('s'))
     config.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
     config.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
@@ -380,8 +471,8 @@ def main() -> None:
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
-    whitelist = config.get('WHITELIST_LIBRARIES', '')
-    blacklist = config.get('BLACKLIST_LIBRARIES', '')
+    filter_mode = config.get('FILTER_MODE', 'BLACKLIST').capitalize()
+    filter_libraries = config.get('FILTER_LIBRARIES', '')
 
     start_minimized = config.getboolean('START_MINIMIZED', True)
     minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
@@ -441,7 +532,7 @@ def main() -> None:
     label_host.pack(anchor='w', padx=10)
 
     var_jf_host = ctk.StringVar(value=jf_host)
-    entry_jf_host = ctk.CTkEntry(master=col1, textvariable=var_jf_host if jf_host else None)
+    entry_jf_host = ctk.CTkEntry(master=col1, textvariable=var_jf_host)
     entry_jf_host.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
@@ -449,9 +540,7 @@ def main() -> None:
 
     var_jf_api_key = ctk.StringVar(value=jf_api_key)
     entry_jf_api_key = ctk.CTkEntry(
-        master=col1,
-        textvariable=var_jf_api_key if jf_api_key else None,
-        placeholder_text='Leave Blank for Quick Connect',
+        master=col1, textvariable=var_jf_api_key, placeholder_text='Leave Blank for Quick Connect'
     )
     entry_jf_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -460,33 +549,60 @@ def main() -> None:
 
     var_jf_username = ctk.StringVar(value=jf_username)
     entry_jf_username = ctk.CTkEntry(
-        master=col1,
-        textvariable=var_jf_username if jf_username else None,
-        placeholder_text='Leave Blank for Quick Connect',
+        master=col1, textvariable=var_jf_username, placeholder_text='Leave Blank for Quick Connect'
     )
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
-    label_whitelist = ctk.CTkLabel(master=col1, text='Library Whitelist')
-    label_whitelist.pack(anchor='w', padx=10)
+    def change_filter_mode(value: str) -> None:
+        var_filter_mode.set(value)
+        on_click(
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
+        )
 
-    var_whitelist = ctk.StringVar(value=whitelist)
-    entry_whitelist = ctk.CTkEntry(
+    var_filter_mode = ctk.StringVar(value=filter_mode.capitalize())
+    segmented_filter_mode = ctk.CTkSegmentedButton(
         master=col1,
-        textvariable=var_whitelist if whitelist else None,
-        placeholder_text='Leave Blank to Disable',
+        values=['Blacklist', 'Whitelist'],
+        variable=var_filter_mode,
+        command=lambda value: change_filter_mode(value),
     )
-    entry_whitelist.pack(pady=(0, 5), padx=10, fill='x')
+    segmented_filter_mode.pack(pady=(10, 5), padx=10, fill='x')
+    var_filter_libraries = ctk.StringVar(value=filter_libraries)
 
-    label_blacklist = ctk.CTkLabel(master=col1, text='Library Blacklist')
-    label_blacklist.pack(anchor='w', padx=10)
+    def select_libraries() -> None:
+        jf_host_str = entry_jf_host.get().rstrip('/')
+        if not jf_host_str:
+            logger.error('Missing Jellyfin Host')
+            return
+        jf_api_key_str = entry_jf_api_key.get()
+        if not jf_api_key_str:
+            logger.error('Missing Jellyfin API Key')
+            return
+        jf_username_str = entry_jf_username.get()
 
-    var_blacklist = ctk.StringVar(value=blacklist)
-    entry_blacklist = ctk.CTkEntry(
-        master=col1,
-        textvariable=var_blacklist if blacklist else None,
-        placeholder_text='Leave Blank to Disable',
+        LibrarySelectorWindow(
+            root,
+            config,
+            jf_host_str,
+            jf_api_key_str,
+            jf_username_str,
+            var_filter_mode,
+            var_filter_libraries,
+        )
+        on_click(
+            cast(ctk.CTkButton, context['button_connect']),
+            entries,
+            rpc_process,
+            only_disconnect=True,
+        )
+
+    button_select_libraries = ctk.CTkButton(
+        master=col1, text='Select Libraries', command=select_libraries
     )
-    entry_blacklist.pack(pady=(0, 5), padx=10, fill='x')
+    button_select_libraries.pack(pady=5, padx=10, fill='x')
 
     textbox_status_monitor = ctk.CTkTextbox(master=col1, height=100)
     textbox_status_monitor.configure(state='disabled')
@@ -500,9 +616,7 @@ def main() -> None:
 
     var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key or None)
     entry_tmdb_api_key = ctk.CTkEntry(
-        master=col2,
-        textvariable=var_tmdb_api_key if tmdb_api_key else None,
-        placeholder_text='Leave Blank to Disable',
+        master=col2, textvariable=var_tmdb_api_key, placeholder_text='Leave Blank to Disable'
     )
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -511,9 +625,7 @@ def main() -> None:
 
     var_languages = ctk.StringVar(value=poster_languages)
     entry_languages = ctk.CTkEntry(
-        master=col2,
-        textvariable=var_languages if poster_languages else None,
-        placeholder_text='Leave Blank to Disable',
+        master=col2, textvariable=var_languages, placeholder_text='Leave Blank to Disable'
     )
     entry_languages.pack(pady=(0, 5), padx=10, fill='x')
 
@@ -641,10 +753,7 @@ def main() -> None:
 
     var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
     entry_polling_rate = ctk.CTkEntry(
-        master=frame_advanced_settings,
-        textvariable=var_polling_rate if polling_rate else None,
-        width=50,
-        justify='center',
+        master=frame_advanced_settings, textvariable=var_polling_rate, width=50, justify='center'
     )
     entry_polling_rate.configure(state='disabled')
     entry_polling_rate.grid(row=0, column=2, pady=5, sticky='e')
@@ -664,10 +773,7 @@ def main() -> None:
 
     var_seek_threshold = ctk.StringVar(value=f'{seek_threshold}s')
     entry_seek_threshold = ctk.CTkEntry(
-        master=frame_advanced_settings,
-        textvariable=var_seek_threshold if seek_threshold else None,
-        width=50,
-        justify='center',
+        master=frame_advanced_settings, textvariable=var_seek_threshold, width=50, justify='center'
     )
     entry_seek_threshold.configure(state='disabled')
     entry_seek_threshold.grid(row=1, column=2, pady=5, sticky='e')
@@ -717,8 +823,6 @@ def main() -> None:
         'JELLYFIN_API_KEY': {'entry': entry_jf_api_key, 'obfuscate': True},
         'JELLYFIN_USERNAME': {'entry': entry_jf_username, 'obfuscate': False},
         'TMDB_API_KEY': {'entry': entry_tmdb_api_key, 'obfuscate': True},
-        'WHITELIST_LIBRARIES': {'entry': entry_whitelist, 'obfuscate': False},
-        'BLACKLIST_LIBRARIES': {'entry': entry_blacklist, 'obfuscate': False},
         'POSTER_LANGUAGES': {'entry': entry_languages, 'obfuscate': False},
     }
     checkboxes = {
@@ -754,7 +858,7 @@ def main() -> None:
                 )
             )
 
-    def set_log_level(level: str) -> None:  # TODO
+    def set_log_level(level: str) -> None:
         logger.setLevel(level)
         on_click(
             cast(ctk.CTkButton, context['button_connect']),
@@ -817,7 +921,14 @@ def main() -> None:
 
     def on_click_callback() -> None:
         save_config(
-            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold
+            ini_path,
+            entries,
+            checkboxes,
+            var_filter_mode,
+            var_filter_libraries,
+            var_log_level,
+            var_polling_rate,
+            var_seek_threshold,
         )
         on_click(
             cast(ctk.CTkButton, context['button_connect']),
@@ -828,7 +939,14 @@ def main() -> None:
 
     def on_close_callback() -> None:
         save_config(
-            ini_path, entries, checkboxes, var_log_level, var_polling_rate, var_seek_threshold
+            ini_path,
+            entries,
+            checkboxes,
+            var_filter_mode,
+            var_filter_libraries,
+            var_log_level,
+            var_polling_rate,
+            var_seek_threshold,
         )
         on_close(root, rpc_process, context['tray_icon'])
 

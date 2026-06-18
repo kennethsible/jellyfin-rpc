@@ -39,7 +39,6 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 - `season_over_series` controls whether season posters are preferred over series posters for shows.
 - `always_use_musicbrainz` controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider.
 - `release_over_group` controls whether release album covers are preferred over group album covers. The distinction between [release](https://musicbrainz.org/doc/Release) and [release group](https://musicbrainz.org/doc/Release_Group) is described in the MusicBrainz documentation. In short, a release is a specific *release* of an album that belongs to a *release group* (one per album).
-- `find_best_match` searches for missing TMDB or MusicBrainz IDs before fetching posters or covers, respectively. Ideally, you should make sure that Jellyfin has populated these metadata tags.
 
 ## GUI Screenshot
 
@@ -69,7 +68,7 @@ options:
 2. Create Python Environment
 
     ```bash
-    uv venv .venv --python 3.14
+    uv venv .venv --python 3.12
     ```
 
 3. Build Standalone Executable
