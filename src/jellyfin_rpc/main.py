@@ -218,35 +218,45 @@ async def check_tmdb_connection(session: ClientSession, api_key: str) -> None:
         logger.debug(e)
 
 
-async def get_series_id(session: ClientSession, api_key: str, title: str) -> str | None:
+async def get_series_id(
+    session: ClientSession, api_key: str, title: str, year: int | None = None
+) -> str | None:
     search_url = 'https://api.themoviedb.org/3/search/tv'
     search_params = {'api_key': api_key, 'query': title}
+    if year is not None:
+        search_params['first_air_date_year'] = str(year)
     try:
         async with session.get(search_url, params=search_params) as response:
             response.raise_for_status()
             data = await response.json()
-            return data['results'][0]['id']
+            if results := data.get('results'):
+                return results[0].get('id')
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
-    except (ValueError, KeyError, IndexError) as e:
+    except (ValueError, KeyError) as e:
         logger.warning(f'TMDB API Parsing Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     return None
 
 
-async def get_movie_id(session: ClientSession, api_key: str, title: str) -> str | None:
+async def get_movie_id(
+    session: ClientSession, api_key: str, title: str, year: int | None = None
+) -> str | None:
     search_url = 'https://api.themoviedb.org/3/search/movie'
     search_params = {'api_key': api_key, 'query': title}
+    if year is not None:
+        search_params['first_air_date_year'] = str(year)
     try:
         async with session.get(search_url, params=search_params) as response:
             response.raise_for_status()
             data = await response.json()
-            return data['results'][0]['id']
+            if results := data.get('results'):
+                return results[0].get('id')
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
-    except (ValueError, KeyError, IndexError) as e:
+    except (ValueError, KeyError) as e:
         logger.warning(f'TMDB API Parsing Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     return None
