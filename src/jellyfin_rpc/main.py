@@ -701,7 +701,7 @@ async def activity_loop(
                 is_https = jf_host.startswith('https://')
 
                 if media_type == 'Episode':
-                    tmdb_id = None
+                    tmdb_id = series_year = None
                     if jf_series_id := media_dict.get('SeriesId'):
                         try:
                             async with jf_session.get(
@@ -711,6 +711,7 @@ async def activity_loop(
                             ) as response:
                                 response.raise_for_status()
                                 series_item = await response.json()
+                                series_year = series_item.get('ProductionYear')
                                 series_ids = series_item.get('ProviderIds', {})
                                 tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
                         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
@@ -720,7 +721,7 @@ async def activity_loop(
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'SeriesName' in media_dict:
                             tmdb_id = await get_series_id(
-                                cache_session, tmdb_api_key, media_dict['SeriesName']
+                                cache_session, tmdb_api_key, media_dict['SeriesName'], series_year
                             )
 
                     if not always_use_tmdb:
@@ -771,13 +772,14 @@ async def activity_loop(
 
                 elif media_type == 'Movie':
                     movie_ids = media_dict.get('ProviderIds', {})
+                    movie_year = media_dict.get('ProductionYear')
                     tmdb_id = movie_ids.get('Tmdb') or movie_ids.get('TheMovieDb')
 
                     if not tmdb_id and tmdb_api_key:
                         logger.warning('No TMDB ID Found. Searching...')
                         if 'Name' in media_dict:
                             tmdb_id = await get_movie_id(
-                                cache_session, tmdb_api_key, media_dict['Name']
+                                cache_session, tmdb_api_key, media_dict['Name'], movie_year
                             )
 
                     jf_movie_poster = (
