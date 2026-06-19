@@ -130,6 +130,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
         self.title('Jellyfin RPC')
         self.geometry('220x350')
         self.transient(master)
+        self.wait_visibility()
         self.grab_set()
 
         self.jf_host = jf_host
