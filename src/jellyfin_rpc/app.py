@@ -328,10 +328,12 @@ def get_executable_path() -> str:
         return os.path.abspath(__file__)
 
 
-if sys.platform == 'win32':
-    import winreg
+def set_startup_status(enabled: bool) -> None:
+    exe_path = get_executable_path()
 
-    def set_startup_status(enabled: bool) -> None:
+    if sys.platform == 'win32':
+        import winreg
+
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r'Software\Microsoft\Windows\CurrentVersion\Run',
@@ -339,7 +341,6 @@ if sys.platform == 'win32':
             winreg.KEY_SET_VALUE,
         ) as key:
             if enabled:
-                exe_path = get_executable_path()
                 winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
             else:
                 try:
@@ -347,7 +348,37 @@ if sys.platform == 'win32':
                 except FileNotFoundError:
                     pass
 
-    def get_startup_status() -> bool:
+    elif sys.platform == 'linux':
+        autostart_dir = os.path.expanduser('~/.config/autostart')
+        desktop_file = os.path.join(autostart_dir, 'jellyfin-rpc.desktop')
+        if enabled:
+            os.makedirs(autostart_dir, exist_ok=True)
+            exe_dir = os.path.dirname(exe_path)
+            icon_path = os.path.join(exe_dir, 'jellyfin-rpc.png')
+            if not os.path.exists(icon_path):
+                icon_path = 'jellyfin-rpc'
+            desktop_entry = (
+                '[Desktop Entry]\n'
+                'Type=Application\n'
+                f'Version={__version__}\n'
+                'Name=Jellyfin RPC\n'
+                'Comment=Discord Rich Presence for Jellyfin\n'
+                f'Exec="{exe_path}"\n'
+                f'Icon={icon_path}\n'
+                'Terminal=false\n'
+                'StartupNotify=false\n'
+            )
+            with open(desktop_file, 'w', encoding='utf-8') as f:
+                f.write(desktop_entry)
+        else:
+            if os.path.exists(desktop_file):
+                os.remove(desktop_file)
+
+
+def get_startup_status() -> bool:
+    if sys.platform == 'win32':
+        import winreg
+
         try:
             with winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
@@ -362,6 +393,12 @@ if sys.platform == 'win32':
             return True
         except FileNotFoundError:
             return False
+
+    elif sys.platform == 'linux':
+        desktop_file = os.path.expanduser('~/.config/autostart/jellyfin-rpc.desktop')
+        return os.path.exists(desktop_file)
+
+    return False
 
 
 def open_file(filepath: str) -> None:
@@ -722,7 +759,7 @@ def main() -> None:
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(10, 0), padx=10)
 
-    if sys.platform == 'win32':
+    if sys.platform in ('win32', 'linux'):
         var_startup_status = ctk.IntVar(value=int(get_startup_status()))
         checkbox_startup_status = ctk.CTkCheckBox(
             master=col3,
