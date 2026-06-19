@@ -315,11 +315,8 @@ def on_close(
 def set_close_behavior(
     root: ctk.CTk, on_close_callback: Callable[[], None], withdraw: bool
 ) -> None:
-    if withdraw:
-        if sys.platform == 'linux':
-            root.protocol('WM_DELETE_WINDOW', root.iconify)
-        else:
-            root.protocol('WM_DELETE_WINDOW', root.withdraw)
+    if withdraw and sys.platform != 'linux':
+        root.protocol('WM_DELETE_WINDOW', root.withdraw)
     else:
         root.protocol('WM_DELETE_WINDOW', on_close_callback)
 
@@ -748,7 +745,8 @@ def main() -> None:
         text=f'Close Button Minimizes to {background_type}',
         variable=var_minimize_on_close,
     )
-    checkbox_minimize_on_close.pack(anchor='w', pady=5, padx=10, fill='x')
+    if sys.platform != 'linux':
+        checkbox_minimize_on_close.pack(anchor='w', pady=5, padx=10, fill='x')
 
     label_advanced_settings = ctk.CTkLabel(master=col3, text='Advanced Settings', font=font_header)
     label_advanced_settings.pack(pady=(10, 0), padx=10)
@@ -860,6 +858,8 @@ def main() -> None:
 
     for key, checkbox in checkboxes.items():
         if key == 'MINIMIZE_ON_CLOSE':
+            if sys.platform == 'linux':
+                continue
             checkbox.configure(
                 command=lambda: set_close_behavior(
                     root, on_close_callback, checkboxes['MINIMIZE_ON_CLOSE']._variable.get()
