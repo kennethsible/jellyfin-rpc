@@ -23,7 +23,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install Package Manager
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
@@ -51,40 +51,46 @@ jobs:
             export MACOS_ARCH="x86_64"
           fi
           uv run pyinstaller main.spec --noconfirm
-      - name: Generate Desktop Launcher (Linux Only)
+      - name: Generate AppImage (Linux Only)
         if: matrix.os == 'ubuntu-22.04'
         shell: bash
         run: |
-          mv "dist/Jellyfin RPC" dist/jellyfin-rpc
-          mkdir -p "dist/Jellyfin RPC"
-          mv dist/jellyfin-rpc "dist/Jellyfin RPC/"
-          cp images/icon.png "dist/Jellyfin RPC/jellyfin-rpc.png"
+          mkdir -p dist/AppDir/usr/bin
+          cp images/icon.png dist/AppDir/jellyfin-rpc.png
+          mv "dist/Jellyfin RPC" dist/AppDir/usr/bin/jellyfin-rpc
 
-          cat << 'EOF' > "dist/Jellyfin RPC/jellyfin-rpc.desktop"
+          mkdir -p dist/AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p dist/AppDir/usr/share/icons/hicolor/512x512/apps
+          cp images/icon-256x256.png dist/AppDir/usr/share/icons/hicolor/256x256/apps/jellyfin-rpc.png
+          cp images/icon-512x512.png dist/AppDir/usr/share/icons/hicolor/512x512/apps/jellyfin-rpc.png
+
+          cat << 'EOF' > dist/AppDir/jellyfin-rpc.desktop
           [Desktop Entry]
           Type=Application
-          Version=$(uv version --short)
           Name=Jellyfin RPC
           Comment=Discord Rich Presence for Jellyfin
-          Exec=/opt/jellyfin-rpc/jellyfin-rpc
-          Icon=/opt/jellyfin-rpc/jellyfin-rpc.png
+          Exec=jellyfin-rpc
+          Icon=jellyfin-rpc
           Terminal=false
-          Categories=Network;Utility;
+          Categories=Network;
           StartupWMClass=jellyfin-rpc
           EOF
 
-          cat << 'EOF' > "dist/Jellyfin RPC/install.sh"
-          #!/usr/bin/env bash
-          set -e
-
-          cd "$(dirname "$0")"
-          sudo mkdir -p /opt/jellyfin-rpc
-          sudo chmod +x jellyfin-rpc.desktop
-          sudo cp jellyfin-rpc.desktop /usr/share/applications/
-          sudo cp jellyfin-rpc jellyfin-rpc.png /opt/jellyfin-rpc/
+          cat << 'EOF' > dist/AppDir/AppRun
+          #!/bin/sh
+          APPDIR="$(dirname "$(readlink -f "${0}")")"
+          exec "${APPDIR}/usr/bin/jellyfin-rpc" "$@"
           EOF
+          chmod +x dist/AppDir/AppRun
 
-          chmod +x "dist/Jellyfin RPC/install.sh"
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          mv squashfs-root appimagetool.AppDir
+
+          export ARCH=x86_64
+          ./appimagetool.AppDir/AppRun dist/AppDir "dist/Jellyfin RPC.AppImage"
+          rm -rf dist/AppDir appimagetool.AppDir appimagetool-x86_64.AppImage
       - name: Isolate App Bundle (macOS Only)
         if: startsWith(matrix.os, 'macos')
         run: |
