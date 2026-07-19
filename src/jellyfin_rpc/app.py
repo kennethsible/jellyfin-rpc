@@ -4,22 +4,22 @@ import multiprocessing as mp
 import os
 import queue
 import shutil
+import socket
 import subprocess
 import sys
 import threading
 import webbrowser
-from configparser import ConfigParser, SectionProxy
-from json.decoder import JSONDecodeError
-from logging import LogRecord, handlers
-from multiprocessing.queues import Queue
-from typing import Any, Callable, TypedDict, cast
-
 import certifi
 import customtkinter as ctk
 import pystray
 import requests
 from PIL import Image
 from requests.exceptions import RequestException
+from configparser import ConfigParser, SectionProxy
+from json.decoder import JSONDecodeError
+from logging import LogRecord, handlers
+from multiprocessing.queues import Queue
+from typing import Any, Callable, TypedDict, cast
 
 from jellyfin_rpc import __version__, start_discord_rpc
 from jellyfin_rpc.main import (
@@ -321,7 +321,7 @@ def on_close(
 def set_close_behavior(
     root: ctk.CTk, on_close_callback: Callable[[], None], withdraw: bool
 ) -> None:
-    if withdraw and sys.platform != 'linux':
+    if withdraw:
         root.protocol('WM_DELETE_WINDOW', root.withdraw)
     else:
         root.protocol('WM_DELETE_WINDOW', on_close_callback)
@@ -475,6 +475,38 @@ def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[Lo
     return log_queue
 
 
+def acquire_singleton_lock(port: int) -> bool:
+    global _singleton_socket
+    _singleton_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        _singleton_socket.bind(('127.0.0.1', port))
+        _singleton_socket.listen(1)
+        _singleton_socket.setblocking(False)
+        return True
+    except OSError:
+        try:
+            notify_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            notify_socket.connect(('127.0.0.1', port))
+            notify_socket.sendall(b'FOCUS')
+            notify_socket.close()
+        except OSError:
+            pass
+        return False
+
+
+def poll_singleton_socket(root: ctk.CTk) -> None:
+    if _singleton_socket is not None:
+        try:
+            conn, _ = _singleton_socket.accept()
+            conn.close()
+            root.after(0, root.deiconify)
+            root.after(0, root.lift)
+            root.after(0, root.focus_force)
+        except BlockingIOError:
+            pass
+    root.after(200, lambda: poll_singleton_socket(root))
+
+
 def main() -> None:
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
@@ -508,6 +540,11 @@ def main() -> None:
             shutil.copyfile(ini_bundle_path, ini_path)
 
     config = load_config(ini_path)
+
+    # If another instance is already listening on this port, notify it and exit immediately
+    singleton_port = config.getint('SINGLETON_PORT', fallback=57634)
+    if not acquire_singleton_lock(singleton_port):
+        return
 
     jf_host = config.get('JELLYFIN_HOST', '')
     jf_api_key = config.get('JELLYFIN_API_KEY', '')
@@ -547,6 +584,9 @@ def main() -> None:
     root.title(f'Jellyfin RPC v{__version__}')
     root.rowconfigure(0, weight=1)
     root.columnconfigure(0, weight=1)
+    
+    # Bring this window to the front whenever a second instance signals us
+    poll_singleton_socket(root)
 
     frame_main = ctk.CTkFrame(master=root)
     frame_main.grid(row=0, column=0, sticky='nsew')
@@ -901,8 +941,6 @@ def main() -> None:
 
     for key, checkbox in checkboxes.items():
         if key == 'MINIMIZE_ON_CLOSE':
-            if sys.platform == 'linux':
-                continue
             checkbox.configure(
                 command=lambda: set_close_behavior(
                     root, on_close_callback, checkboxes['MINIMIZE_ON_CLOSE']._variable.get()
@@ -1017,7 +1055,7 @@ def main() -> None:
             '::tk::mac::ReopenApplication',
             lambda: on_maximize(label_update, frame_grid, frame_bottom, root),
         )
-    elif sys.platform == 'win32':
+    elif sys.platform in ('win32', 'linux'):
         tray_icon = pystray.Icon(
             'jellyfin-rpc',
             Image.open(png_bundle_path),
@@ -1028,7 +1066,7 @@ def main() -> None:
                 pystray.MenuItem('Quit', lambda: gui_queue.put('QUIT')),
             ),
         )
-        tray_icon.run_detached()
+        threading.Thread(target=tray_icon.run, daemon=True).start()
     context['tray_icon'] = tray_icon
 
     button_connect = ctk.CTkButton(
@@ -1039,10 +1077,7 @@ def main() -> None:
     if jf_host:  # and jf_api_key and jf_username:
         on_click_callback()
         if start_minimized and button_connect_text == 'Disconnect':
-            if sys.platform == 'linux':
-                root.iconify()
-            else:
-                root.withdraw()
+            root.withdraw()
     else:
         logger.info('Open Setup Guide')
 

@@ -33,17 +33,29 @@ If you prefer to use the CLI over the GUI (or you're on Linux), fill out the inc
 > [!IMPORTANT]
 > [TMDB](https://www.themoviedb.org/) can **optionally** be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/) can be used to fetch album covers.
 
-- `show_when_paused` shows the activity with a paused timer instead of a progress bar. If disabled, the activity stops displaying when you pause your media.
-- `show_server_name` shows your server name as the activity name instead of saying 'Jellyfin'.
-- `show_jellyfin_icon` shows a small Jellyfin icon in the bottom right of the poster or album cover.
-- `poster_languages` is a comma-separated list of two-letter language codes ([ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1)) for TMDB.
-- `textless_posters` controls whether textless TMDB posters are prioritized over language posters.
-- `always_use_tmdb` controls whether TMDB is the default source for posters or a fallback provider.
-- `season_over_series` controls whether season posters are preferred over series posters for shows.
-- `always_use_musicbrainz` controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider.
-- `release_over_group` controls whether release album covers are preferred over group album covers. The distinction between [release](https://musicbrainz.org/doc/Release) and [release group](https://musicbrainz.org/doc/Release_Group) is described in the MusicBrainz documentation. In short, a release is a specific *release* of an album that belongs to a *release group* (one per album).
+- `jellyfin_host` is the base URL of your Jellyfin server, including the scheme and port (e.g. `http://192.168.1.100:8096`).
+- `jellyfin_api_key` is the API key used to authenticate with your Jellyfin server. Leave blank to use Quick Connect instead.
+- `jellyfin_username` is the Jellyfin username whose activity should be tracked. Leave blank to use Quick Connect instead.
 - `filter_mode` controls whether `filter_libraries` uses a whitelist (allowed) or blacklist (blocked).
 - `filter_libraries` is a comma-separated list of Jellyfin libraries to either whitelist or blacklist.
+- `tmdb_api_key` is your API key for The Movie Database, used to fetch movie and show posters. Leave blank to disable TMDB lookups.
+- `poster_languages` is a comma-separated list of two-letter language codes ([ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1)) for TMDB.
+- `textless_posters` controls whether textless TMDB posters are prioritized over language posters.
+- `season_over_series` controls whether season posters are preferred over series posters for shows.
+- `release_over_group` controls whether release album covers are preferred over group album covers. The distinction between [release](https://musicbrainz.org/doc/Release) and [release group](https://musicbrainz.org/doc/Release_Group) is described in the MusicBrainz documentation. In short, a release is a specific *release* of an album that belongs to a *release group* (one per album).
+- `always_use_tmdb` controls whether TMDB is the default source for posters or a fallback provider.
+- `always_use_musicbrainz` controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider.
+- `media_types` is a comma-separated list of media types to track activity for. Valid values are `Movies`, `Shows`, and `Music`.
+- `show_when_paused` shows the activity with a paused timer instead of a progress bar. If disabled, the activity stops displaying when you pause your media.
+- `show_server_name` shows your server name as the activity name instead of saying 'Jellyfin'.
+- `show_jellyfin_logo` shows a small Jellyfin icon in the bottom right of the poster or album cover.
+- `polling_rate` is the interval, in seconds, at which Jellyfin RPC checks for playback changes.
+- `seek_threshold` is the minimum change in playback position, in seconds, required to be treated as a seek rather than normal playback.
+- `log_level` controls the verbosity of log messages shown in the GUI and printed to the console. Valid values are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`.
+- `file_hdlr_level` controls the verbosity of log messages written to the log file, independently of `log_level`.
+- `log_max_bytes` is the maximum size, in bytes, a log file is allowed to reach before it is rotated.
+- `log_max_files` is the number of rotated log files to keep before the oldest is deleted.
+- `singleton_port` is the local port used to detect whether Jellyfin RPC is already running, so that opening it again focuses the existing window instead of starting a second instance. Change this only if the default port conflicts with another application on your system.
 
 ## GUI Screenshot
 

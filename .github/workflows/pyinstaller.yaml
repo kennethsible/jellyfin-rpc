@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: linux-x86_64
           - os: windows-latest
             platform: windows-amd64
@@ -29,19 +29,22 @@ jobs:
         with:
           enable-cache: true
       - name: Install Python 3.14 (Linux Only)
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu-24.04'
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt-get update
-          sudo apt-get install -y python3.14-tk libpython3.14
+          sudo apt-get install -y python3.14-tk libpython3.14 python3.14-dev gir1.2-ayatanaappindicator3-0.1 gir1.2-gtk-3.0 libgirepository-2.0-dev libgirepository1.0-dev pkg-config libcairo2-dev
           uv venv .venv --python /usr/bin/python3.14 --seed
       - name: Install Python 3.14 (macOS/Windows)
-        if: matrix.os != 'ubuntu-22.04'
+        if: matrix.os != 'ubuntu-24.04'
         run: uv python install 3.14
       - name: Install Dependencies
         run: uv sync --extra gui --no-dev
+      - name: Install PyGObject (Linux Only)
+        if: matrix.os == 'ubuntu-24.04'
+        run: uv pip install "pygobject<3.50"
       - name: Build PyInstaller Executable
         shell: bash
         run: |
@@ -50,9 +53,14 @@ jobs:
           elif [ "${{ matrix.platform }}" = "macos-amd64" ]; then
             export MACOS_ARCH="x86_64"
           fi
-          uv run pyinstaller main.spec --noconfirm
+          if [ "${{ matrix.platform }}" = "linux-x86_64" ]; then
+            sudo apt-get install -y xvfb
+            xvfb-run -a uv run pyinstaller main.spec --noconfirm
+          else
+            uv run pyinstaller main.spec --noconfirm
+          fi
       - name: Generate AppImage (Linux Only)
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
           mkdir -p dist/AppDir/usr/bin
