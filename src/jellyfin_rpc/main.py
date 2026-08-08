@@ -693,6 +693,22 @@ async def activity_loop(
                 except (KeyError, TypeError, ValueError):
                     pass
 
+            if current_end and time.time() >= current_end:
+                if previous_activity is not None:
+                    try:
+                        await discord_rpc.clear()
+                    except (PyPresenceException, OSError, KeyError) as e:
+                        logger.error(f'RPC Clear Error: {type(e).__name__}')
+                        logger.debug(e)
+                        await await_connection(discord_rpc, polling_rate)
+                        await asyncio.sleep(polling_rate)
+                        continue
+                    logger.info('Activity Cleared (Stale Session)')
+                    previous_activity = previous_start = None
+                    previous_playstate = False
+                await asyncio.sleep(polling_rate)
+                continue
+
             media_changed = previous_activity != activity
             playstate_changed = previous_playstate != session_paused
 
