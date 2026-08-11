@@ -49,6 +49,11 @@ def load_config(ini_path: str) -> SectionProxy:
     return config['DEFAULT']
 
 
+def save_config(config_parser: ConfigParser, ini_path: str) -> None:
+    with open(ini_path, 'w') as ini_file:
+        config_parser.write(ini_file)
+
+
 def parse_delimited_list(config: SectionProxy, option: str) -> list[str]:
     option_split = re.split(r'[,;|]', config.get(option, ''))
     return [x.strip() for x in option_split if x.strip()]
@@ -104,7 +109,7 @@ async def initiate_quick_connect(
             secret = init_data['Secret']
             code = init_data['Code']
             logger.info(f'Quick Connect Code: {code}')
-    except (aiohttp.ClientError, asyncio.TimeoutError, JSONDecodeError, KeyError) as e:
+    except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Initiate Quick Connect: {e}')
         sys.exit(1)
 
@@ -117,7 +122,7 @@ async def initiate_quick_connect(
                     connect_data = await response.json()
                     if connect_data.get('Authenticated') is True:
                         break
-        except (aiohttp.ClientError, asyncio.TimeoutError, JSONDecodeError, KeyError):
+        except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError):
             pass
         await asyncio.sleep(5)
 
@@ -132,7 +137,7 @@ async def initiate_quick_connect(
             username = auth_data['User']['Name']
             logger.info(f'Successfully Authenticated via Quick Connect ({username})')
             return token, username
-    except (aiohttp.ClientError, asyncio.TimeoutError, JSONDecodeError, KeyError) as e:
+    except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Retrieve User Access Token: {e}')
         sys.exit(1)
 
@@ -163,8 +168,8 @@ async def get_jf_user_and_server(
         config_parser.read(ini_path)
         config_parser.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
         config_parser.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
-        with open(ini_path, 'w') as ini_file:
-            config_parser.write(ini_file)
+
+        await asyncio.to_thread(save_config, config_parser, ini_path)
 
     initial_attempt = True
     headers = {
@@ -196,7 +201,7 @@ async def get_jf_user_and_server(
             logger.info('Connected to Jellyfin API')
             return user_id, server_name
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             if initial_attempt:
                 logger.error(f'Jellyfin API Network Error ({type(e).__name__}). Retrying...')
                 logger.debug(e)
@@ -219,7 +224,7 @@ async def check_tmdb_connection(session: ClientSession, api_key: str) -> None:
         async with session.get(config_url, params=config_params) as response:
             response.raise_for_status()
         logger.info('Connected to TMDB API')
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
 
@@ -237,7 +242,7 @@ async def get_series_id(
             data = await response.json()
             if results := data.get('results'):
                 return results[0].get('id')
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     except (ValueError, KeyError) as e:
@@ -259,7 +264,7 @@ async def get_movie_id(
             data = await response.json()
             if results := data.get('results'):
                 return results[0].get('id')
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     except (ValueError, KeyError) as e:
@@ -280,7 +285,7 @@ async def get_music_id(session: ClientSession, artist: str, album: str) -> str |
             response.raise_for_status()
             data = await response.json()
             return data['release-groups'][0]['id']
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'MusicBrainz API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
@@ -334,7 +339,7 @@ async def get_series_poster(
                 if poster_path := data.get('poster_path'):
                     return 'https://image.tmdb.org/t/p/w185/' + poster_path
                 logger.warning('No Poster Available on TMDB. Skipping...')
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
@@ -370,7 +375,7 @@ async def get_season_poster(
                 if poster_path := data.get('poster_path'):
                     return 'https://image.tmdb.org/t/p/w185/' + poster_path
                 logger.warning('No Poster Available on TMDB. Skipping...')
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError):
+    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError):
         pass
 
     return await get_series_poster(session, api_key, tmdb_id, languages)
@@ -396,7 +401,7 @@ async def get_movie_poster(
                 if poster_path := data.get('poster_path'):
                     return 'https://image.tmdb.org/t/p/w185/' + poster_path
                 logger.warning('No Poster Available on TMDB. Skipping...')
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
@@ -413,7 +418,7 @@ async def get_release_group_cover(session: ClientSession, group_id: str) -> str:
             if 'images' not in data:
                 logger.warning('No Cover Art Available on Cover Art Archive. Skipping...')
             return data['images'][0]['image']
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'Cover Art Archive API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
@@ -432,7 +437,7 @@ async def get_release_cover(
             response.raise_for_status()
             data = await response.json()
             return data['images'][0]['image']
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError):
+    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError):
         return await get_release_group_cover(session, group_id)
 
 
@@ -521,7 +526,7 @@ async def activity_loop(
             async with jf_session.get(f'{jf_host}/Sessions', headers=jf_headers) as response:
                 response.raise_for_status()
                 sessions = await response.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (aiohttp.ClientError, TimeoutError) as e:
             logger.error(f'Session Polling Error: {type(e).__name__}')
             logger.debug(e)
             user_id, server_name = await get_jf_user_and_server(
@@ -597,7 +602,7 @@ async def activity_loop(
                                 break
                         if library_id:
                             cached_item_id, cached_library = item_id, library_id
-                    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+                    except (aiohttp.ClientError, TimeoutError, ValueError) as e:
                         logger.error(f'Library Retrieval Failed ({type(e).__name__}). Skipping...')
                         logger.debug(e)
 
@@ -643,9 +648,9 @@ async def activity_loop(
                         activity = details
                     case 'Audio':
                         activity_type = ActivityType.LISTENING
-                        if 'Artists' in media_dict and media_dict['Artists']:
+                        if media_dict.get('Artists'):
                             state = ', '.join(media_dict['Artists'])
-                        if 'Album' in media_dict and media_dict['Album']:
+                        if media_dict.get('Album'):
                             if state:
                                 state += f' - {media_dict["Album"]}'
                             else:
@@ -713,9 +718,13 @@ async def activity_loop(
             playstate_changed = previous_playstate != session_paused
 
             seek_detected = False
-            if not session_paused and previous_start is not None and current_start is not None:
-                if abs(current_start - previous_start) > seek_threshold:
-                    seek_detected = True
+            if (
+                not session_paused
+                and current_start is not None
+                and previous_start is not None
+                and abs(current_start - previous_start) > seek_threshold
+            ):
+                seek_detected = True
 
             if media_changed:
                 poster_url = 'large_image'
@@ -736,7 +745,7 @@ async def activity_loop(
                                 series_year = series_item.get('ProductionYear')
                                 series_ids = series_item.get('ProviderIds', {})
                                 tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
-                        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                        except (aiohttp.ClientError, TimeoutError, ValueError):
                             pass
 
                     if not tmdb_id and tmdb_api_key:
@@ -837,7 +846,7 @@ async def activity_loop(
                                 album_item = await response.json()
                                 album_music_ids = album_item.get('ProviderIds', {})
                                 group_id = album_music_ids.get('MusicBrainzReleaseGroup')
-                        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                        except (aiohttp.ClientError, TimeoutError, ValueError):
                             pass
 
                     if not group_id:
@@ -870,7 +879,7 @@ async def activity_loop(
                                             album_item = await response.json()
                                     album_music_ids = album_item.get('ProviderIds', {})
                                     release_id = album_music_ids.get('MusicBrainzAlbum')
-                                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                                except (aiohttp.ClientError, TimeoutError, ValueError):
                                     pass
                         poster_url = await get_release_cover(cache_session, group_id, release_id)
 

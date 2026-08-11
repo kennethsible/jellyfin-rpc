@@ -8,11 +8,12 @@ import subprocess
 import sys
 import threading
 import webbrowser
+from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
-from typing import Any, Callable, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import certifi
 import customtkinter as ctk
