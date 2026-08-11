@@ -906,7 +906,17 @@ async def activity_loop(
                 }
 
             if media_changed or playstate_changed or seek_detected:
-                small_image = 'small_image' if show_jf_logo else None
+                small_image = None
+                if show_jf_logo:
+                    small_image = 'media_paused' if session_paused else 'small_image'
+                if media_changed:
+                    logger.info(f'"{activity}"')
+                elif playstate_changed:
+                    playstate = 'Paused' if session_paused else 'Resumed'
+                    logger.debug(f'PlayState {playstate}')
+                elif seek_detected:
+                    logger.debug('Seek Detected')
+
                 try:
                     await discord_rpc.update(
                         **cached_kwargs,
@@ -920,14 +930,6 @@ async def activity_loop(
                     await await_connection(discord_rpc, polling_rate)
                     await asyncio.sleep(polling_rate)
                     continue
-
-                if media_changed:
-                    logger.info(f'"{activity}"')
-                elif playstate_changed:
-                    playstate = 'Paused' if session_paused else 'Resumed'
-                    logger.debug(f'PlayState {playstate}')
-                elif seek_detected:
-                    logger.debug('Seek Detected')
 
                 previous_activity, previous_playstate = activity, session_paused
                 previous_start = current_start
