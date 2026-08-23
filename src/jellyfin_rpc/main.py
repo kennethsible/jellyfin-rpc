@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import platform
@@ -20,7 +21,7 @@ from typing import Any
 
 import aiohttp
 import certifi
-from aiohttp import ClientSession
+from aiohttp import ClientSession, WSMsgType
 from aiohttp_client_cache import CacheBackend
 from aiohttp_client_cache.session import CachedSession
 from langcodes import Language
@@ -198,7 +199,7 @@ async def get_jf_user_and_server(
                     system_info = await response.json()
                     server_name = system_info.get('ServerName', 'Jellyfin')
 
-            logger.info('Connected to Jellyfin API')
+            logger.info('Connected to Jellyfin Server')
             return user_id, server_name
 
         except (TimeoutError, aiohttp.ClientError) as e:
@@ -457,6 +458,65 @@ async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
         break
 
 
+async def ws_listener(
+    session: ClientSession,
+    config: SectionProxy,
+    polling_rate: int,
+    ws_state: dict[str, Any],
+    wake_event: asyncio.Event,
+) -> None:
+    jf_host = config['JELLYFIN_HOST'].rstrip('/')
+    device_id = get_device_id(config)
+    ws_protocol = 'wss://' if jf_host.startswith('https://') else 'ws://'
+    ws_host = jf_host.split('://', 1)[-1]
+
+    initial_attempt = True
+    while True:
+        jf_api_key = config.get('JELLYFIN_API_KEY', '')
+        if not jf_api_key:
+            await asyncio.sleep(1)
+            continue
+
+        ws_url = f'{ws_protocol}{ws_host}/socket?api_key={jf_api_key}&deviceId={device_id}'
+        try:
+            async with session.ws_connect(ws_url, heartbeat=30.0) as ws:
+                ws_state['ws_connected'] = True
+                initial_attempt = True
+                # logger.info('Connected to Jellyfin WebSocket')
+                await ws.send_str(json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'}))
+                async for msg in ws:
+                    if msg.type == WSMsgType.TEXT:
+                        payload = json.loads(msg.data)
+                        if payload.get('MessageType') == 'Sessions':
+                            ws_state['sessions'] = payload.get('Data', [])
+                            wake_event.set()
+                    elif msg.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
+                        break
+        except (aiohttp.ClientError, TimeoutError, asyncio.CancelledError) as e:
+            if isinstance(e, asyncio.CancelledError):
+                break
+            if initial_attempt:
+                logger.warning(f'Jellyfin WebSocket Error ({type(e).__name__}). Skipping...')
+                logger.debug(e)
+                initial_attempt = False
+        finally:
+            ws_state['ws_connected'] = False
+        await asyncio.sleep(polling_rate)
+
+
+async def await_session_event(
+    ws_state: dict[str, Any], wake_event: asyncio.Event, polling_rate: int
+) -> None:
+    if ws_state.get('ws_connected'):
+        try:
+            await asyncio.wait_for(wake_event.wait(), timeout=polling_rate)
+        except TimeoutError:
+            pass
+        wake_event.clear()
+    else:
+        await asyncio.sleep(polling_rate)
+
+
 async def activity_loop(
     jf_session: ClientSession,
     cache_session: ClientSession,
@@ -465,6 +525,8 @@ async def activity_loop(
     ini_path: str,
     polling_rate: int,
     seek_threshold: int,
+    ws_state: dict[str, Any],
+    wake_event: asyncio.Event,
 ) -> None:
     jf_host = config['JELLYFIN_HOST'].rstrip('/')
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
@@ -520,32 +582,36 @@ async def activity_loop(
     previous_warning = previous_playstate = False
     cached_item_id = cached_library = None
     cached_kwargs: dict[str, Any] = {}
+    previous_update = 0.0
 
     while True:
-        try:
-            async with jf_session.get(f'{jf_host}/Sessions', headers=jf_headers) as response:
-                response.raise_for_status()
-                sessions = await response.json()
-        except (aiohttp.ClientError, TimeoutError) as e:
-            logger.error(f'Session Polling Error: {type(e).__name__}')
-            logger.debug(e)
-            user_id, server_name = await get_jf_user_and_server(
-                jf_session, config, ini_path, show_server_name, polling_rate
-            )
-            jf_username = config['JELLYFIN_USERNAME']
-            jf_api_key = config['JELLYFIN_API_KEY']
-            jf_headers['Authorization'] = build_auth_header(get_device_id(config), jf_api_key)
-            await asyncio.sleep(polling_rate)
-            continue
-        except ValueError as e:
-            logger.error(f'Session Parsing Error: {type(e).__name__}')
-            logger.debug(e)
-            await asyncio.sleep(polling_rate)
-            continue
+        if ws_state.get('ws_connected'):
+            sessions = ws_state.get('sessions', [])
+        else:
+            try:
+                async with jf_session.get(f'{jf_host}/Sessions', headers=jf_headers) as response:
+                    response.raise_for_status()
+                    sessions = await response.json()
+            except (aiohttp.ClientError, TimeoutError) as e:
+                logger.error(f'Session Polling Error: {type(e).__name__}')
+                logger.debug(e)
+                user_id, server_name = await get_jf_user_and_server(
+                    jf_session, config, ini_path, show_server_name, polling_rate
+                )
+                jf_username = config['JELLYFIN_USERNAME']
+                jf_api_key = config['JELLYFIN_API_KEY']
+                jf_headers['Authorization'] = build_auth_header(get_device_id(config), jf_api_key)
+                await asyncio.sleep(polling_rate)
+                continue
+            except ValueError as e:
+                logger.error(f'Session Parsing Error: {type(e).__name__}')
+                logger.debug(e)
+                await asyncio.sleep(polling_rate)
+                continue
 
         user_sessions = [s for s in sessions if s.get('UserName') == jf_username]
         if not user_sessions:
-            await asyncio.sleep(polling_rate)
+            await await_session_event(ws_state, wake_event, polling_rate)
             continue
 
         session_data: dict[str, Any] = {}
@@ -577,7 +643,8 @@ async def activity_loop(
                     logger.info('Activity Cleared')
                     previous_activity = previous_start = None
                     previous_playstate = False
-                await asyncio.sleep(polling_rate)
+                    previous_update = time.time()
+                await await_session_event(ws_state, wake_event, polling_rate)
                 continue
 
             try:
@@ -631,7 +698,8 @@ async def activity_loop(
                         logger.info('Activity Cleared (Library Blocked)')
                         previous_activity = previous_start = None
                         previous_playstate = False
-                    await asyncio.sleep(polling_rate)
+                        previous_update = time.time()
+                    await await_session_event(ws_state, wake_event, polling_rate)
                     continue
 
                 match media_type := media_dict['Type']:
@@ -675,7 +743,8 @@ async def activity_loop(
                             logger.info('Activity Cleared (Unsupported Media)')
                             previous_activity = previous_start = None
                             previous_playstate = False
-                        await asyncio.sleep(polling_rate)
+                            previous_update = time.time()
+                        await await_session_event(ws_state, wake_event, polling_rate)
                         continue  # raise NotImplementedError()
 
                 if len(details) < 2:  # e.g., Chinese characters
@@ -711,7 +780,8 @@ async def activity_loop(
                     logger.info('Activity Cleared (Stale Session)')
                     previous_activity = previous_start = None
                     previous_playstate = False
-                await asyncio.sleep(polling_rate)
+                    previous_update = time.time()
+                await await_session_event(ws_state, wake_event, polling_rate)
                 continue
 
             media_changed = previous_activity != activity
@@ -905,7 +975,8 @@ async def activity_loop(
                     'large_url': large_url,
                 }
 
-            if media_changed or playstate_changed or seek_detected:
+            has_changed = media_changed or playstate_changed or seek_detected
+            if has_changed and time.time() - previous_update >= polling_rate:
                 small_image = None
                 if show_jf_logo:
                     small_image = 'media_paused' if session_paused else 'small_image'
@@ -924,6 +995,7 @@ async def activity_loop(
                         end=current_end,
                         small_image=small_image,
                     )
+                    previous_update = time.time()
                 except (PyPresenceException, OSError, KeyError) as e:
                     logger.error(f'RPC Update Error: {type(e).__name__}')
                     logger.debug(e)
@@ -946,8 +1018,9 @@ async def activity_loop(
             logger.info('Activity Cleared')
             previous_activity = previous_start = None
             previous_playstate = False
+            previous_update = time.time()
 
-        await asyncio.sleep(polling_rate)
+        await await_session_event(ws_state, wake_event, polling_rate)
 
 
 async def monitor_activity(
@@ -962,6 +1035,9 @@ async def monitor_activity(
     jf_connector = aiohttp.TCPConnector(ssl=ssl_context)
     cache_connector = aiohttp.TCPConnector(ssl=ssl_context)
 
+    ws_state = {'sessions': [], 'ws_connected': False}
+    wake_event = asyncio.Event()
+
     try:
         async with (
             ClientSession(connector=jf_connector, timeout=timeout) as jf_session,
@@ -969,15 +1045,25 @@ async def monitor_activity(
                 cache=CacheBackend(), connector=cache_connector, timeout=timeout
             ) as cache_session,
         ):
-            await activity_loop(
-                jf_session,
-                cache_session,
-                discord_rpc,
-                config,
-                init_path,
-                polling_rate,
-                seek_threshold,
+            ws_task = asyncio.create_task(
+                ws_listener(jf_session, config, polling_rate, ws_state, wake_event)
             )
+            try:
+                await activity_loop(
+                    jf_session,
+                    cache_session,
+                    discord_rpc,
+                    config,
+                    init_path,
+                    polling_rate,
+                    seek_threshold,
+                    ws_state,
+                    wake_event,
+                )
+            finally:
+                ws_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await ws_task
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
