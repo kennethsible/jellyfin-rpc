@@ -1,82 +1,100 @@
 <!-- markdownlint-disable MD033 MD041 -->
 # Discord RPC for Jellyfin
 
-Jellyfin RPC updates your Discord status with what you're watching or listening to on your Jellyfin server. Make sure your Discord client is open and that your [Activity Privacy](https://support.discord.com/hc/en-us/articles/7931156448919-Activity-Sharing-on-Discord-FAQ) settings are configured correctly.
+Jellyfin RPC updates your Discord status with what you're watching or listening to on your Jellyfin server. Make sure your desktop client for Discord is running and your [Activity Sharing](https://support.discord.com/hc/en-us/articles/7931156448919-Activity-Sharing-on-Discord-FAQ) settings are enabled.
 
-<p display="flex" align="center">
-  <img src="images/jellyfin_rpc_series.png" alt="jellyfin_rpc_series" width="300" />
-  <img src="images/jellyfin_rpc_music.png" alt="jellyfin_rpc_movie" width="300" />
+<p align="center">
+  <img src="images/jellyfin_rpc_series.png" alt="Discord Episode Activity" width="300" />
+  <img src="images/jellyfin_rpc_music.png" alt="Discord Music Activity" width="300" />
 </p>
 
 ## Installation
 
-- For Windows, macOS, and Linux, download the latest release from GitHub ([see here](https://github.com/kennethsible/jellyfin-rpc/releases)).
-- Alternatively, use [pip](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://pip.pypa.io/en/stable/installation/&ved=2ahUKEwitg4Hr2fuTAxWQkIkEHchVE1gQFnoECCYQAQ&usg=AOvVaw31Hu8kE5Z4dpEnAanOzEpL) to install the CLI tool and refer to the [CLI usage](#cli-usage) section.
+- For the desktop GUI (Windows, macOS, or Linux), download the latest version from the [Releases](https://github.com/kennethsible/jellyfin-rpc/releases) page.
+- For the CLI tool (headless/terminal), download the [INI file](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini) from GitHub and install the package via [pip](https://pip.pypa.io/en/stable/installation/).
 
     ```bash
     pip install git+https://github.com/kennethsible/jellyfin-rpc.git
     ```
 
 > [!NOTE]
-> On Linux, you can use [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) to automatically create a desktop shortcut and place Jellyfin RPC into your system's application launcher.
+> On Linux, [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) can automatically create a desktop shortcut and place Jellyfin RPC into your system's application launcher.
 
 ## Configuration
 
-The Jellyfin host can be either a public or a local URL for your server. However, with a local URL, posters and album covers won't be retrievable from your Jellyfin server. In that case, you will need to rely on public metadata providers (see below for details). After entering your Jellyfin host, click "Connect" and use [Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) to authenticate with a user access token. To generate an API key instead of Quick Connect, go to the server dashboard and select "API Keys" under "Advanced."
+Jellyfin host can be either a public or local URL for your server. However, posters and album covers won't be retrievable from your Jellyfin server with a local URL (requires HTTPS and must be publicly accessible by Discord). In that case, Jellyfin RPC includes support for public metadata providers such as [TMDB](https://www.themoviedb.org/) and [MusicBrainz](https://musicbrainz.org/) (via the [Cover Art Archive](https://coverartarchive.org/)).
 
-If you prefer to use the CLI over the GUI (or you're on Linux), fill out the included [INI config](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you run into any issues, please change `log_level` in the INI to `DEBUG` and include the output in your GitHub Issue.
+After entering your Jellyfin host, click **Connect** and use [Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) to authenticate with a user access token. To generate an API key instead, go to the server dashboard and select **API Keys** under **Advanced**.
 
-- `%AppData%\Jellyfin RPC` (Windows)
-- `~/Library/Application Support/Jellyfin RPC` (macOS)
-- `~/.config/Jellyfin RPC` (Linux)
+<p align="center">
+  <img src="images/jellyfin_rpc_gui.png" alt="Jellyfin RPC GUI" width="450" />
+</p>
 
-> [!IMPORTANT]
-> [TMDB](https://www.themoviedb.org/) can **optionally** be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). [MusicBrainz](https://musicbrainz.org/) and the [Cover Art Archive](https://coverartarchive.org/) can be used to fetch album covers.
+If running in headless/CLI mode, configuration is loaded from an [INI file](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you encounter any issues, set the log level to `DEBUG` (via the GUI or INI file) and include the log output when opening a [GitHub issue](https://github.com/kennethsible/jellyfin-rpc/issues).
 
-- `show_when_paused` shows the activity with a paused timer instead of a progress bar. If disabled, the activity stops displaying when you pause your media.
-- `show_server_name` shows your server name as the activity name instead of saying 'Jellyfin'.
-- `show_jellyfin_icon` shows a small Jellyfin icon in the bottom right of the poster or album cover.
-- `poster_languages` is a comma-separated list of two-letter language codes ([ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1)) for TMDB.
-- `textless_posters` controls whether textless TMDB posters are prioritized over language posters.
-- `always_use_tmdb` controls whether TMDB is the default source for posters or a fallback provider.
-- `season_over_series` controls whether season posters are preferred over series posters for shows.
-- `always_use_musicbrainz` controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider.
-- `release_over_group` controls whether release album covers are preferred over group album covers. The distinction between [release](https://musicbrainz.org/doc/Release) and [release group](https://musicbrainz.org/doc/Release_Group) is described in the MusicBrainz documentation. In short, a release is a specific *release* of an album that belongs to a *release group* (one per album).
-- `filter_mode` controls whether `filter_libraries` uses a whitelist (allowed) or blacklist (blocked).
-- `filter_libraries` is a comma-separated list of Jellyfin libraries to either whitelist or blacklist.
+> [!NOTE]
+> TMDB can *optionally* be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). The Cover Art Archive can be used to fetch album covers without an API key.
 
-## GUI Screenshot
+| Key | Default | Description |
+| :--- | :--- | :--- |
+| `JELLYFIN_HOST` | — | Jellyfin server URL (e.g., `https://jellyfin.example.com` or `http://localhost:8096`). |
+| `JELLYFIN_API_KEY` | — | Jellyfin API key (generated automatically when authenticating with Quick Connect). |
+| `JELLYFIN_USERNAME` | — | Jellyfin username to display media activity for in Discord. |
+| `DISCORD_CLIENT_ID` | — | Optional custom Discord application client ID. Uses the provided application if unset. |
+| `TMDB_API_KEY` | — | Optional API key from TMDB (required for posters if your Jellyfin server is local). |
+| `MEDIA_TYPES` | `Shows, Movies, Music` | Comma-separated list of media types to display activities for (`Shows`, `Movies`, `Music`). |
+| `SHOW_WHEN_PAUSED` | `true` | Shows the activity with a paused indicator instead of a progress bar. If disabled, the activity stops displaying when paused. |
+| `SHOW_SERVER_NAME` | `false` | Shows your server name as the activity name instead of saying "Jellyfin". |
+| `SHOW_JELLYFIN_LOGO` | `false` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
+| `POSTER_LANGUAGES` | — | Comma-separated list of languages (preferably two-letter [ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1) language codes) for TMDB. Uses TMDB's default image order if unset. |
+| `TEXTLESS_POSTERS` | `false` | Controls whether textless TMDB posters are prioritized over language posters. |
+| `ALWAYS_USE_TMDB` | `false` | Controls whether TMDB is the default source for posters or a fallback provider for local artwork from Jellyfin. |
+| `SEASON_OVER_SERIES` | `false` | Controls whether season posters are preferred over series posters for shows. |
+| `ALWAYS_USE_MUSICBRAINZ` | `false` | Controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider for local artwork from Jellyfin. |
+| `RELEASE_OVER_GROUP` | `false` | Controls whether [release](https://musicbrainz.org/doc/Release) artwork is preferred over [release group](https://musicbrainz.org/doc/Release_Group) artwork on MusicBrainz. |
+| `FILTER_MODE` | `BLACKLIST` | Controls whether the library filter uses a whitelist (allowed) or blacklist (blocked). |
+| `FILTER_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
+| `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions (or the minimum delay/fallback interval between WebSocket events). |
+| `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
+| `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
+| `FILE_HDLR_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
+| `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |
+| `LOG_MAX_FILES` | `3` | Maximum number of log files to keep before deleting the oldest. |
 
-![jellyfin_rpc_gui](images/jellyfin_rpc_gui.png)
-
-## CLI Usage
+## CLI Usage (Headless)
 
 ```bash
-usage: main.py [-h] --ini-path INI_PATH [--log-path LOG_PATH]
+jellyfin-rpc [-h] [--ini-path INI_PATH] [--log-path LOG_PATH]
 
 options:
   --ini-path INI_PATH
   --log-path LOG_PATH
 ```
 
-### Local Build Instructions
+If not specified, configuration and log files default to the following directories:
+
+- `%AppData%\Jellyfin RPC` (Windows)
+- `~/Library/Application Support/Jellyfin RPC` (macOS)
+- `~/.config/jellyfin-rpc` (Linux)
+
+## Building from Source
 
 > [!NOTE]
-> For Linux builds, consult the GitHub Actions workflow for PyInstaller ([see here](https://github.com/kennethsible/jellyfin-rpc/blob/main/.github/workflows/pyinstaller.yaml)). You should use the system Python installation, as uv does not currently include font support ([astral-sh/uv/issues/15668](https://github.com/astral-sh/uv/issues/15668)).
+> For Linux builds, refer to the PyInstaller GitHub Actions workflow ([see here](https://github.com/kennethsible/jellyfin-rpc/blob/main/.github/workflows/pyinstaller.yaml)) and use the system Python installation, as `uv` does not currently include font support ([astral-sh/uv/issues/15668](https://github.com/astral-sh/uv/issues/15668)).
 
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+1. Install the [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager.
 
     ```bash
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 
-2. Create Python Environment
+2. Create a Python environment.
 
     ```bash
     uv venv .venv --python 3.12
     ```
 
-3. Build Standalone Executable
+3. Build the standalone executable.
 
     ```bash
     uv run --extra gui pyinstaller main.spec
