@@ -504,19 +504,6 @@ async def ws_listener(
         await asyncio.sleep(polling_rate)
 
 
-async def await_session_event(
-    ws_state: dict[str, Any], wake_event: asyncio.Event, polling_rate: int
-) -> None:
-    if ws_state.get('ws_connected'):
-        try:
-            await asyncio.wait_for(wake_event.wait(), timeout=polling_rate)
-        except TimeoutError:
-            pass
-        wake_event.clear()
-    else:
-        await asyncio.sleep(polling_rate)
-
-
 async def activity_loop(
     jf_session: ClientSession,
     cache_session: ClientSession,
@@ -584,12 +571,24 @@ async def activity_loop(
     previous_playback = None  # Playback Time of Last Media Position
     previous_timestamp = None  # System Time of Last Media Position
     previous_update = 0.0  # System Time of Last Activity Update
+    pending_update = False  # Tracks Deferred Update During Cooldown
+    pending_payload = None  # Event Payload for Deferred Update
 
     cached_item_id = cached_library = None
     cached_kwargs: dict[str, Any] = {}
 
     while True:
         if ws_state.get('ws_connected'):
+            try:
+                if pending_update:
+                    remaining_cooldown = polling_rate - (time.time() - previous_update)
+                    wait_timeout = max(0.05, remaining_cooldown)
+                else:
+                    wait_timeout = polling_rate
+                await asyncio.wait_for(wake_event.wait(), timeout=wait_timeout)
+                wake_event.clear()
+            except TimeoutError:
+                pass
             sessions = ws_state.get('sessions', [])
         else:
             try:
@@ -613,18 +612,15 @@ async def activity_loop(
                 await asyncio.sleep(polling_rate)
                 continue
 
-        user_sessions = [s for s in sessions if s.get('UserName') == jf_username]
-        if not user_sessions:
-            await await_session_event(ws_state, wake_event, polling_rate)
-            continue
-
         session_data: dict[str, Any] = {}
-        for user_session in user_sessions:
-            if not (item := user_session.get('NowPlayingItem')):
+        for session in sessions:
+            if session.get('UserName') != jf_username:
+                continue
+            if not (item := session.get('NowPlayingItem')):
                 continue
             media_type = item.get('Type')
             if media_type in jf_media_types:
-                session_data = user_session
+                session_data = session
                 break
 
         if 'NowPlayingItem' in session_data:
@@ -651,8 +647,7 @@ async def activity_loop(
                     previous_playback = None
                     previous_timestamp = None
                     previous_update = time.time()
-
-                await await_session_event(ws_state, wake_event, polling_rate)
+                    pending_update = False
                 continue
 
             try:
@@ -683,13 +678,9 @@ async def activity_loop(
 
                 match filter_mode:
                     case 'WHITELIST':
-                        is_allowed = False
-                        if library_id and library_id in filter_libraries:
-                            is_allowed = True
+                        is_allowed = bool(library_id and library_id in filter_libraries)
                     case 'BLACKLIST':
-                        is_allowed = True
-                        if library_id and library_id in filter_libraries:
-                            is_allowed = False
+                        is_allowed = not (library_id and library_id in filter_libraries)
                     case _:
                         is_allowed = True
 
@@ -710,8 +701,7 @@ async def activity_loop(
                         previous_playback = None
                         previous_timestamp = None
                         previous_update = time.time()
-
-                    await await_session_event(ws_state, wake_event, polling_rate)
+                        pending_update = False
                     continue
 
                 match media_type := media_dict['Type']:
@@ -759,8 +749,7 @@ async def activity_loop(
                             previous_playback = None
                             previous_timestamp = None
                             previous_update = time.time()
-
-                        await await_session_event(ws_state, wake_event, polling_rate)
+                            pending_update = False
                         continue  # raise NotImplementedError()
 
                 if len(details) < 2:  # e.g., Chinese characters
@@ -803,8 +792,7 @@ async def activity_loop(
                     previous_playback = None
                     previous_timestamp = None
                     previous_update = time.time()
-
-                await await_session_event(ws_state, wake_event, polling_rate)
+                    pending_update = False
                 continue
 
             media_changed = previous_activity != activity
@@ -815,6 +803,7 @@ async def activity_loop(
             if (
                 not media_changed
                 and not session_paused
+                and not previous_playstate
                 and current_playback is not None
                 and previous_playback is not None
                 and previous_timestamp is not None
@@ -1006,18 +995,31 @@ async def activity_loop(
                     'large_url': large_url,
                 }
 
-            has_changed = media_changed or playstate_changed or seek_detected
-            if has_changed and time.time() - previous_update >= polling_rate:
+            if media_changed or seek_detected or playstate_changed:
+                pending_update = True
+                if media_changed:
+                    pending_payload = ('media_changed', activity)
+                elif seek_detected:
+                    pending_payload = ('seek_detected', None)
+                elif playstate_changed:
+                    pending_payload = ('playstate_changed', session_paused)
+
+            if pending_update and (time.time() - previous_update) >= polling_rate:
                 small_image = None
                 if show_jf_logo:
                     small_image = 'media_paused' if session_paused else 'small_image'
-                if media_changed:
-                    logger.info(f'"{activity}"')
-                elif seek_detected:
-                    logger.debug('Seek Detected')
-                elif playstate_changed:
-                    playstate = 'Paused' if session_paused else 'Resumed'
-                    logger.debug(f'PlayState {playstate}')
+
+                if pending_payload:
+                    update_type, payload = pending_payload
+                    match update_type:
+                        case 'media_changed':
+                            logger.info(f'"{payload}"')
+                        case 'seek_detected':
+                            logger.debug('Seek Detected')
+                        case 'playstate_changed':
+                            playstate = 'Paused' if payload else 'Resumed'
+                            logger.debug(f'PlayState {playstate}')
+                    pending_payload = None
 
                 try:
                     await discord_rpc.update(
@@ -1027,14 +1029,15 @@ async def activity_loop(
                         small_image=small_image,
                     )
                     previous_update = time.time()
+                    previous_activity = activity
+                    previous_playstate = session_paused
+                    pending_update = False
                 except (PyPresenceException, OSError, KeyError) as e:
                     logger.error(f'RPC Update Error: {type(e).__name__}')
                     logger.debug(e)
                     await await_connection(discord_rpc, polling_rate)
                     await asyncio.sleep(polling_rate)
                     continue
-
-                previous_activity, previous_playstate = activity, session_paused
 
         elif previous_activity is not None:
             try:
@@ -1052,8 +1055,7 @@ async def activity_loop(
             previous_playback = None
             previous_timestamp = None
             previous_update = time.time()
-
-        await await_session_event(ws_state, wake_event, polling_rate)
+            pending_update = False
 
 
 async def monitor_activity(
