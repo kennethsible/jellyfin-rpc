@@ -31,6 +31,7 @@ from pypresence.types import ActivityType, StatusDisplayType
 
 CLIENT_ID = '1238889120672120853'
 logger = logging.getLogger('RPC')
+logging.addLevelName(15, 'VERBOSE')
 
 pkg_metadata = metadata('jellyfin-rpc')
 contact_info = parseaddr(pkg_metadata['Author-email'])[1]
@@ -1010,9 +1011,9 @@ async def activity_loop(
                     pending_payload = ('playstate_changed', playstate)
 
             if pending_update and (time.time() - previous_update) >= polling_rate:
-                small_image = None
-                if show_jf_logo:
-                    small_image = 'media_paused' if session_paused else 'small_image'
+                small_image = (
+                    'media_paused' if session_paused else 'small_image' if show_jf_logo else None
+                )
 
                 if pending_payload:
                     update_type, payload = pending_payload
@@ -1020,9 +1021,9 @@ async def activity_loop(
                         case 'media_changed':
                             logger.info(f'"{payload}"')
                         case 'seek_detected':
-                            logger.debug(f'Seek Detected ({payload})')
+                            logger.log(15, f'Seek Detected ({payload})')
                         case 'playstate_changed':
-                            logger.debug(f'PlayState {payload}')
+                            logger.log(15, f'PlayState {payload}')
                     pending_payload = None
 
                 try:

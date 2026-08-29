@@ -33,6 +33,7 @@ from jellyfin_rpc.main import (
 
 button_connect_text = ''
 logger = logging.getLogger('GUI')
+logging.addLevelName(15, 'VERBOSE')
 
 
 class RPCProcess:
@@ -75,6 +76,7 @@ class RPCLogger:
         self.text_widget = text_widget
 
         self.text_widget.tag_config('DEBUG', foreground='#95A5A6')
+        self.text_widget.tag_config('VERBOSE', foreground='#7DC2E7')
         self.text_widget.tag_config('INFO', foreground='#3DAEE9')
         self.text_widget.tag_config('WARNING', foreground='#F67400')
         self.text_widget.tag_config('ERROR', foreground='#DA4453')
@@ -517,7 +519,7 @@ def main() -> None:
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO') or config.getboolean(
-        'SHOW_JELLYFIN_ICON', False
+        'SHOW_JELLYFIN_ICON', True
     )
 
     tmdb_api_key = config.get('TMDB_API_KEY', '')
@@ -845,7 +847,7 @@ def main() -> None:
     label_log_level = ctk.CTkLabel(master=frame_advanced_settings, text='Log Level:')
     label_log_level.grid(row=2, column=0, pady=5, sticky='w')
 
-    values_log_level = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+    values_log_level = ['DEBUG', 'VERBOSE', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     var_log_level = ctk.StringVar(value=log_level)
     optionmenu_log_level = ctk.CTkOptionMenu(
         master=frame_advanced_settings, values=values_log_level, variable=var_log_level, width=0

@@ -45,7 +45,7 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `MEDIA_TYPES` | `Shows, Movies, Music` | Comma-separated list of media types to display activities for (`Shows`, `Movies`, `Music`). |
 | `SHOW_WHEN_PAUSED` | `true` | Shows the activity with a paused indicator instead of a progress bar. If disabled, the activity stops displaying when paused. |
 | `SHOW_SERVER_NAME` | `false` | Shows your server name as the activity name instead of saying "Jellyfin". |
-| `SHOW_JELLYFIN_LOGO` | `false` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
+| `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
 | `POSTER_LANGUAGES` | — | Comma-separated list of languages (preferably two-letter [ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1) language codes) for TMDB. Uses TMDB's default image order if unset. |
 | `TEXTLESS_POSTERS` | `false` | Controls whether textless TMDB posters are prioritized over language posters. |
 | `ALWAYS_USE_TMDB` | `false` | Controls whether TMDB is the default source for posters or a fallback provider for local artwork from Jellyfin. |
@@ -56,8 +56,8 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `FILTER_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions (or the minimum delay/fallback interval between WebSocket events). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
-| `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
-| `FILE_HDLR_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
+| `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
+| `FILE_HDLR_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |
 | `LOG_MAX_FILES` | `3` | Maximum number of log files to keep before deleting the oldest. |
 
