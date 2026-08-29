@@ -482,13 +482,13 @@ async def ws_listener(
             async with session.ws_connect(ws_url, heartbeat=30.0) as ws:
                 ws_state['ws_connected'] = True
                 initial_attempt = True
-                # logger.info('Connected to Jellyfin WebSocket')
                 await ws.send_str(json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'}))
                 async for msg in ws:
                     if msg.type == WSMsgType.TEXT:
                         payload = json.loads(msg.data)
                         if payload.get('MessageType') == 'Sessions':
                             ws_state['sessions'] = payload.get('Data', [])
+                            ws_state['last_packet'] = time.time()
                             wake_event.set()
                     elif msg.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
                         break
@@ -768,7 +768,9 @@ async def activity_loop(
                 position_ticks = int(session_data['PlayState']['PositionTicks'])
                 current_playback = position_ticks / 10_000_000
                 if not session_paused:
-                    current_start = int(time.time() - current_playback)
+                    last_packet_time = ws_state.get('last_packet', time.time())
+                    adjusted_playback = current_playback + (time.time() - last_packet_time)
+                    current_start = int(time.time() - adjusted_playback)
                     runtime_ticks = int(media_dict['RunTimeTicks'])
                     current_end = int(current_start + runtime_ticks / 10_000_000)
             except (KeyError, TypeError, ValueError):
@@ -798,8 +800,8 @@ async def activity_loop(
             media_changed = previous_activity != activity
             playstate_changed = previous_playstate != session_paused
 
-            seek_detected = False
-            current_timestamp = time.time()
+            seek_detected, seek_delta = False, 0.0
+            packet_timestamp = ws_state.get('last_packet', time.time())
             if (
                 not media_changed
                 and not session_paused
@@ -808,13 +810,14 @@ async def activity_loop(
                 and previous_playback is not None
                 and previous_timestamp is not None
             ):
-                timestamp_elapsed = current_timestamp - previous_timestamp
+                timestamp_elapsed = packet_timestamp - previous_timestamp
                 expected_playback = previous_playback + timestamp_elapsed
-                if abs(current_playback - expected_playback) > seek_threshold:
-                    seek_detected = True
+                playback_delta = current_playback - expected_playback
+                if abs(playback_delta) >= (seek_threshold - 0.5):
+                    seek_detected, seek_delta = True, round(playback_delta)
 
             previous_playback = current_playback
-            previous_timestamp = current_timestamp
+            previous_timestamp = packet_timestamp
 
             if media_changed:
                 poster_url = 'large_image'
@@ -1000,9 +1003,11 @@ async def activity_loop(
                 if media_changed:
                     pending_payload = ('media_changed', activity)
                 elif seek_detected:
-                    pending_payload = ('seek_detected', None)
+                    delta_str = f'+{seek_delta}s' if seek_delta > 0 else f'{seek_delta}s'
+                    pending_payload = ('seek_detected', delta_str)
                 elif playstate_changed:
-                    pending_payload = ('playstate_changed', session_paused)
+                    playstate = 'Paused' if session_paused else 'Resumed'
+                    pending_payload = ('playstate_changed', playstate)
 
             if pending_update and (time.time() - previous_update) >= polling_rate:
                 small_image = None
@@ -1015,10 +1020,9 @@ async def activity_loop(
                         case 'media_changed':
                             logger.info(f'"{payload}"')
                         case 'seek_detected':
-                            logger.debug('Seek Detected')
+                            logger.debug(f'Seek Detected ({payload})')
                         case 'playstate_changed':
-                            playstate = 'Paused' if payload else 'Resumed'
-                            logger.debug(f'PlayState {playstate}')
+                            logger.debug(f'PlayState {payload}')
                     pending_payload = None
 
                 try:
