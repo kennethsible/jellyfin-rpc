@@ -18,6 +18,7 @@ from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 import certifi
@@ -142,6 +143,20 @@ async def initiate_quick_connect(
     except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Retrieve User Access Token: {e}')
         sys.exit(1)
+
+
+async def resolve_jf_host(jf_host: str, session: aiohttp.ClientSession) -> str:
+    for protocol in ('https://', 'http://'):
+        candidate_url = f'{protocol}{jf_host}'
+        try:
+            async with session.get(
+                f'{candidate_url}/System/Info/Public', timeout=aiohttp.ClientTimeout(total=5.0)
+            ) as response:
+                if response.status in (200, 401, 403):
+                    return candidate_url
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            continue
+    return f'http://{jf_host}'
 
 
 async def get_jf_user_and_server(
@@ -1085,9 +1100,16 @@ async def monitor_activity(
                 cache=CacheBackend(), connector=cache_connector, timeout=timeout
             ) as cache_session,
         ):
+            jf_host = config['JELLYFIN_HOST'].rstrip('/')
+            if urlparse(jf_host).scheme not in ('http', 'https'):
+                jf_host = await resolve_jf_host(jf_host, jf_session)
+                config['JELLYFIN_HOST'] = jf_host
+                logger.warning(f'Missing URL Protocol: {jf_host}')
+
             ws_task = asyncio.create_task(
                 ws_listener(jf_session, config, polling_rate, ws_state, wake_event)
             )
+
             try:
                 await activity_loop(
                     jf_session,
