@@ -274,7 +274,7 @@ async def get_movie_id(
     search_url = 'https://api.themoviedb.org/3/search/movie'
     search_params = {'api_key': api_key, 'query': title}
     if year is not None:
-        search_params['first_air_date_year'] = str(year)
+        search_params['primary_release_year'] = str(year)
     try:
         async with session.get(search_url, params=search_params) as response:
             response.raise_for_status()
@@ -526,7 +526,7 @@ async def ws_listener(
                             wake_event.set()
                     elif msg.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
                         break
-        except (aiohttp.ClientError, TimeoutError, asyncio.CancelledError) as e:
+        except (aiohttp.ClientError, asyncio.CancelledError, TimeoutError, ValueError) as e:
             if isinstance(e, asyncio.CancelledError):
                 break
             if initial_attempt:
@@ -629,6 +629,7 @@ async def activity_loop(
                 async with jf_session.get(f'{jf_host}/Sessions', headers=jf_headers) as response:
                     response.raise_for_status()
                     sessions = await response.json()
+                    ws_state['last_packet'] = time.time()
             except (aiohttp.ClientError, TimeoutError) as e:
                 logger.error(f'Session Polling Error: {type(e).__name__}')
                 logger.debug(e)
