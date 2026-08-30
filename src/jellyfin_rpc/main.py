@@ -290,18 +290,36 @@ async def get_movie_id(
     return None
 
 
-async def get_music_id(session: ClientSession, artist: str, album: str) -> str | None:
+async def get_music_id_from_search(session: ClientSession, artist: str, album: str) -> str | None:
     artist, album = artist.lower(), album.lower()
     search_url = 'https://musicbrainz.org/ws/2/release-group'
     headers = {'User-Agent': USER_AGENT, 'Accept': 'application/json'}
     artist_query = f'artist:({artist}) OR artistalias:({artist})'
-    album_query = f'releasegroup:({album}) OR alias:({album}'
+    album_query = f'releasegroup:({album}) OR alias:({album})'
     params = {'query': f'({artist_query}) AND ({album_query})', 'fmt': 'json'}
     try:
         async with session.get(search_url, headers=headers, params=params) as response:
             response.raise_for_status()
             data = await response.json()
             return data['release-groups'][0]['id']
+    except (aiohttp.ClientError, TimeoutError) as e:
+        logger.warning(f'MusicBrainz API Network Error ({type(e).__name__}). Skipping...')
+        logger.debug(e)
+    except (ValueError, KeyError, IndexError) as e:
+        logger.warning(f'MusicBrainz API Parsing Error ({type(e).__name__}). Skipping...')
+        logger.debug(e)
+    return None
+
+
+async def get_music_id_from_release(session: ClientSession, release_id: str) -> str | None:
+    lookup_url = f'https://musicbrainz.org/ws/2/release/{release_id}'
+    headers = {'User-Agent': USER_AGENT, 'Accept': 'application/json'}
+    params = {'inc': 'release-groups', 'fmt': 'json'}
+    try:
+        async with session.get(lookup_url, headers=headers, params=params) as response:
+            response.raise_for_status()
+            data = await response.json()
+            return data['release-group']['id']
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'MusicBrainz API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
@@ -837,15 +855,15 @@ async def activity_loop(
 
             if media_changed:
                 poster_url = 'large_image'
-                state_url = large_url = details_url = None
+                details_url = state_url = None
                 is_https = jf_host.startswith('https://')
 
                 if media_type == 'Episode':
                     tmdb_id = series_year = None
-                    if jf_series_id := media_dict.get('SeriesId'):
+                    if series_id := media_dict.get('SeriesId'):
                         try:
                             async with jf_session.get(
-                                f'{jf_host}/Items/{jf_series_id}',
+                                f'{jf_host}/Items/{series_id}',
                                 headers=jf_headers,
                                 params={'userId': user_id},
                             ) as response:
@@ -865,21 +883,11 @@ async def activity_loop(
                             )
 
                     if not always_use_tmdb:
-                        jf_season_id = media_dict.get('SeasonId')
-                        jf_season_poster = (
-                            f'{jf_host}/Items/{jf_season_id}/Images/Primary'
-                            if (jf_season_id and is_https)
-                            else None
-                        )
-                        jf_series_poster = (
-                            f'{jf_host}/Items/{jf_series_id}/Images/Primary'
-                            if (jf_series_id and is_https)
-                            else None
-                        )
-                        if season_over_series and jf_season_poster:
-                            poster_url = jf_season_poster
-                        elif jf_series_poster:
-                            poster_url = jf_series_poster
+                        season_id = media_dict.get('SeasonId')
+                        if season_over_series and season_id and is_https:
+                            poster_url = f'{jf_host}/Items/{season_id}/Images/Primary'
+                        elif series_id and is_https:
+                            poster_url = f'{jf_host}/Items/{series_id}/Images/Primary'
                         elif tmdb_api_key and tmdb_id:
                             season = media_dict['ParentIndexNumber']
                             if season_over_series:
@@ -905,10 +913,11 @@ async def activity_loop(
                         details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
                         if 'ParentIndexNumber' in media_dict:
                             season = media_dict['ParentIndexNumber']
-                            large_url = f'{details_url}/season/{season}'
                             if 'IndexNumber' in media_dict:
                                 episode = media_dict['IndexNumber']
                                 state_url = f'{details_url}/season/{season}/episode/{episode}'
+                            else:
+                                state_url = f'{details_url}/season/{season}'
 
                 elif media_type == 'Movie':
                     movie_ids = media_dict.get('ProviderIds', {})
@@ -922,13 +931,8 @@ async def activity_loop(
                                 cache_session, tmdb_api_key, media_dict['Name'], movie_year
                             )
 
-                    jf_movie_poster = (
-                        f'{jf_host}/Items/{item_id}/Images/Primary'
-                        if (item_id and is_https)
-                        else None
-                    )
-                    if not always_use_tmdb and jf_movie_poster:
-                        poster_url = jf_movie_poster
+                    if not always_use_tmdb and item_id and is_https:
+                        poster_url = f'{jf_host}/Items/{item_id}/Images/Primary'
                     elif tmdb_api_key and tmdb_id:
                         poster_url = await get_movie_poster(
                             cache_session, tmdb_api_key, tmdb_id, languages
@@ -936,15 +940,15 @@ async def activity_loop(
 
                     if tmdb_id:
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
-                        large_url = details_url
 
                 elif media_type == 'Audio':
                     music_ids = media_dict.get('ProviderIds', {})
+                    track_id = music_ids.get('MusicBrainzTrack')
                     group_id = music_ids.get('MusicBrainzReleaseGroup')
-                    album_id = media_dict.get('AlbumId')
+                    release_id = music_ids.get('MusicBrainzAlbum')
 
-                    album_item = None
-                    if not group_id and album_id:
+                    album_id = media_dict.get('AlbumId')
+                    if album_id and (not group_id or release_over_group and not release_id):
                         try:
                             async with jf_session.get(
                                 f'{jf_host}/Items/{album_id}',
@@ -954,64 +958,46 @@ async def activity_loop(
                                 response.raise_for_status()
                                 album_item = await response.json()
                                 album_music_ids = album_item.get('ProviderIds', {})
-                                group_id = album_music_ids.get('MusicBrainzReleaseGroup')
+                                if not group_id:
+                                    group_id = album_music_ids.get('MusicBrainzReleaseGroup')
+                                if release_over_group and not release_id:
+                                    release_id = album_music_ids.get('MusicBrainzAlbum')
                         except (aiohttp.ClientError, TimeoutError, ValueError):
                             pass
 
+                    if not group_id and release_id:
+                        group_id = await get_music_id_from_release(cache_session, release_id)
                     if not group_id:
                         logger.warning('No MusicBrainz ID Found. Searching...')
                         if 'AlbumArtist' in media_dict and 'Album' in media_dict:
-                            group_id = await get_music_id(
+                            group_id = await get_music_id_from_search(
                                 cache_session, media_dict['AlbumArtist'], media_dict['Album']
                             )
 
-                    release_id = None
-                    jf_album_cover = (
-                        f'{jf_host}/Items/{album_id}/Images/Primary'
-                        if (album_id and is_https)
-                        else None
-                    )
-                    if not always_use_musicbrainz and jf_album_cover:
-                        poster_url = jf_album_cover
+                    if not always_use_musicbrainz and album_id and is_https:
+                        poster_url = f'{jf_host}/Items/{album_id}/Images/Primary'
                     elif group_id:
-                        if release_over_group:
-                            release_id = music_ids.get('MusicBrainzAlbum')
-                            if not release_id and album_id:
-                                try:
-                                    if album_item is None:
-                                        async with jf_session.get(
-                                            f'{jf_host}/Items/{album_id}',
-                                            headers=jf_headers,
-                                            params={'userId': user_id},
-                                        ) as response:
-                                            response.raise_for_status()
-                                            album_item = await response.json()
-                                    album_music_ids = album_item.get('ProviderIds', {})
-                                    release_id = album_music_ids.get('MusicBrainzAlbum')
-                                except (aiohttp.ClientError, TimeoutError, ValueError):
-                                    pass
-                        poster_url = await get_release_cover(cache_session, group_id, release_id)
+                        cover_release_id = release_id if release_over_group else None
+                        poster_url = await get_release_cover(
+                            cache_session, group_id, cover_release_id
+                        )
 
-                    if group_id:
-                        if 'MusicBrainzTrack' in music_ids:
-                            track_id = music_ids['MusicBrainzTrack']
-                            details_url = f'https://musicbrainz.org/track/{track_id}'
+                    if track_id:
+                        details_url = f'https://musicbrainz.org/track/{track_id}'
+                    if release_over_group and release_id:
+                        state_url = f'https://musicbrainz.org/release/{release_id}'
+                    elif group_id:
                         state_url = f'https://musicbrainz.org/release-group/{group_id}'
-                        if release_id:
-                            large_url = f'https://musicbrainz.org/release/{release_id}'
-                        else:
-                            large_url = state_url
 
                 cached_kwargs = {
                     'activity_type': activity_type,
                     'status_display_type': StatusDisplayType.DETAILS,
-                    'state': state[:128] if state else None,
-                    'state_url': state_url,
+                    'name': server_name,
                     'details': details[:128] if details else None,
                     'details_url': details_url,
-                    'name': server_name,
+                    'state': state[:128] if state else None,
+                    'state_url': state_url,
                     'large_image': poster_url,
-                    'large_url': large_url,
                 }
 
             if media_changed or seek_detected or playstate_changed:
