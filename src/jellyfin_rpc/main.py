@@ -511,9 +511,10 @@ async def ws_listener(
             await asyncio.sleep(1)
             continue
 
-        ws_url = f'{ws_protocol}{ws_host}/socket?api_key={jf_api_key}&deviceId={device_id}'
+        ws_url = f'{ws_protocol}{ws_host}/socket?deviceId={device_id}'
+        headers = {'Authorization': build_auth_header(device_id, jf_api_key)}
         try:
-            async with session.ws_connect(ws_url, heartbeat=30.0) as ws:
+            async with session.ws_connect(ws_url, headers=headers, heartbeat=30.0) as ws:
                 ws_state['ws_connected'] = True
                 initial_attempt = True
                 await ws.send_str(json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'}))
