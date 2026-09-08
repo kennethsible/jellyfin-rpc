@@ -991,6 +991,13 @@ async def activity_loop(
                     elif group_id:
                         state_url = f'https://musicbrainz.org/release-group/{group_id}'
 
+                if (
+                    show_server_name
+                    and server_name is not None
+                    and activity_type == ActivityType.WATCHING
+                ):
+                    server_name = f'on {server_name}'
+
                 cached_kwargs = {
                     'activity_type': activity_type,
                     'status_display_type': StatusDisplayType.DETAILS,
