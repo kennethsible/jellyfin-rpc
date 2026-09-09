@@ -234,7 +234,7 @@ async def get_jf_user_and_server(
             continue
 
 
-async def check_tmdb_connection(session: ClientSession, api_key: str) -> None:
+async def check_tmdb_auth(session: ClientSession, api_key: str) -> None:
     config_url = 'https://api.themoviedb.org/3/configuration'
     config_params = {'api_key': api_key}
     try:
@@ -517,21 +517,35 @@ async def ws_listener(
             async with session.ws_connect(ws_url, headers=headers, heartbeat=30.0) as ws:
                 ws_state['ws_connected'] = True
                 initial_attempt = True
-                await ws.send_str(json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'}))
-                async for msg in ws:
-                    if msg.type == WSMsgType.TEXT:
-                        payload = json.loads(msg.data)
-                        if payload.get('MessageType') == 'Sessions':
-                            ws_state['sessions'] = payload.get('Data', [])
-                            ws_state['last_packet'] = time.time()
-                            wake_event.set()
-                    elif msg.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
-                        break
+
+                async def ping_loop() -> None:
+                    while True:
+                        await asyncio.sleep(30)
+                        await ws.send_str(json.dumps({'MessageType': 'KeepAlive'}))
+
+                ping_task = asyncio.create_task(ping_loop())
+                try:
+                    await ws.send_str(
+                        json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'})
+                    )
+                    async for msg in ws:
+                        if msg.type == WSMsgType.TEXT:
+                            payload = json.loads(msg.data)
+                            if payload.get('MessageType') == 'Sessions':
+                                ws_state['sessions'] = payload.get('Data', [])
+                                ws_state['last_packet'] = time.time()
+                                wake_event.set()
+                        elif msg.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
+                            break
+                finally:
+                    ping_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await ping_task
         except (aiohttp.ClientError, asyncio.CancelledError, TimeoutError, ValueError) as e:
             if isinstance(e, asyncio.CancelledError):
                 break
             if initial_attempt:
-                logger.warning(f'Jellyfin WebSocket Error ({type(e).__name__}). Skipping...')
+                logger.warning(f'Jellyfin WebSocket Error ({type(e).__name__}). Retrying...')
                 logger.debug(e)
                 initial_attempt = False
         finally:
@@ -568,7 +582,7 @@ async def activity_loop(
     }
 
     if tmdb_api_key := config.get('TMDB_API_KEY'):
-        await check_tmdb_connection(cache_session, tmdb_api_key)
+        await check_tmdb_auth(cache_session, tmdb_api_key)
 
     languages = parse_delimited_list(config, 'POSTER_LANGUAGES')
     for i, lang in enumerate(languages):
@@ -991,17 +1005,18 @@ async def activity_loop(
                     elif group_id:
                         state_url = f'https://musicbrainz.org/release-group/{group_id}'
 
+                display_name = server_name
                 if (
                     show_server_name
                     and server_name is not None
                     and activity_type == ActivityType.WATCHING
                 ):
-                    server_name = f'on {server_name}'
+                    display_name = f'on {server_name}'
 
                 cached_kwargs = {
                     'activity_type': activity_type,
                     'status_display_type': StatusDisplayType.DETAILS,
-                    'name': server_name,
+                    'name': display_name,
                     'details': details[:128] if details else None,
                     'details_url': details_url,
                     'state': state[:128] if state else None,
@@ -1074,7 +1089,7 @@ async def activity_loop(
 
 
 async def monitor_activity(
-    config: SectionProxy, init_path: str, polling_rate: int, seek_threshold: int
+    config: SectionProxy, ini_path: str, polling_rate: int, seek_threshold: int
 ) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
     discord_rpc = AioPresence(client_id)
@@ -1111,7 +1126,7 @@ async def monitor_activity(
                     cache_session,
                     discord_rpc,
                     config,
-                    init_path,
+                    ini_path,
                     polling_rate,
                     seek_threshold,
                     ws_state,
