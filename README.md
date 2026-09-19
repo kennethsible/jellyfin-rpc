@@ -62,6 +62,7 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `FILTER_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions (or the minimum delay/fallback interval between WebSocket events). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
+| `SINGLETON_PORT` | `57634` | Local TCP port used to prevent multiple instances and focus the active window on launch. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `FILE_HDLR_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |

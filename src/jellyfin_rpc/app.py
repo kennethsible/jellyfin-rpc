@@ -4,6 +4,7 @@ import multiprocessing as mp
 import os
 import queue
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -31,9 +32,11 @@ from jellyfin_rpc.main import (
     parse_delimited_list,
 )
 
-button_connect_text = ''
+SINGLE_INSTANCE_PORT = 57634
 logger = logging.getLogger('GUI')
 logging.addLevelName(15, 'VERBOSE')
+
+button_connect_text = ''
 
 
 class RPCProcess:
@@ -478,6 +481,50 @@ def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[Lo
     return log_queue
 
 
+def activate_existing_instance(singleton_port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            client.settimeout(1.0)
+            client.connect(('127.0.0.1', singleton_port))
+            client.sendall(b'FOCUS\n')
+            return True
+    except (ConnectionRefusedError, TimeoutError, OSError):
+        return False
+
+
+def start_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket.socket | None:
+    try:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # IPv4 TCP
+        server.bind(('127.0.0.1', singleton_port))
+        server.listen(5)
+
+        def listener():
+            while True:
+                try:
+                    connection, _ = server.accept()
+                    with connection:
+                        message = connection.recv(1024).strip()
+                        if message == b'FOCUS':
+                            gui_queue.put('FOCUS')
+                except OSError:
+                    break
+
+        threading.Thread(target=listener, daemon=True).start()
+        return server
+    except OSError:
+        return None
+
+
+def focus_window(root: ctk.CTk) -> None:
+    if root.state() == 'withdrawn' or root.state() == 'iconic':
+        root.deiconify()
+    root.lift()
+    root.focus_force()
+    if sys.platform == 'win32':
+        root.attributes('-topmost', True)
+        root.after_idle(root.attributes, '-topmost', False)
+
+
 def main() -> None:
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
@@ -511,6 +558,10 @@ def main() -> None:
             shutil.copyfile(ini_bundle_path, ini_path)
 
     config = load_config(ini_path)
+    singleton_port = config.getint('SINGLETON_PORT', fallback=SINGLE_INSTANCE_PORT)
+
+    if activate_existing_instance(singleton_port):
+        sys.exit(0)
 
     jf_host = config.get('JELLYFIN_HOST', '')
     jf_api_key = config.get('JELLYFIN_API_KEY', '')
@@ -541,6 +592,9 @@ def main() -> None:
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
+
+    gui_queue: queue.Queue[str] = queue.Queue()
+    ipc_server = start_ipc_server(gui_queue, singleton_port)
 
     color_theme = 'dark' if sys.platform == 'linux' else 'system'
     appearance_mode = config.get('APPEARANCE_MODE', color_theme)
@@ -1014,7 +1068,6 @@ def main() -> None:
         on_close(root, rpc_process, context['tray_icon'])
 
     tray_icon = None
-    gui_queue: queue.Queue[str] = queue.Queue()
     if sys.platform == 'darwin':
         root.createcommand(
             '::tk::mac::ReopenApplication',
@@ -1068,6 +1121,9 @@ def main() -> None:
                     on_click_callback()
                 case 'MAXIMIZE':
                     on_maximize(label_update, frame_grid, frame_bottom, root)
+                case 'FOCUS':
+                    on_maximize(label_update, frame_grid, frame_bottom, root)
+                    focus_window(root)
                 case 'QUIT':
                     on_close_callback()
         except queue.Empty:
@@ -1075,8 +1131,7 @@ def main() -> None:
         finally:
             root.after(100, lambda: poll_gui_queue())
 
-    if tray_icon:
-        poll_gui_queue()
+    poll_gui_queue()
 
     if sys.platform == 'win32':
         root.iconbitmap(ico_bundle_path)
@@ -1084,7 +1139,15 @@ def main() -> None:
     root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
     root.resizable(True, True)
 
-    set_close_behavior(root, on_close_callback, minimize_on_close)
+    def exit_cleanup():
+        if ipc_server:
+            try:
+                ipc_server.close()
+            except OSError:
+                pass
+        on_close_callback()
+
+    set_close_behavior(root, exit_cleanup, minimize_on_close)
     root.mainloop()
 
 
