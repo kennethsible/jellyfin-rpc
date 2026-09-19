@@ -23,9 +23,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Package Manager
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       - name: Install Python 3.14 (Linux Only)
@@ -61,8 +61,8 @@ jobs:
 
           mkdir -p dist/AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p dist/AppDir/usr/share/icons/hicolor/512x512/apps
-          cp images/icon-256x256.png dist/AppDir/usr/share/icons/hicolor/256x256/apps/jellyfin-rpc.png
-          cp images/icon-512x512.png dist/AppDir/usr/share/icons/hicolor/512x512/apps/jellyfin-rpc.png
+          cp images/icon_256x256.png dist/AppDir/usr/share/icons/hicolor/256x256/apps/jellyfin-rpc.png
+          cp images/icon_512x512.png dist/AppDir/usr/share/icons/hicolor/512x512/apps/jellyfin-rpc.png
 
           cat << 'EOF' > dist/AppDir/jellyfin-rpc.desktop
           [Desktop Entry]
