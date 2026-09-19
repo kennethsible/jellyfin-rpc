@@ -2,6 +2,10 @@
 <div align="center">
   <img alt="Jellyfin RPC Banner" src="https://raw.githubusercontent.com/kennethsible/jellyfin-rpc/refs/heads/main/images/jellyfin_rpc_banner.svg" width="600">
 </div>
+<p align="center">
+<img src="https://github.com/kennethsible/jellyfin-rpc/actions/workflows/pyinstaller.yaml/badge.svg" alt="PyInstaller Release" />
+<img src="https://img.shields.io/github/downloads/kennethsible/jellyfin-rpc/total?label=GitHub%20Downloads&color=34cf58&labelColor=555" alt="GitHub Downloads" />
+</p>
 
 Jellyfin RPC updates your Discord status with what you're watching or listening to on your Jellyfin server. Make sure your desktop client for Discord is running and your [Activity Sharing](https://support.discord.com/hc/en-us/articles/7931156448919-Activity-Sharing-on-Discord-FAQ) settings are enabled.
 
