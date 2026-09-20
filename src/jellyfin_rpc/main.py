@@ -12,6 +12,7 @@ import time
 import uuid
 from configparser import ConfigParser, SectionProxy
 from contextlib import suppress
+from dataclasses import dataclass
 from email.utils import parseaddr
 from importlib.metadata import metadata
 from json.decoder import JSONDecodeError
@@ -533,6 +534,21 @@ async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
         break
 
 
+async def clear_activity(
+    discord_rpc: AioPresence, polling_rate: int, reason: str | None = None
+) -> bool:
+    try:
+        await discord_rpc.clear()
+        logger.info('Activity Cleared' + (f' ({reason})' if reason else ''))
+        return True
+    except (PyPresenceException, OSError, KeyError) as e:
+        logger.error(f'Failed to Clear Activity: {type(e).__name__}')
+        logger.debug(e)
+        await await_connection(discord_rpc, polling_rate)
+        await asyncio.sleep(polling_rate)
+        return False
+
+
 async def ws_listener(
     session: ClientSession,
     config: SectionProxy,
@@ -592,6 +608,25 @@ async def ws_listener(
         finally:
             ws_state['ws_connected'] = False
         await asyncio.sleep(polling_rate)
+
+
+@dataclass
+class PresenceState:
+    last_activity_str: str = ''
+    last_playstate: bool = False
+    last_playback: float | None = None  # Playback Time of Last Media Position
+    last_timestamp: float | None = None  # System Time of Last Media Position
+    last_rpc_update: float = 0.0  # System Time of Last RPC Activity Update
+    has_pending_update: bool = False
+    pending_payload: tuple[str, Any] | None = None
+
+    def reset(self) -> None:
+        self.last_activity_str = ''
+        self.last_playstate = False
+        self.last_playback = None
+        self.last_timestamp = None
+        self.last_rpc_update = time.time()
+        self.has_pending_update = False
 
 
 async def activity_loop(
@@ -654,14 +689,10 @@ async def activity_loop(
     if 'Music' in media_types:
         jf_media_types.add('Audio')
 
-    activity = previous_activity = None
-    previous_warning = False  # Suppresses Duplicate Warnings
-    previous_playstate = False  # Last Pause State (True=Paused)
-    previous_playback = None  # Playback Time of Last Media Position
-    previous_timestamp = None  # System Time of Last Media Position
-    previous_update = 0.0  # System Time of Last Activity Update
-    pending_update = False  # Tracks Deferred Update During Cooldown
-    pending_payload = None  # Event Payload for Deferred Update
+    activity_str = ''
+    rpc_state = PresenceState()
+    last_unsupported_warning = False
+    last_missing_key_warning = False
 
     cached_item_id = None
     cached_kwargs: dict[str, Any] = {}
@@ -669,8 +700,8 @@ async def activity_loop(
     while True:
         if ws_state.get('ws_connected'):
             try:
-                if pending_update:
-                    remaining_cooldown = polling_rate - (time.time() - previous_update)
+                if rpc_state.has_pending_update:
+                    remaining_cooldown = polling_rate - (time.time() - rpc_state.last_rpc_update)
                     wait_timeout = max(0.05, remaining_cooldown)
                 else:
                     wait_timeout = polling_rate
@@ -723,26 +754,13 @@ async def activity_loop(
             except KeyError as e:
                 logger.warning(f'Missing Key in Session Data: {e}')
                 session_paused = False
-            playstate_changed = previous_playstate != session_paused
+            playstate_changed = rpc_state.last_playstate != session_paused
 
             if session_paused and not show_when_paused:
-                if previous_activity is not None:
-                    try:
-                        await discord_rpc.clear()
-                        logger.info('Activity Cleared')
-                    except (PyPresenceException, OSError, KeyError) as e:
-                        logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                        logger.debug(e)
-                        await await_connection(discord_rpc, polling_rate)
-                        await asyncio.sleep(polling_rate)
+                if rpc_state.last_activity_str:
+                    if not await clear_activity(discord_rpc, polling_rate):
                         continue
-
-                    previous_activity = None
-                    previous_playstate = False
-                    previous_playback = None
-                    previous_timestamp = None
-                    previous_update = time.time()
-                    pending_update = False
+                    rpc_state.reset()
                 continue
 
             current_playback = None
@@ -761,23 +779,10 @@ async def activity_loop(
 
             STALE_GRACE_PERIOD = 5
             if current_end and time.time() >= (current_end + STALE_GRACE_PERIOD):
-                if previous_activity is not None:
-                    try:
-                        await discord_rpc.clear()
-                        logger.info('Activity Cleared (Stale Session)')
-                    except (PyPresenceException, OSError, KeyError) as e:
-                        logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                        logger.debug(e)
-                        await await_connection(discord_rpc, polling_rate)
-                        await asyncio.sleep(polling_rate)
+                if rpc_state.last_activity_str:
+                    if not await clear_activity(discord_rpc, polling_rate, 'Stale Session'):
                         continue
-
-                    previous_activity = None
-                    previous_playstate = False
-                    previous_playback = None
-                    previous_timestamp = None
-                    previous_update = time.time()
-                    pending_update = False
+                    rpc_state.reset()
                 continue
 
             seek_detected, seek_delta = False, 0.0
@@ -785,17 +790,19 @@ async def activity_loop(
             if (
                 not media_changed
                 and not session_paused
-                and not previous_playstate
+                and not rpc_state.last_playstate
                 and current_playback is not None
-                and previous_playback is not None
-                and previous_timestamp is not None
+                and rpc_state.last_playback is not None
+                and rpc_state.last_timestamp is not None
             ):
-                timestamp_elapsed = packet_timestamp - previous_timestamp
-                expected_playback = previous_playback + timestamp_elapsed
+                timestamp_elapsed = packet_timestamp - rpc_state.last_timestamp
+                expected_playback = rpc_state.last_playback + timestamp_elapsed
                 playback_delta = current_playback - expected_playback
                 if abs(playback_delta) >= (seek_threshold - 0.5):
                     seek_detected, seek_delta = True, round(playback_delta)
-            previous_playback, previous_timestamp = current_playback, packet_timestamp
+
+            rpc_state.last_playback = current_playback
+            rpc_state.last_timestamp = packet_timestamp
 
             if media_changed:
                 cached_item_id = item_id
@@ -828,80 +835,60 @@ async def activity_loop(
                             is_allowed = True
 
                     if not is_allowed:
-                        if previous_activity is not None:
-                            try:
-                                await discord_rpc.clear()
-                                logger.info('Activity Cleared (Library Blocked)')
-                            except (PyPresenceException, OSError, KeyError) as e:
-                                logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                                logger.debug(e)
-                                await await_connection(discord_rpc, polling_rate)
-                                await asyncio.sleep(polling_rate)
+                        if rpc_state.last_activity_str:
+                            if not await clear_activity(
+                                discord_rpc, polling_rate, 'Library Blocked'
+                            ):
                                 continue
-
-                            previous_activity = None
-                            previous_playstate = False
-                            previous_playback = None
-                            previous_timestamp = None
-                            previous_update = time.time()
-                            pending_update = False
+                            rpc_state.reset()
+                            cached_kwargs.clear()
                         continue
 
-                    state = details = None
+                    state_str = details_str = None
                     match media_type := media_dict['Type']:
                         case 'Episode':
                             activity_type = ActivityType.WATCHING
                             season = media_dict['ParentIndexNumber']
                             episode = media_dict['IndexNumber']
-                            details = media_dict['SeriesName']
-                            state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
-                            activity = f'{details} {state.split(" - ")[0]}'
+                            details_str = media_dict['SeriesName']
+                            state_str = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
+                            activity_str = f'{details_str} {state_str.split(" - ")[0]}'
                         case 'Movie':
                             activity_type = ActivityType.WATCHING
-                            details = media_dict['Name']
+                            details_str = media_dict['Name']
                             if genres := media_dict.get('Genres'):
-                                state = ' \u2022 '.join(genres[:3])
-                            activity = details
+                                state_str = ' \u2022 '.join(genres[:3])
+                            activity_str = details_str
                         case 'Audio':
                             activity_type = ActivityType.LISTENING
                             if artists := media_dict.get('Artists'):
-                                state = ', '.join(artists)
+                                state_str = ', '.join(artists)
                             if album_name := media_dict.get('Album'):
-                                if state:
-                                    state += f' - {album_name}'
+                                if state_str:
+                                    state_str += f' - {album_name}'
                                 else:
-                                    state = album_name
-                            details = media_dict['Name']
-                            activity = str(details)
-                            if state:
-                                activity += f' - {state.split(" - ")[0]}'
+                                    state_str = album_name
+                            details_str = media_dict['Name']
+                            activity_str = details_str
+                            if state_str:
+                                activity_str += f' - {state_str.split(" - ")[0]}'
                         case _:
-                            if not previous_warning:
+                            if not last_unsupported_warning:
                                 logger.warning(
                                     f'Unsupported Media Type "{media_type}". Skipping...'
                                 )
-                                previous_warning = True
-                            if previous_activity is not None:
-                                try:
-                                    await discord_rpc.clear()
-                                    logger.info('Activity Cleared (Unsupported Media)')
-                                except (PyPresenceException, OSError, KeyError) as e:
-                                    logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                                    logger.debug(e)
-                                    await await_connection(discord_rpc, polling_rate)
-                                    await asyncio.sleep(polling_rate)
+                                last_unsupported_warning = True
+                            if rpc_state.last_activity_str:
+                                if not await clear_activity(
+                                    discord_rpc, polling_rate, 'Unsupported Media'
+                                ):
                                     continue
+                                rpc_state.reset()
+                                cached_kwargs.clear()
+                            continue
 
-                                previous_activity = None
-                                previous_playstate = False
-                                previous_playback = None
-                                previous_timestamp = None
-                                previous_update = time.time()
-                                pending_update = False
-                            continue  # raise NotImplementedError()
-
-                    if len(details) < 2:  # e.g., Chinese characters
-                        details += ' '
+                    if len(details_str) < 2:
+                        details_str += ' '
 
                     poster_url = 'large_image'
                     details_url = state_url = None
@@ -1081,41 +1068,45 @@ async def activity_loop(
                         'activity_type': activity_type,
                         'status_display_type': StatusDisplayType.DETAILS,
                         'name': display_name,
-                        'details': details[:128] if details else None,
+                        'details': details_str[:128] if details_str else None,
                         'details_url': details_url,
-                        'state': state[:128] if state else None,
+                        'state': state_str[:128] if state_str else None,
                         'state_url': state_url,
                         'large_image': poster_url,
                     }
 
                 except KeyError as e:
-                    if not previous_warning:
+                    if not last_missing_key_warning:
                         logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
-                        previous_warning = True
+                        last_missing_key_warning = True
                     cached_item_id = None
                     await asyncio.sleep(polling_rate)
                     continue
 
-                previous_warning = False
+                last_unsupported_warning = False
+                last_missing_key_warning = False
 
             if media_changed or seek_detected or playstate_changed:
-                pending_update = True
+                rpc_state.has_pending_update = True
                 if media_changed:
-                    pending_payload = ('media_changed', activity)
+                    rpc_state.pending_payload = ('media_changed', activity_str)
                 elif seek_detected:
                     delta_str = f'+{seek_delta}s' if seek_delta > 0 else f'{seek_delta}s'
-                    pending_payload = ('seek_detected', delta_str)
+                    rpc_state.pending_payload = ('seek_detected', delta_str)
                 elif playstate_changed:
                     playstate = 'Paused' if session_paused else 'Resumed'
-                    pending_payload = ('playstate_changed', playstate)
+                    rpc_state.pending_payload = ('playstate_changed', playstate)
 
-            if pending_update and (time.time() - previous_update) >= polling_rate:
+            if (
+                rpc_state.has_pending_update
+                and (time.time() - rpc_state.last_rpc_update) >= polling_rate
+            ):
                 small_image = (
                     'media_paused' if session_paused else 'small_image' if show_jf_logo else None
                 )
 
-                if pending_payload:
-                    update_type, payload = pending_payload
+                if rpc_state.pending_payload:
+                    update_type, payload = rpc_state.pending_payload
                     match update_type:
                         case 'media_changed':
                             logger.info(f'"{payload}"')
@@ -1123,7 +1114,7 @@ async def activity_loop(
                             logger.log(15, f'Seek Detected ({payload})')
                         case 'playstate_changed':
                             logger.log(15, f'PlayState {payload}')
-                    pending_payload = None
+                    rpc_state.pending_payload = None
 
                 try:
                     await discord_rpc.update(
@@ -1132,10 +1123,10 @@ async def activity_loop(
                         end=current_end,
                         small_image=small_image,
                     )
-                    previous_update = time.time()
-                    previous_activity = activity
-                    previous_playstate = session_paused
-                    pending_update = False
+                    rpc_state.last_rpc_update = time.time()
+                    rpc_state.last_activity_str = activity_str
+                    rpc_state.last_playstate = session_paused
+                    rpc_state.has_pending_update = False
                 except (PyPresenceException, OSError, KeyError) as e:
                     logger.error(f'RPC Update Error: {type(e).__name__}')
                     logger.debug(e)
@@ -1143,24 +1134,10 @@ async def activity_loop(
                     await asyncio.sleep(polling_rate)
                     continue
 
-        elif previous_activity is not None:
-            try:
-                await discord_rpc.clear()
-                logger.info('Activity Cleared')
-            except (PyPresenceException, OSError, KeyError) as e:
-                logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                logger.debug(e)
-                await await_connection(discord_rpc, polling_rate)
-                await asyncio.sleep(polling_rate)
+        elif rpc_state.last_activity_str:
+            if not await clear_activity(discord_rpc, polling_rate):
                 continue
-
-            previous_activity = None
-            previous_playstate = False
-            previous_playback = None
-            previous_timestamp = None
-            previous_update = time.time()
-            pending_update = False
-
+            rpc_state.reset()
             cached_item_id = None
             cached_kwargs.clear()
 
