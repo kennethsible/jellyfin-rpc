@@ -859,11 +859,11 @@ async def activity_loop(
             try:
                 position_ticks = int(session_data['PlayState']['PositionTicks'])
                 current_playback = position_ticks / 10_000_000
+                last_packet_time = ws_state.get('last_packet', time.time())
+                adjusted_playback = current_playback + (time.time() - last_packet_time)
+                current_start = int(time.time() - adjusted_playback)
+                runtime_ticks = int(media_dict['RunTimeTicks'])
                 if not session_paused:
-                    last_packet_time = ws_state.get('last_packet', time.time())
-                    adjusted_playback = current_playback + (time.time() - last_packet_time)
-                    current_start = int(time.time() - adjusted_playback)
-                    runtime_ticks = int(media_dict['RunTimeTicks'])
                     current_end = int(current_start + runtime_ticks / 10_000_000)
             except (KeyError, TypeError, ValueError):
                 pass
