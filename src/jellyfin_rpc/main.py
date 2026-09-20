@@ -113,6 +113,7 @@ async def initiate_quick_connect(
             secret = init_data['Secret']
             code = init_data['Code']
             logger.info(f'Quick Connect Code: {code}')
+            logger.info(f'{jf_host.rstrip("/")}/web/#/quickconnect')
     except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Initiate Quick Connect: {e}')
         sys.exit(1)

@@ -3,6 +3,7 @@ import logging
 import multiprocessing as mp
 import os
 import queue
+import re
 import shutil
 import socket
 import subprocess
@@ -98,27 +99,26 @@ class RPCLogger:
         self.text_widget.configure(state='normal')
         start_index = self.text_widget.index('end-1c')
         self.text_widget.insert(ctk.END, message)
-
         end_index = f'{start_index}+{len(record.levelname)}c'
         self.text_widget.tag_add(record.levelname, start_index, end_index)
 
-        if message.rstrip().endswith('Open Setup Guide'):
-            tk_text = self.text_widget._textbox
-            tk_text.tag_add('link', '1.6', '1.22')
-            mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
-            link_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
-            bold_font = ctk.CTkFont(family=tk_text.cget('font'))
-            bold_font.configure(weight='bold')
-            tk_text.tag_configure('link', foreground=link_color, font=bold_font)
-            tk_text.tag_bind(
-                'link',
-                '<Button-1>',
-                lambda _: webbrowser.open_new_tab(
-                    'https://github.com/kennethsible/jellyfin-rpc?tab=readme-ov-file#configuration'
-                ),
-            )
-            tk_text.tag_bind('link', '<Enter>', lambda event: event.widget.config(cursor='hand2'))
-            tk_text.tag_bind('link', '<Leave>', lambda event: event.widget.config(cursor=''))
+        tk_text = self.text_widget._textbox
+        mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
+        link_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
+        bold_font = ctk.CTkFont(family=tk_text.cget('font'), weight='bold')
+
+        for match in re.finditer(r'https?://\S+', message):
+            url = match.group(0)
+            tag_name = f'link_{id(url)}_{match.start()}'
+
+            link_start = f'{start_index}+{match.start()}c'
+            link_end = f'{start_index}+{match.end()}c'
+
+            tk_text.tag_add(tag_name, link_start, link_end)
+            tk_text.tag_configure(tag_name, foreground=link_color, font=bold_font)
+            tk_text.tag_bind(tag_name, '<Button-1>', lambda _, u=url: webbrowser.open_new_tab(u))
+            tk_text.tag_bind(tag_name, '<Enter>', lambda event: event.widget.config(cursor='hand2'))
+            tk_text.tag_bind(tag_name, '<Leave>', lambda event: event.widget.config(cursor=''))
 
         self.text_widget.configure(state='disabled')
         self.text_widget.see(ctk.END)
@@ -645,26 +645,25 @@ def main() -> None:
     label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
     label_host.pack(anchor='w', padx=10)
 
-    var_jf_host = ctk.StringVar(value=jf_host)
-    entry_jf_host = ctk.CTkEntry(master=col1, textvariable=var_jf_host)
+    entry_jf_host = ctk.CTkEntry(master=col1)
+    if jf_host:
+        entry_jf_host.insert(0, jf_host)
     entry_jf_host.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
     label_jf_api_key.pack(anchor='w', padx=10)
 
-    var_jf_api_key = ctk.StringVar(value=jf_api_key)
-    entry_jf_api_key = ctk.CTkEntry(
-        master=col1, textvariable=var_jf_api_key, placeholder_text='Leave Blank for Quick Connect'
-    )
+    entry_jf_api_key = ctk.CTkEntry(master=col1, placeholder_text='Leave Blank for Quick Connect')
+    if jf_api_key:
+        entry_jf_api_key.insert(0, jf_api_key)
     entry_jf_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
     label_jf_username = ctk.CTkLabel(master=col1, text='Jellyfin Username', font=font_label)
     label_jf_username.pack(anchor='w', padx=10)
 
-    var_jf_username = ctk.StringVar(value=jf_username)
-    entry_jf_username = ctk.CTkEntry(
-        master=col1, textvariable=var_jf_username, placeholder_text='Leave Blank for Quick Connect'
-    )
+    entry_jf_username = ctk.CTkEntry(master=col1, placeholder_text='Leave Blank for Quick Connect')
+    if jf_username:
+        entry_jf_username.insert(0, jf_username)
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
     def change_filter_mode(value: str) -> None:
@@ -728,19 +727,17 @@ def main() -> None:
     label_tmdb_api_key = ctk.CTkLabel(master=col2, text='TMDB API Key', font=font_label)
     label_tmdb_api_key.pack(anchor='w', padx=10)
 
-    var_tmdb_api_key = ctk.StringVar(value=tmdb_api_key or None)
-    entry_tmdb_api_key = ctk.CTkEntry(
-        master=col2, textvariable=var_tmdb_api_key, placeholder_text='Leave Blank to Disable'
-    )
+    entry_tmdb_api_key = ctk.CTkEntry(master=col2, placeholder_text='Leave Blank to Disable')
+    if tmdb_api_key:
+        entry_tmdb_api_key.insert(0, tmdb_api_key)
     entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
 
     label_languages = ctk.CTkLabel(master=col2, text='Poster Language(s)')
     label_languages.pack(anchor='w', padx=10)
 
-    var_languages = ctk.StringVar(value=poster_languages)
-    entry_languages = ctk.CTkEntry(
-        master=col2, textvariable=var_languages, placeholder_text='Leave Blank to Disable'
-    )
+    entry_languages = ctk.CTkEntry(master=col2, placeholder_text='Leave Blank to Disable')
+    if poster_languages:
+        entry_languages.insert(0, poster_languages)
     entry_languages.pack(pady=(0, 5), padx=10, fill='x')
 
     var_always_use_tmdb = ctk.IntVar(value=always_use_tmdb)
@@ -807,21 +804,21 @@ def main() -> None:
     )
     checkbox_paused.pack(anchor='w', pady=5, padx=10, fill='x')
 
-    var_server_name = ctk.IntVar(value=show_server_name)
-    checkbox_server_name = ctk.CTkCheckBox(
-        master=col3, text='Show Jellyfin Server Name (Title)', variable=var_server_name
-    )
-    checkbox_server_name.pack(anchor='w', pady=5, padx=10, fill='x')
-
     var_jf_logo = ctk.IntVar(value=show_jf_logo)
     checkbox_jf_logo = ctk.CTkCheckBox(
         master=col3, text='Show Jellyfin Logo (Small Image)', variable=var_jf_logo
     )
     checkbox_jf_logo.pack(anchor='w', pady=5, padx=10, fill='x')
 
+    var_server_name = ctk.IntVar(value=show_server_name)
+    checkbox_server_name = ctk.CTkCheckBox(
+        master=col3, text='Show Jellyfin Server Name', variable=var_server_name
+    )
+    checkbox_server_name.pack(anchor='w', pady=5, padx=10, fill='x')
+
     var_imdb_urls = ctk.IntVar(value=imdb_external_urls)
     checkbox_imdb_urls = ctk.CTkCheckBox(
-        master=col3, text='Prioritize IMDb for External URLs', variable=var_imdb_urls
+        master=col3, text='Prefer IMDb for External URLs', variable=var_imdb_urls
     )
     checkbox_imdb_urls.pack(anchor='w', pady=5, padx=10, fill='x')
 
@@ -1099,7 +1096,7 @@ def main() -> None:
     )
     button_connect.pack(pady=(5, 10))
     context['button_connect'] = button_connect
-    if jf_host:  # and jf_api_key and jf_username:
+    if jf_host:
         on_click_callback()
         if start_minimized and button_connect_text == 'Disconnect':
             if sys.platform == 'linux':
@@ -1107,14 +1104,14 @@ def main() -> None:
             else:
                 root.withdraw()
     else:
-        logger.info('Open Setup Guide')
+        logger.info('Enter Host and Click Connect')
 
     def poll_process_status() -> None:
         status_text = textbox_status_monitor.get('1.0', 'end')
-        if not var_jf_api_key.get() and 'via Quick Connect' in status_text:
+        if not entry_jf_api_key.get() and 'via Quick Connect' in status_text:
             config = load_config(ini_path)
-            var_jf_api_key.set(config.get('JELLYFIN_API_KEY', ''))
-            var_jf_username.set(config.get('JELLYFIN_USERNAME', ''))
+            entry_jf_api_key.set(config.get('JELLYFIN_API_KEY', ''))
+            entry_jf_username.set(config.get('JELLYFIN_USERNAME', ''))
         if rpc_process.has_failed():
             on_click_callback()
         root.after(1000, lambda: poll_process_status())
