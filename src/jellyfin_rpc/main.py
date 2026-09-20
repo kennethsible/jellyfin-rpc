@@ -1157,6 +1157,9 @@ async def activity_loop(
             previous_update = time.time()
             pending_update = False
 
+        if not ws_state.get('ws_connected'):
+            await asyncio.sleep(polling_rate)
+
 
 async def monitor_activity(
     config: SectionProxy, ini_path: str, polling_rate: int, seek_threshold: int
