@@ -261,6 +261,7 @@ def save_config(
         'SHOW_WHEN_PAUSED',
         'SHOW_SERVER_NAME',
         'SHOW_JELLYFIN_LOGO',
+        'IMDB_EXTERNAL_URLS',
         'ALWAYS_USE_TMDB',
         'TEXTLESS_POSTERS',
         'SEASON_OVER_SERIES',
@@ -569,9 +570,8 @@ def main() -> None:
 
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
-    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO') or config.getboolean(
-        'SHOW_JELLYFIN_ICON', True
-    )
+    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
+    imdb_external_urls = config.getboolean('IMDB_EXTERNAL_URLS', False)
 
     tmdb_api_key = config.get('TMDB_API_KEY', '')
     poster_languages = config.get('POSTER_LANGUAGES', '')
@@ -588,7 +588,7 @@ def main() -> None:
     start_minimized = config.getboolean('START_MINIMIZED', True)
     minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
 
-    polling_rate = max(1, config.getint('POLLING_RATE') or config.getint('REFRESH_RATE', 5))
+    polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
@@ -819,6 +819,12 @@ def main() -> None:
     )
     checkbox_jf_logo.pack(anchor='w', pady=5, padx=10, fill='x')
 
+    var_imdb_urls = ctk.IntVar(value=imdb_external_urls)
+    checkbox_imdb_urls = ctk.CTkCheckBox(
+        master=col3, text='Prioritize IMDb for External URLs', variable=var_imdb_urls
+    )
+    checkbox_imdb_urls.pack(anchor='w', pady=5, padx=10, fill='x')
+
     label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
     label_system_settings.pack(pady=(10, 0), padx=10)
 
@@ -951,6 +957,7 @@ def main() -> None:
         'SHOW_WHEN_PAUSED': checkbox_paused,
         'SHOW_SERVER_NAME': checkbox_server_name,
         'SHOW_JELLYFIN_LOGO': checkbox_jf_logo,
+        'IMDB_EXTERNAL_URLS': checkbox_imdb_urls,
         'ALWAYS_USE_TMDB': checkbox_always_use_tmdb,
         'ALWAYS_USE_MUSICBRAINZ': checkbox_always_use_musicbrainz,
         'TEXTLESS_POSTERS': checkbox_textless_posters,

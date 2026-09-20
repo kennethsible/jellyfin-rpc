@@ -476,6 +476,47 @@ async def get_release_cover(
         return await get_release_group_cover(session, group_id)
 
 
+def resolve_series_provider_urls(
+    series_external_urls: list[dict[str, str]],
+    episode_external_urls: list[dict[str, str]],
+    season: int | None = None,
+    episode: int | None = None,
+    use_imdb: bool = False,
+) -> tuple[str | None, str | None]:
+    episode_urls = {
+        entry['Name'].lower(): entry['Url']
+        for entry in episode_external_urls
+        if entry.get('Name') and entry.get('Url')
+    }
+    for series_entry in series_external_urls:
+        provider = series_entry.get('Name', '').lower()
+        if provider == 'imdb' and not use_imdb:
+            continue
+        series_url = series_entry.get('Url')
+        if not series_url:
+            continue
+        state_url = episode_urls.get(provider)
+        if not state_url and provider in ('tmdb', 'themoviedb') and season is not None:
+            if episode is not None:
+                state_url = f'{series_url}/season/{season}/episode/{episode}'
+            else:
+                state_url = f'{series_url}/season/{season}'
+        return series_url, state_url
+    return None, None
+
+
+def resolve_movie_provider_urls(
+    movie_external_urls: list[dict[str, str]], use_imdb: bool = False
+) -> tuple[str | None, str | None]:
+    for movie_entry in movie_external_urls:
+        provider = movie_entry.get('Name', '').lower()
+        if provider == 'imdb' and not use_imdb:
+            continue
+        if movie_url := movie_entry.get('Url'):
+            return movie_url, None
+    return None, None
+
+
 async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
     initial_attempt = True
     while True:
@@ -567,9 +608,8 @@ async def activity_loop(
     jf_host = config['JELLYFIN_HOST'].rstrip('/')
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
-    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO') or config.getboolean(
-        'SHOW_JELLYFIN_ICON', False
-    )
+    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
+    imdb_external_urls = config.getboolean('IMDB_EXTERNAL_URLS', False)
 
     user_id, server_name = await get_jf_user_and_server(
         jf_session, config, ini_path, show_server_name, polling_rate
@@ -876,6 +916,11 @@ async def activity_loop(
 
                 if media_type == 'Episode':
                     tmdb_id = series_year = None
+                    season = media_dict.get('ParentIndexNumber')
+                    episode = media_dict.get('IndexNumber')
+                    series_ids: dict[str, Any] = {}
+
+                    series_external_urls: list[dict[str, str]] = []
                     if series_id := media_dict.get('SeriesId'):
                         try:
                             async with jf_session.get(
@@ -887,7 +932,22 @@ async def activity_loop(
                                 series_item = await response.json()
                                 series_year = series_item.get('ProductionYear')
                                 series_ids = series_item.get('ProviderIds', {})
+                                series_external_urls = series_item.get('ExternalUrls', [])
                                 tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
+                        except (aiohttp.ClientError, TimeoutError, ValueError):
+                            pass
+
+                    episode_external_urls: list[dict[str, str]] = []
+                    if item_id:
+                        try:
+                            async with jf_session.get(
+                                f'{jf_host}/Items/{item_id}',
+                                headers=jf_headers,
+                                params={'userId': user_id},
+                            ) as response:
+                                response.raise_for_status()
+                                episode_item = await response.json()
+                                episode_external_urls = episode_item.get('ExternalUrls', [])
                         except (aiohttp.ClientError, TimeoutError, ValueError):
                             pass
 
@@ -905,7 +965,6 @@ async def activity_loop(
                         elif series_id and is_https:
                             poster_url = f'{jf_host}/Items/{series_id}/Images/Primary'
                         elif tmdb_api_key and tmdb_id:
-                            season = media_dict['ParentIndexNumber']
                             if season_over_series:
                                 poster_url = await get_season_poster(
                                     cache_session, tmdb_api_key, tmdb_id, languages, season
@@ -915,7 +974,6 @@ async def activity_loop(
                                     cache_session, tmdb_api_key, tmdb_id, languages
                                 )
                     elif tmdb_api_key and tmdb_id:
-                        season = media_dict['ParentIndexNumber']
                         if season_over_series:
                             poster_url = await get_season_poster(
                                 cache_session, tmdb_api_key, tmdb_id, languages, season
@@ -925,12 +983,17 @@ async def activity_loop(
                                 cache_session, tmdb_api_key, tmdb_id, languages
                             )
 
-                    if tmdb_id:
+                    details_url, state_url = resolve_series_provider_urls(
+                        series_external_urls,
+                        episode_external_urls,
+                        season,
+                        episode,
+                        use_imdb=imdb_external_urls,
+                    )
+                    if not details_url and tmdb_id:
                         details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
-                        if 'ParentIndexNumber' in media_dict:
-                            season = media_dict['ParentIndexNumber']
-                            if 'IndexNumber' in media_dict:
-                                episode = media_dict['IndexNumber']
+                        if season is not None:
+                            if episode is not None:
                                 state_url = f'{details_url}/season/{season}/episode/{episode}'
                             else:
                                 state_url = f'{details_url}/season/{season}'
@@ -954,7 +1017,12 @@ async def activity_loop(
                             cache_session, tmdb_api_key, tmdb_id, languages
                         )
 
-                    if tmdb_id:
+                    movie_external_urls = media_dict.get('ExternalUrls', [])
+                    details_url, state_url = resolve_movie_provider_urls(
+                        movie_external_urls,
+                        use_imdb=imdb_external_urls,
+                    )
+                    if not details_url and tmdb_id:
                         details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
 
                 elif media_type == 'Audio':
@@ -1147,7 +1215,7 @@ def start_discord_rpc(
     ini_path: str, log_path: str | None = None, log_queue: Queue[LogRecord] | None = None
 ) -> None:
     config = load_config(ini_path)
-    polling_rate = max(1, config.getint('POLLING_RATE') or config.getint('REFRESH_RATE', 5))
+    polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
 
     logger.setLevel(logging.DEBUG)

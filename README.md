@@ -52,6 +52,7 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `SHOW_WHEN_PAUSED` | `true` | Shows the activity with a paused indicator instead of a progress bar. If disabled, the activity stops displaying when paused. |
 | `SHOW_SERVER_NAME` | `false` | Shows your server name as the activity name instead of saying "Jellyfin". |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
+| `IMDB_EXTERNAL_URLS` | `false` | Controls whether IMDb is prioritized over other providers for external URLs. |
 | `POSTER_LANGUAGES` | — | Comma-separated list of languages (preferably two-letter [ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1) language codes) for TMDB. Uses TMDB's default image order if unset. |
 | `TEXTLESS_POSTERS` | `false` | Controls whether textless TMDB posters are prioritized over language posters. |
 | `ALWAYS_USE_TMDB` | `false` | Controls whether TMDB is the default source for posters or a fallback provider for local artwork from Jellyfin. |
