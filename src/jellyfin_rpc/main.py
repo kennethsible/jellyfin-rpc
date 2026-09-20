@@ -42,19 +42,19 @@ USER_AGENT = f'Jellyfin-RPC/{RPC_VERSION} ( {contact_info} )'
 
 
 def load_config(ini_path: str) -> SectionProxy:
-    config = ConfigParser()
-    config.read(ini_path)
-    if config.get('DEFAULT', 'API_TOKEN', fallback=None):
-        jf_api_key = config.get('DEFAULT', 'API_TOKEN')
-        config.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
-    if config.get('DEFAULT', 'USERNAME', fallback=None):
-        jf_username = config.get('DEFAULT', 'USERNAME')
-        config.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
-    return config['DEFAULT']
+    config_parser = ConfigParser()
+    config_parser.read(ini_path, encoding='utf-8')
+    if config_parser.get('DEFAULT', 'API_TOKEN', fallback=None):
+        jf_api_key = config_parser.get('DEFAULT', 'API_TOKEN')
+        config_parser.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
+    if config_parser.get('DEFAULT', 'USERNAME', fallback=None):
+        jf_username = config_parser.get('DEFAULT', 'USERNAME')
+        config_parser.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
+    return config_parser['DEFAULT']
 
 
 def save_config(config_parser: ConfigParser, ini_path: str) -> None:
-    with open(ini_path, 'w') as ini_file:
+    with open(ini_path, 'w', encoding='utf-8') as ini_file:
         config_parser.write(ini_file)
 
 
@@ -78,7 +78,8 @@ def get_lang_code(lang_str: str) -> str | None:
         pass
     try:
         return Language.find(lang_str).language
-    except (ImportError, LookupError, ValueError):
+    except (ImportError, LookupError, ValueError) as e:
+        logger.debug(e)
         return None
 
 
@@ -114,7 +115,7 @@ async def initiate_quick_connect(
             code = init_data['Code']
             logger.info(f'Quick Connect Code: {code}')
             logger.info(f'{jf_host.rstrip("/")}/web/#/quickconnect')
-    except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError) as e:
+    except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Initiate Quick Connect: {e}')
         sys.exit(1)
 
@@ -127,7 +128,7 @@ async def initiate_quick_connect(
                     connect_data = await response.json()
                     if connect_data.get('Authenticated') is True:
                         break
-        except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError):
+        except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError):
             pass
         await asyncio.sleep(5)
 
@@ -142,7 +143,7 @@ async def initiate_quick_connect(
             username = auth_data['User']['Name']
             logger.info(f'Successfully Authenticated via Quick Connect ({username})')
             return token, username
-    except (TimeoutError, aiohttp.ClientError, JSONDecodeError, KeyError) as e:
+    except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Retrieve User Access Token: {e}')
         sys.exit(1)
 
@@ -184,7 +185,7 @@ async def get_jf_user_and_server(
         config['JELLYFIN_USERNAME'] = jf_username
 
         config_parser = ConfigParser()
-        config_parser.read(ini_path)
+        config_parser.read(ini_path, encoding='utf-8')
         config_parser.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
         config_parser.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
 
@@ -220,7 +221,7 @@ async def get_jf_user_and_server(
             logger.info('Connected to Jellyfin Server')
             return user_id, server_name
 
-        except (TimeoutError, aiohttp.ClientError) as e:
+        except (aiohttp.ClientError, TimeoutError) as e:
             if initial_attempt:
                 logger.error(f'Jellyfin API Network Error ({type(e).__name__}). Retrying...')
                 logger.debug(e)
@@ -243,7 +244,7 @@ async def check_tmdb_auth(session: ClientSession, api_key: str) -> None:
         async with session.get(config_url, params=config_params) as response:
             response.raise_for_status()
         logger.info('Connected to TMDB API')
-    except (TimeoutError, aiohttp.ClientError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
 
@@ -261,10 +262,10 @@ async def get_series_id(
             data = await response.json()
             if results := data.get('results'):
                 return results[0].get('id')
-    except (TimeoutError, aiohttp.ClientError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, IndexError) as e:
         logger.warning(f'TMDB API Parsing Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     return None
@@ -283,10 +284,10 @@ async def get_movie_id(
             data = await response.json()
             if results := data.get('results'):
                 return results[0].get('id')
-    except (TimeoutError, aiohttp.ClientError) as e:
+    except (aiohttp.ClientError, TimeoutError) as e:
         logger.warning(f'TMDB API Network Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, IndexError) as e:
         logger.warning(f'TMDB API Parsing Error ({type(e).__name__}). Skipping...')
         logger.debug(e)
     return None
@@ -412,8 +413,8 @@ async def get_season_poster(
                 if poster_path := data.get('poster_path'):
                     return 'https://image.tmdb.org/t/p/w185/' + poster_path
                 logger.warning('No Poster Available on TMDB. Skipping...')
-    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError):
-        pass
+    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError) as e:
+        logger.debug(e)
 
     return await get_series_poster(session, api_key, tmdb_id, languages)
 
@@ -474,7 +475,8 @@ async def get_release_cover(
             response.raise_for_status()
             data = await response.json()
             return data['images'][0]['image']
-    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError):
+    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError) as e:
+        logger.debug(e)
         return await get_release_group_cover(session, group_id)
 
 
@@ -599,9 +601,9 @@ async def ws_listener(
                     ping_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await ping_task
-        except (aiohttp.ClientError, asyncio.CancelledError, TimeoutError, ValueError) as e:
-            if isinstance(e, asyncio.CancelledError):
-                break
+        except asyncio.CancelledError:
+            break
+        except (aiohttp.ClientError, TimeoutError, ValueError) as e:
             if initial_attempt:
                 logger.warning(f'Jellyfin WebSocket Error ({type(e).__name__}). Retrying...')
                 logger.debug(e)
@@ -775,8 +777,8 @@ async def activity_loop(
                 runtime_ticks = int(media_dict['RunTimeTicks'])
                 if not session_paused:
                     current_end = int(current_start + runtime_ticks / 10_000_000)
-            except (KeyError, TypeError, ValueError):
-                pass
+            except (ValueError, KeyError, TypeError) as e:
+                logger.debug(e)
 
             STALE_GRACE_PERIOD = 5
             if current_end and time.time() >= (current_end + STALE_GRACE_PERIOD):
@@ -821,9 +823,14 @@ async def activity_loop(
                                 if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
                                     library_id = ancestor.get('Id')
                                     break
-                        except (aiohttp.ClientError, TimeoutError, ValueError) as e:
+                        except (aiohttp.ClientError, TimeoutError) as e:
                             logger.error(
-                                f'Library Retrieval Failed ({type(e).__name__}). Skipping...'
+                                f'Library Retrieval Network Error ({type(e).__name__}). Skipping...'
+                            )
+                            logger.debug(e)
+                        except (ValueError, KeyError) as e:
+                            logger.error(
+                                f'Library Retrieval Parsing Error ({type(e).__name__}). Skipping...'
                             )
                             logger.debug(e)
 
@@ -915,8 +922,8 @@ async def activity_loop(
                                     series_ids = series_item.get('ProviderIds', {})
                                     series_external_urls = series_item.get('ExternalUrls', [])
                                     tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
-                            except (aiohttp.ClientError, TimeoutError, ValueError):
-                                pass
+                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
+                                logger.debug(f'Failed to Fetch Series Details ({series_id}): {e}')
 
                         episode_external_urls: list[dict[str, str]] = []
                         if item_id:
@@ -929,8 +936,8 @@ async def activity_loop(
                                     response.raise_for_status()
                                     episode_item = await response.json()
                                     episode_external_urls = episode_item.get('ExternalUrls', [])
-                            except (aiohttp.ClientError, TimeoutError, ValueError):
-                                pass
+                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
+                                logger.debug(f'Failed to Fetch Episode Details ({item_id}): {e}')
 
                         if not tmdb_id and tmdb_api_key:
                             logger.warning('No TMDB ID Found. Searching...')
@@ -1030,8 +1037,8 @@ async def activity_loop(
                                         group_id = album_music_ids.get('MusicBrainzReleaseGroup')
                                     if release_over_group and not release_id:
                                         release_id = album_music_ids.get('MusicBrainzAlbum')
-                            except (aiohttp.ClientError, TimeoutError, ValueError):
-                                pass
+                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
+                                logger.debug(f'Failed to Fetch Album Details ({album_id}): {e}')
 
                         if not group_id and release_id:
                             group_id = await get_music_id_from_release(cache_session, release_id)
@@ -1214,6 +1221,7 @@ def start_discord_rpc(
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
 
     if log_path is not None:
+        os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
         max_bytes = int(config.get('LOG_MAX_BYTES', 5242880))
         max_files = int(config.get('LOG_MAX_FILES', 3))
         file_hdlr = handlers.RotatingFileHandler(

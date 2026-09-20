@@ -5,16 +5,19 @@ import os
 import queue
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import threading
+import tkinter as tk
 import webbrowser
 from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
+from types import FrameType
 from typing import Any, TypedDict, cast
 
 import certifi
@@ -89,9 +92,14 @@ class RPCLogger:
         self.frame.after(100, self.poll_log_queue)
 
     def poll_log_queue(self) -> None:
+        if not self.text_widget.winfo_exists():
+            return
         while not self.log_queue.empty():
             record = self.log_queue.get_nowait()
-            self.display_record(record)
+            try:
+                self.display_record(record)
+            except (tk.TclError, RuntimeError):
+                pass
         self.frame.after(100, self.poll_log_queue)
 
     def display_record(self, record: LogRecord) -> None:
@@ -232,8 +240,8 @@ def save_config(
     var_polling_rate: ctk.StringVar,
     var_seek_threshold: ctk.StringVar,
 ) -> None:
-    config = ConfigParser()
-    config.read(ini_path)
+    config_parser = ConfigParser()
+    config_parser.read(ini_path, encoding='utf-8')
     for key in (
         'JELLYFIN_HOST',
         'JELLYFIN_API_KEY',
@@ -241,12 +249,12 @@ def save_config(
         'TMDB_API_KEY',
         'POSTER_LANGUAGES',
     ):
-        config.set('DEFAULT', key, entries[key]['entry'].get())
-    config.set('DEFAULT', 'FILTER_MODE', var_filter_mode.get())
-    config.set('DEFAULT', 'FILTER_LIBRARIES', var_filter_libraries.get())
-    config.set('DEFAULT', 'POLLING_RATE', var_polling_rate.get().rstrip('s'))
-    config.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
-    config.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
+        config_parser.set('DEFAULT', key, entries[key]['entry'].get())
+    config_parser.set('DEFAULT', 'FILTER_MODE', var_filter_mode.get())
+    config_parser.set('DEFAULT', 'FILTER_LIBRARIES', var_filter_libraries.get())
+    config_parser.set('DEFAULT', 'POLLING_RATE', var_polling_rate.get().rstrip('s'))
+    config_parser.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
+    config_parser.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
 
     media_types = []
     if checkboxes['MOVIES']._variable.get():
@@ -255,7 +263,7 @@ def save_config(
         media_types.append('Shows')
     if checkboxes['MUSIC']._variable.get():
         media_types.append('Music')
-    config.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
+    config_parser.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
     for key in (
         'SHOW_WHEN_PAUSED',
@@ -270,10 +278,10 @@ def save_config(
         'START_MINIMIZED',
         'MINIMIZE_ON_CLOSE',
     ):
-        config.set('DEFAULT', key, str(bool(checkboxes[key]._variable.get())).lower())
+        config_parser.set('DEFAULT', key, str(bool(checkboxes[key]._variable.get())).lower())
 
-    with open(ini_path, 'w') as ini_file:
-        config.write(ini_file)
+    with open(ini_path, 'w', encoding='utf-8') as ini_file:
+        config_parser.write(ini_file)
 
 
 def on_click(
@@ -1150,6 +1158,11 @@ def main() -> None:
             except OSError:
                 pass
         on_close_callback()
+
+    def signal_handler(signum: int, frame: FrameType | None) -> None:
+        exit_cleanup()
+
+    signal.signal(signal.SIGINT, signal_handler)
 
     set_close_behavior(root, exit_cleanup, minimize_on_close)
     root.mainloop()
