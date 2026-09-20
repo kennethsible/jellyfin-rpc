@@ -805,16 +805,18 @@ async def activity_loop(
                     case 'Movie':
                         activity_type = ActivityType.WATCHING
                         details = media_dict['Name']
+                        if genres := media_dict.get('Genres'):
+                            state = ' \u2022 '.join(genres[:3])
                         activity = details
                     case 'Audio':
                         activity_type = ActivityType.LISTENING
-                        if media_dict.get('Artists'):
-                            state = ', '.join(media_dict['Artists'])
-                        if media_dict.get('Album'):
+                        if artists := media_dict.get('Artists'):
+                            state = ', '.join(artists)
+                        if album_name := media_dict.get('Album'):
                             if state:
-                                state += f' - {media_dict["Album"]}'
+                                state += f' - {album_name}'
                             else:
-                                state = media_dict['Album']
+                                state = album_name
                         details = media_dict['Name']
                         activity = str(details)
                         if state:
