@@ -663,7 +663,7 @@ async def activity_loop(
     pending_update = False  # Tracks Deferred Update During Cooldown
     pending_payload = None  # Event Payload for Deferred Update
 
-    cached_item_id = cached_library = None
+    cached_item_id = None
     cached_kwargs: dict[str, Any] = {}
 
     while True:
@@ -713,12 +713,17 @@ async def activity_loop(
                 session_data = session
                 break
 
-        if 'NowPlayingItem' in session_data:
+        if session_data:
+            media_dict = session_data['NowPlayingItem']
+            item_id = media_dict.get('Id')
+            media_changed = item_id != cached_item_id
+
             try:
                 session_paused = session_data['PlayState']['IsPaused']
             except KeyError as e:
                 logger.warning(f'Missing Key in Session Data: {e}')
                 session_paused = False
+            playstate_changed = previous_playstate != session_paused
 
             if session_paused and not show_when_paused:
                 if previous_activity is not None:
@@ -739,120 +744,6 @@ async def activity_loop(
                     previous_update = time.time()
                     pending_update = False
                 continue
-
-            try:
-                state = details = None
-                media_dict = session_data['NowPlayingItem']
-                item_id = media_dict.get('Id')
-
-                library_id = None
-                if item_id == cached_item_id:
-                    library_id = cached_library
-                elif item_id:
-                    try:
-                        ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
-                        async with jf_session.get(
-                            ancestors_url, headers=jf_headers, params={'userId': user_id}
-                        ) as response:
-                            response.raise_for_status()
-                            ancestors = await response.json()
-                        for ancestor in ancestors:
-                            if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
-                                library_id = ancestor.get('Id')
-                                break
-                        if library_id:
-                            cached_item_id, cached_library = item_id, library_id
-                    except (aiohttp.ClientError, TimeoutError, ValueError) as e:
-                        logger.error(f'Library Retrieval Failed ({type(e).__name__}). Skipping...')
-                        logger.debug(e)
-
-                match filter_mode:
-                    case 'WHITELIST':
-                        is_allowed = bool(library_id and library_id in filter_libraries)
-                    case 'BLACKLIST':
-                        is_allowed = not (library_id and library_id in filter_libraries)
-                    case _:
-                        is_allowed = True
-
-                if not is_allowed:
-                    if previous_activity is not None:
-                        try:
-                            await discord_rpc.clear()
-                            logger.info('Activity Cleared (Library Blocked)')
-                        except (PyPresenceException, OSError, KeyError) as e:
-                            logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                            logger.debug(e)
-                            await await_connection(discord_rpc, polling_rate)
-                            await asyncio.sleep(polling_rate)
-                            continue
-
-                        previous_activity = None
-                        previous_playstate = False
-                        previous_playback = None
-                        previous_timestamp = None
-                        previous_update = time.time()
-                        pending_update = False
-                    continue
-
-                match media_type := media_dict['Type']:
-                    case 'Episode':
-                        activity_type = ActivityType.WATCHING
-                        season = media_dict['ParentIndexNumber']
-                        episode = media_dict['IndexNumber']
-                        details = media_dict['SeriesName']
-                        state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
-                        activity = f'{details} {state.split(" - ")[0]}'
-                    case 'Movie':
-                        activity_type = ActivityType.WATCHING
-                        details = media_dict['Name']
-                        if genres := media_dict.get('Genres'):
-                            state = ' \u2022 '.join(genres[:3])
-                        activity = details
-                    case 'Audio':
-                        activity_type = ActivityType.LISTENING
-                        if artists := media_dict.get('Artists'):
-                            state = ', '.join(artists)
-                        if album_name := media_dict.get('Album'):
-                            if state:
-                                state += f' - {album_name}'
-                            else:
-                                state = album_name
-                        details = media_dict['Name']
-                        activity = str(details)
-                        if state:
-                            activity += f' - {state.split(" - ")[0]}'
-                    case _:
-                        if not previous_warning:
-                            logger.warning(f'Unsupported Media Type "{media_type}". Skipping...')
-                            previous_warning = True
-                        if previous_activity is not None:
-                            try:
-                                await discord_rpc.clear()
-                                logger.info('Activity Cleared (Unsupported Media)')
-                            except (PyPresenceException, OSError, KeyError) as e:
-                                logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-                                logger.debug(e)
-                                await await_connection(discord_rpc, polling_rate)
-                                await asyncio.sleep(polling_rate)
-                                continue
-
-                            previous_activity = None
-                            previous_playstate = False
-                            previous_playback = None
-                            previous_timestamp = None
-                            previous_update = time.time()
-                            pending_update = False
-                        continue  # raise NotImplementedError()
-
-                if len(details) < 2:  # e.g., Chinese characters
-                    details += ' '
-            except KeyError as e:
-                if not previous_warning:
-                    logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
-                    previous_warning = True
-                await asyncio.sleep(polling_rate)
-                continue
-            previous_warning = False
 
             current_playback = None
             current_start = current_end = None
@@ -889,9 +780,6 @@ async def activity_loop(
                     pending_update = False
                 continue
 
-            media_changed = previous_activity != activity
-            playstate_changed = previous_playstate != session_paused
-
             seek_detected, seek_delta = False, 0.0
             packet_timestamp = ws_state.get('last_packet', time.time())
             if (
@@ -907,65 +795,180 @@ async def activity_loop(
                 playback_delta = current_playback - expected_playback
                 if abs(playback_delta) >= (seek_threshold - 0.5):
                     seek_detected, seek_delta = True, round(playback_delta)
-
-            previous_playback = current_playback
-            previous_timestamp = packet_timestamp
+            previous_playback, previous_timestamp = current_playback, packet_timestamp
 
             if media_changed:
-                poster_url = 'large_image'
-                details_url = state_url = None
-                is_https = jf_host.startswith('https://')
-
-                if media_type == 'Episode':
-                    tmdb_id = series_year = None
-                    season = media_dict.get('ParentIndexNumber')
-                    episode = media_dict.get('IndexNumber')
-                    series_ids: dict[str, Any] = {}
-
-                    series_external_urls: list[dict[str, str]] = []
-                    if series_id := media_dict.get('SeriesId'):
-                        try:
-                            async with jf_session.get(
-                                f'{jf_host}/Items/{series_id}',
-                                headers=jf_headers,
-                                params={'userId': user_id},
-                            ) as response:
-                                response.raise_for_status()
-                                series_item = await response.json()
-                                series_year = series_item.get('ProductionYear')
-                                series_ids = series_item.get('ProviderIds', {})
-                                series_external_urls = series_item.get('ExternalUrls', [])
-                                tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
-                        except (aiohttp.ClientError, TimeoutError, ValueError):
-                            pass
-
-                    episode_external_urls: list[dict[str, str]] = []
+                cached_item_id = item_id
+                try:
+                    library_id = None
                     if item_id:
                         try:
+                            ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
                             async with jf_session.get(
-                                f'{jf_host}/Items/{item_id}',
-                                headers=jf_headers,
-                                params={'userId': user_id},
+                                ancestors_url, headers=jf_headers, params={'userId': user_id}
                             ) as response:
                                 response.raise_for_status()
-                                episode_item = await response.json()
-                                episode_external_urls = episode_item.get('ExternalUrls', [])
-                        except (aiohttp.ClientError, TimeoutError, ValueError):
-                            pass
-
-                    if not tmdb_id and tmdb_api_key:
-                        logger.warning('No TMDB ID Found. Searching...')
-                        if 'SeriesName' in media_dict:
-                            tmdb_id = await get_series_id(
-                                cache_session, tmdb_api_key, media_dict['SeriesName'], series_year
+                                ancestors = await response.json()
+                            for ancestor in ancestors:
+                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
+                                    library_id = ancestor.get('Id')
+                                    break
+                        except (aiohttp.ClientError, TimeoutError, ValueError) as e:
+                            logger.error(
+                                f'Library Retrieval Failed ({type(e).__name__}). Skipping...'
                             )
+                            logger.debug(e)
 
-                    if not always_use_tmdb:
-                        season_id = media_dict.get('SeasonId')
-                        if season_over_series and season_id and is_https:
-                            poster_url = f'{jf_host}/Items/{season_id}/Images/Primary'
-                        elif series_id and is_https:
-                            poster_url = f'{jf_host}/Items/{series_id}/Images/Primary'
+                    match filter_mode:
+                        case 'WHITELIST':
+                            is_allowed = bool(library_id and library_id in filter_libraries)
+                        case 'BLACKLIST':
+                            is_allowed = not (library_id and library_id in filter_libraries)
+                        case _:
+                            is_allowed = True
+
+                    if not is_allowed:
+                        if previous_activity is not None:
+                            try:
+                                await discord_rpc.clear()
+                                logger.info('Activity Cleared (Library Blocked)')
+                            except (PyPresenceException, OSError, KeyError) as e:
+                                logger.error(f'Failed to Clear Activity: {type(e).__name__}')
+                                logger.debug(e)
+                                await await_connection(discord_rpc, polling_rate)
+                                await asyncio.sleep(polling_rate)
+                                continue
+
+                            previous_activity = None
+                            previous_playstate = False
+                            previous_playback = None
+                            previous_timestamp = None
+                            previous_update = time.time()
+                            pending_update = False
+                        continue
+
+                    state = details = None
+                    match media_type := media_dict['Type']:
+                        case 'Episode':
+                            activity_type = ActivityType.WATCHING
+                            season = media_dict['ParentIndexNumber']
+                            episode = media_dict['IndexNumber']
+                            details = media_dict['SeriesName']
+                            state = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
+                            activity = f'{details} {state.split(" - ")[0]}'
+                        case 'Movie':
+                            activity_type = ActivityType.WATCHING
+                            details = media_dict['Name']
+                            if genres := media_dict.get('Genres'):
+                                state = ' \u2022 '.join(genres[:3])
+                            activity = details
+                        case 'Audio':
+                            activity_type = ActivityType.LISTENING
+                            if artists := media_dict.get('Artists'):
+                                state = ', '.join(artists)
+                            if album_name := media_dict.get('Album'):
+                                if state:
+                                    state += f' - {album_name}'
+                                else:
+                                    state = album_name
+                            details = media_dict['Name']
+                            activity = str(details)
+                            if state:
+                                activity += f' - {state.split(" - ")[0]}'
+                        case _:
+                            if not previous_warning:
+                                logger.warning(
+                                    f'Unsupported Media Type "{media_type}". Skipping...'
+                                )
+                                previous_warning = True
+                            if previous_activity is not None:
+                                try:
+                                    await discord_rpc.clear()
+                                    logger.info('Activity Cleared (Unsupported Media)')
+                                except (PyPresenceException, OSError, KeyError) as e:
+                                    logger.error(f'Failed to Clear Activity: {type(e).__name__}')
+                                    logger.debug(e)
+                                    await await_connection(discord_rpc, polling_rate)
+                                    await asyncio.sleep(polling_rate)
+                                    continue
+
+                                previous_activity = None
+                                previous_playstate = False
+                                previous_playback = None
+                                previous_timestamp = None
+                                previous_update = time.time()
+                                pending_update = False
+                            continue  # raise NotImplementedError()
+
+                    if len(details) < 2:  # e.g., Chinese characters
+                        details += ' '
+
+                    poster_url = 'large_image'
+                    details_url = state_url = None
+                    is_https = jf_host.startswith('https://')
+
+                    if media_type == 'Episode':
+                        tmdb_id = series_year = None
+                        season = media_dict.get('ParentIndexNumber')
+                        episode = media_dict.get('IndexNumber')
+                        series_ids: dict[str, Any] = {}
+
+                        series_external_urls: list[dict[str, str]] = []
+                        if series_id := media_dict.get('SeriesId'):
+                            try:
+                                async with jf_session.get(
+                                    f'{jf_host}/Items/{series_id}',
+                                    headers=jf_headers,
+                                    params={'userId': user_id},
+                                ) as response:
+                                    response.raise_for_status()
+                                    series_item = await response.json()
+                                    series_year = series_item.get('ProductionYear')
+                                    series_ids = series_item.get('ProviderIds', {})
+                                    series_external_urls = series_item.get('ExternalUrls', [])
+                                    tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
+                            except (aiohttp.ClientError, TimeoutError, ValueError):
+                                pass
+
+                        episode_external_urls: list[dict[str, str]] = []
+                        if item_id:
+                            try:
+                                async with jf_session.get(
+                                    f'{jf_host}/Items/{item_id}',
+                                    headers=jf_headers,
+                                    params={'userId': user_id},
+                                ) as response:
+                                    response.raise_for_status()
+                                    episode_item = await response.json()
+                                    episode_external_urls = episode_item.get('ExternalUrls', [])
+                            except (aiohttp.ClientError, TimeoutError, ValueError):
+                                pass
+
+                        if not tmdb_id and tmdb_api_key:
+                            logger.warning('No TMDB ID Found. Searching...')
+                            if 'SeriesName' in media_dict:
+                                tmdb_id = await get_series_id(
+                                    cache_session,
+                                    tmdb_api_key,
+                                    media_dict['SeriesName'],
+                                    series_year,
+                                )
+
+                        if not always_use_tmdb:
+                            season_id = media_dict.get('SeasonId')
+                            if season_over_series and season_id and is_https:
+                                poster_url = f'{jf_host}/Items/{season_id}/Images/Primary'
+                            elif series_id and is_https:
+                                poster_url = f'{jf_host}/Items/{series_id}/Images/Primary'
+                            elif tmdb_api_key and tmdb_id:
+                                if season_over_series:
+                                    poster_url = await get_season_poster(
+                                        cache_session, tmdb_api_key, tmdb_id, languages, season
+                                    )
+                                else:
+                                    poster_url = await get_series_poster(
+                                        cache_session, tmdb_api_key, tmdb_id, languages
+                                    )
                         elif tmdb_api_key and tmdb_id:
                             if season_over_series:
                                 poster_url = await get_season_poster(
@@ -975,124 +978,125 @@ async def activity_loop(
                                 poster_url = await get_series_poster(
                                     cache_session, tmdb_api_key, tmdb_id, languages
                                 )
-                    elif tmdb_api_key and tmdb_id:
-                        if season_over_series:
-                            poster_url = await get_season_poster(
-                                cache_session, tmdb_api_key, tmdb_id, languages, season
-                            )
-                        else:
-                            poster_url = await get_series_poster(
+
+                        details_url, state_url = resolve_series_provider_urls(
+                            series_external_urls,
+                            episode_external_urls,
+                            season,
+                            episode,
+                            use_imdb=imdb_external_urls,
+                        )
+                        if not details_url and tmdb_id:
+                            details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
+                            if season is not None:
+                                if episode is not None:
+                                    state_url = f'{details_url}/season/{season}/episode/{episode}'
+                                else:
+                                    state_url = f'{details_url}/season/{season}'
+
+                    elif media_type == 'Movie':
+                        movie_ids = media_dict.get('ProviderIds', {})
+                        movie_year = media_dict.get('ProductionYear')
+                        tmdb_id = movie_ids.get('Tmdb') or movie_ids.get('TheMovieDb')
+
+                        if not tmdb_id and tmdb_api_key:
+                            logger.warning('No TMDB ID Found. Searching...')
+                            if 'Name' in media_dict:
+                                tmdb_id = await get_movie_id(
+                                    cache_session, tmdb_api_key, media_dict['Name'], movie_year
+                                )
+
+                        if not always_use_tmdb and item_id and is_https:
+                            poster_url = f'{jf_host}/Items/{item_id}/Images/Primary'
+                        elif tmdb_api_key and tmdb_id:
+                            poster_url = await get_movie_poster(
                                 cache_session, tmdb_api_key, tmdb_id, languages
                             )
 
-                    details_url, state_url = resolve_series_provider_urls(
-                        series_external_urls,
-                        episode_external_urls,
-                        season,
-                        episode,
-                        use_imdb=imdb_external_urls,
-                    )
-                    if not details_url and tmdb_id:
-                        details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
-                        if season is not None:
-                            if episode is not None:
-                                state_url = f'{details_url}/season/{season}/episode/{episode}'
-                            else:
-                                state_url = f'{details_url}/season/{season}'
+                        movie_external_urls = media_dict.get('ExternalUrls', [])
+                        details_url, state_url = resolve_movie_provider_urls(
+                            movie_external_urls,
+                            use_imdb=imdb_external_urls,
+                        )
+                        if not details_url and tmdb_id:
+                            details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
 
-                elif media_type == 'Movie':
-                    movie_ids = media_dict.get('ProviderIds', {})
-                    movie_year = media_dict.get('ProductionYear')
-                    tmdb_id = movie_ids.get('Tmdb') or movie_ids.get('TheMovieDb')
+                    elif media_type == 'Audio':
+                        music_ids = media_dict.get('ProviderIds', {})
+                        track_id = music_ids.get('MusicBrainzTrack')
+                        group_id = music_ids.get('MusicBrainzReleaseGroup')
+                        release_id = music_ids.get('MusicBrainzAlbum')
 
-                    if not tmdb_id and tmdb_api_key:
-                        logger.warning('No TMDB ID Found. Searching...')
-                        if 'Name' in media_dict:
-                            tmdb_id = await get_movie_id(
-                                cache_session, tmdb_api_key, media_dict['Name'], movie_year
+                        album_id = media_dict.get('AlbumId')
+                        if album_id and (not group_id or release_over_group and not release_id):
+                            try:
+                                async with jf_session.get(
+                                    f'{jf_host}/Items/{album_id}',
+                                    headers=jf_headers,
+                                    params={'userId': user_id},
+                                ) as response:
+                                    response.raise_for_status()
+                                    album_item = await response.json()
+                                    album_music_ids = album_item.get('ProviderIds', {})
+                                    if not group_id:
+                                        group_id = album_music_ids.get('MusicBrainzReleaseGroup')
+                                    if release_over_group and not release_id:
+                                        release_id = album_music_ids.get('MusicBrainzAlbum')
+                            except (aiohttp.ClientError, TimeoutError, ValueError):
+                                pass
+
+                        if not group_id and release_id:
+                            group_id = await get_music_id_from_release(cache_session, release_id)
+                        if not group_id:
+                            logger.warning('No MusicBrainz ID Found. Searching...')
+                            if 'AlbumArtist' in media_dict and 'Album' in media_dict:
+                                group_id = await get_music_id_from_search(
+                                    cache_session, media_dict['AlbumArtist'], media_dict['Album']
+                                )
+
+                        if not always_use_musicbrainz and album_id and is_https:
+                            poster_url = f'{jf_host}/Items/{album_id}/Images/Primary'
+                        elif group_id:
+                            cover_release_id = release_id if release_over_group else None
+                            poster_url = await get_release_cover(
+                                cache_session, group_id, cover_release_id
                             )
 
-                    if not always_use_tmdb and item_id and is_https:
-                        poster_url = f'{jf_host}/Items/{item_id}/Images/Primary'
-                    elif tmdb_api_key and tmdb_id:
-                        poster_url = await get_movie_poster(
-                            cache_session, tmdb_api_key, tmdb_id, languages
-                        )
+                        if track_id:
+                            details_url = f'https://musicbrainz.org/track/{track_id}'
+                        if release_over_group and release_id:
+                            state_url = f'https://musicbrainz.org/release/{release_id}'
+                        elif group_id:
+                            state_url = f'https://musicbrainz.org/release-group/{group_id}'
 
-                    movie_external_urls = media_dict.get('ExternalUrls', [])
-                    details_url, state_url = resolve_movie_provider_urls(
-                        movie_external_urls,
-                        use_imdb=imdb_external_urls,
-                    )
-                    if not details_url and tmdb_id:
-                        details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
+                    display_name = server_name
+                    if (
+                        show_server_name
+                        and server_name is not None
+                        and activity_type == ActivityType.WATCHING
+                    ):
+                        display_name = f'on {server_name}'
 
-                elif media_type == 'Audio':
-                    music_ids = media_dict.get('ProviderIds', {})
-                    track_id = music_ids.get('MusicBrainzTrack')
-                    group_id = music_ids.get('MusicBrainzReleaseGroup')
-                    release_id = music_ids.get('MusicBrainzAlbum')
+                    cached_kwargs = {
+                        'activity_type': activity_type,
+                        'status_display_type': StatusDisplayType.DETAILS,
+                        'name': display_name,
+                        'details': details[:128] if details else None,
+                        'details_url': details_url,
+                        'state': state[:128] if state else None,
+                        'state_url': state_url,
+                        'large_image': poster_url,
+                    }
 
-                    album_id = media_dict.get('AlbumId')
-                    if album_id and (not group_id or release_over_group and not release_id):
-                        try:
-                            async with jf_session.get(
-                                f'{jf_host}/Items/{album_id}',
-                                headers=jf_headers,
-                                params={'userId': user_id},
-                            ) as response:
-                                response.raise_for_status()
-                                album_item = await response.json()
-                                album_music_ids = album_item.get('ProviderIds', {})
-                                if not group_id:
-                                    group_id = album_music_ids.get('MusicBrainzReleaseGroup')
-                                if release_over_group and not release_id:
-                                    release_id = album_music_ids.get('MusicBrainzAlbum')
-                        except (aiohttp.ClientError, TimeoutError, ValueError):
-                            pass
+                except KeyError as e:
+                    if not previous_warning:
+                        logger.warning(f'Missing Key in Session Data: {e}. Skipping...')
+                        previous_warning = True
+                    cached_item_id = None
+                    await asyncio.sleep(polling_rate)
+                    continue
 
-                    if not group_id and release_id:
-                        group_id = await get_music_id_from_release(cache_session, release_id)
-                    if not group_id:
-                        logger.warning('No MusicBrainz ID Found. Searching...')
-                        if 'AlbumArtist' in media_dict and 'Album' in media_dict:
-                            group_id = await get_music_id_from_search(
-                                cache_session, media_dict['AlbumArtist'], media_dict['Album']
-                            )
-
-                    if not always_use_musicbrainz and album_id and is_https:
-                        poster_url = f'{jf_host}/Items/{album_id}/Images/Primary'
-                    elif group_id:
-                        cover_release_id = release_id if release_over_group else None
-                        poster_url = await get_release_cover(
-                            cache_session, group_id, cover_release_id
-                        )
-
-                    if track_id:
-                        details_url = f'https://musicbrainz.org/track/{track_id}'
-                    if release_over_group and release_id:
-                        state_url = f'https://musicbrainz.org/release/{release_id}'
-                    elif group_id:
-                        state_url = f'https://musicbrainz.org/release-group/{group_id}'
-
-                display_name = server_name
-                if (
-                    show_server_name
-                    and server_name is not None
-                    and activity_type == ActivityType.WATCHING
-                ):
-                    display_name = f'on {server_name}'
-
-                cached_kwargs = {
-                    'activity_type': activity_type,
-                    'status_display_type': StatusDisplayType.DETAILS,
-                    'name': display_name,
-                    'details': details[:128] if details else None,
-                    'details_url': details_url,
-                    'state': state[:128] if state else None,
-                    'state_url': state_url,
-                    'large_image': poster_url,
-                }
+                previous_warning = False
 
             if media_changed or seek_detected or playstate_changed:
                 pending_update = True
@@ -1156,6 +1160,9 @@ async def activity_loop(
             previous_timestamp = None
             previous_update = time.time()
             pending_update = False
+
+            cached_item_id = None
+            cached_kwargs.clear()
 
         if not ws_state.get('ws_connected'):
             await asyncio.sleep(polling_rate)
