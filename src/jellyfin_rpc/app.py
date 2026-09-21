@@ -148,7 +148,9 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
     ):
         super().__init__(master)
         self.title('Library Selector')
-        self.geometry('220x350')
+        self.geometry('200x300')
+        self.minsize(200, 300)
+        self.resizable(True, True)
         self.transient(master)
         self.wait_visibility()
         self.grab_set()
@@ -159,15 +161,18 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
         self.var_selected_libraries = var_selected_libraries
         self.checkbox_map: dict[str, ctk.BooleanVar] = {}
 
-        self.scroll_frame = ctk.CTkScrollableFrame(
-            master=self, label_text=var_library_filter_type.get()
-        )
-        self.scroll_frame.pack(fill='both', expand=True, padx=10, pady=10)
-
         self.button_save_selection = ctk.CTkButton(
             master=self, text='Save Selection', command=self.save_selection
         )
-        self.button_save_selection.pack(pady=(5, 10))
+        self.button_save_selection.pack(side='bottom', fill='x', padx=10, pady=(5, 10))
+
+        label_font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
+        self.scroll_frame = ctk.CTkScrollableFrame(
+            master=self,
+            label_text=var_library_filter_type.get(),
+            label_font=label_font,
+        )
+        self.scroll_frame.pack(side='top', fill='both', expand=True, padx=10, pady=(10, 5))
 
         self.retrieve_libraries(config)
 
