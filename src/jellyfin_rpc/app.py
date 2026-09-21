@@ -1120,8 +1120,17 @@ def main() -> None:
         status_text = textbox_status_monitor.get('1.0', 'end')
         if not entry_jf_api_key.get() and 'via Quick Connect' in status_text:
             config = load_config(ini_path)
-            entry_jf_api_key.set(config.get('JELLYFIN_API_KEY', ''))
-            entry_jf_username.set(config.get('JELLYFIN_USERNAME', ''))
+            jf_api_key = config.get('JELLYFIN_API_KEY', '')
+            jf_username = config.get('JELLYFIN_USERNAME', '')
+
+            if jf_api_key and jf_username:
+                entry_jf_api_key.configure(state='normal')
+                entry_jf_username.configure(state='normal')
+                entry_jf_api_key.set(jf_api_key)
+                entry_jf_username.set(jf_username)
+                entry_jf_api_key.configure(state='readonly', show='*')
+                entry_jf_username.configure(state='readonly')
+
         if rpc_process.has_failed():
             on_click_callback()
         root.after(1000, lambda: poll_process_status())
