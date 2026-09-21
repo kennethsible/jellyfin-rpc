@@ -147,7 +147,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
         var_selected_libraries: ctk.StringVar,
     ):
         super().__init__(master)
-        self.title(f'Jellyfin RPC v{__version__}')
+        self.title('Library Selector')
         self.geometry('220x350')
         self.transient(master)
         self.wait_visibility()
@@ -160,7 +160,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
         self.checkbox_map: dict[str, ctk.BooleanVar] = {}
 
         self.scroll_frame = ctk.CTkScrollableFrame(
-            master=self, label_text=f'{var_library_filter_type.get()}ed Libraries'
+            master=self, label_text=var_library_filter_type.get()
         )
         self.scroll_frame.pack(fill='both', expand=True, padx=10, pady=10)
 
@@ -202,7 +202,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
             views_data = response.json()
             libraries = views_data.get('Items', [])
             if not libraries:
-                ctk.CTkLabel(self.scroll_frame, text='No Libraries Retrieved.').pack()
+                ctk.CTkLabel(self.scroll_frame, text='No Libraries Found.').pack()
                 return
 
             selected_libraries = [
@@ -865,14 +865,14 @@ def main() -> None:
     label_advanced_settings.pack(pady=(10, 0), padx=10)
 
     frame_advanced_settings = ctk.CTkFrame(master=col3, fg_color='transparent')
-    frame_advanced_settings.pack(fill='x', padx=10, pady=5)
-    frame_advanced_settings.grid_columnconfigure(0, weight=1)
+    frame_advanced_settings.pack(pady=5)
+    frame_advanced_settings.grid_columnconfigure(0, weight=0)
     frame_advanced_settings.grid_columnconfigure(1, weight=0)
     frame_advanced_settings.grid_columnconfigure(2, weight=0)
     frame_advanced_settings.grid_columnconfigure(3, weight=0)
 
-    label_polling_rate = ctk.CTkLabel(master=frame_advanced_settings, text='Polling Rate:')
-    label_polling_rate.grid(row=0, column=0, pady=5, sticky='w')
+    label_polling_rate = ctk.CTkLabel(master=frame_advanced_settings, text='Polling Rate')
+    label_polling_rate.grid(row=0, column=0, padx=(0, 10), pady=5, sticky='e')
 
     button_polling_rate_dec = ctk.CTkButton(
         master=frame_advanced_settings, text='-', width=28, height=28
@@ -891,8 +891,8 @@ def main() -> None:
     )
     button_polling_rate_inc.grid(row=0, column=3, padx=(5, 0), pady=5, sticky='e')
 
-    label_seek_threshold = ctk.CTkLabel(master=frame_advanced_settings, text='Seek Threshold:')
-    label_seek_threshold.grid(row=1, column=0, pady=5, sticky='w')
+    label_seek_threshold = ctk.CTkLabel(master=frame_advanced_settings, text='Seek Threshold')
+    label_seek_threshold.grid(row=1, column=0, padx=(0, 10), pady=5, sticky='e')
 
     button_seek_threshold_dec = ctk.CTkButton(
         master=frame_advanced_settings, text='-', width=28, height=28
@@ -911,8 +911,8 @@ def main() -> None:
     )
     button_seek_threshold_inc.grid(row=1, column=3, padx=(5, 0), pady=5, sticky='e')
 
-    label_log_level = ctk.CTkLabel(master=frame_advanced_settings, text='Log Level:')
-    label_log_level.grid(row=2, column=0, pady=5, sticky='w')
+    label_log_level = ctk.CTkLabel(master=frame_advanced_settings, text='Log Level (Console)')
+    label_log_level.grid(row=2, column=0, padx=(0, 10), pady=5, sticky='e')
 
     values_log_level = ['DEBUG', 'VERBOSE', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     var_log_level = ctk.StringVar(value=log_level)

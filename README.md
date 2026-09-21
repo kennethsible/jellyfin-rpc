@@ -58,10 +58,11 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `SEASON_OVER_SERIES` | `false` | Controls whether season posters are preferred over series posters for shows. |
 | `ALWAYS_USE_MUSICBRAINZ` | `false` | Controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider for local artwork from Jellyfin. |
 | `RELEASE_OVER_GROUP` | `false` | Controls whether [release](https://musicbrainz.org/doc/Release) artwork is preferred over [release group](https://musicbrainz.org/doc/Release_Group) artwork on MusicBrainz. |
-| `LIBRARY_FILTER_TYPE` | `BLACKLIST` | Controls whether the library filter uses a whitelist (allowed) or blacklist (blocked). |
+| `LIBRARY_FILTER_TYPE` | `Denylist` | Controls whether the library filter uses a whitelist (allowed) or blacklist (blocked). |
 | `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions (or the minimum delay/fallback interval between WebSocket events). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
+| `STALE_GRACE_PERIOD` | `5` | Buffer in seconds to wait after media finishes before clearing a stale session. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_FILE_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |

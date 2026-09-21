@@ -44,10 +44,16 @@ USER_AGENT = f'Jellyfin-RPC/{RPC_VERSION} ( {contact_info} )'
 def load_config(ini_path: str) -> SectionProxy:
     config_parser = ConfigParser()
     config_parser.read(ini_path, encoding='utf-8')
+    has_legacy_keys = False
 
     def migrate_key(legacy_key: str, modern_key: str) -> None:
-        if value := config_parser.get('DEFAULT', legacy_key, fallback=None):
-            config_parser.set('DEFAULT', modern_key, value)
+        nonlocal has_legacy_keys
+        if config_parser.has_option('DEFAULT', legacy_key):
+            if not config_parser.has_option('DEFAULT', modern_key):
+                value = config_parser.get('DEFAULT', legacy_key)
+                config_parser.set('DEFAULT', modern_key, value)
+            config_parser.remove_option('DEFAULT', legacy_key)
+            has_legacy_keys = True
 
     migrate_key('API_TOKEN', 'JELLYFIN_API_KEY')
     migrate_key('USERNAME', 'JELLYFIN_USERNAME')
@@ -55,6 +61,10 @@ def load_config(ini_path: str) -> SectionProxy:
     migrate_key('FILTER_LIBRARIES', 'SELECTED_LIBRARIES')
     migrate_key('REFRESH_RATE', 'POLLING_RATE')
     migrate_key('FILE_HDLR_LEVEL', 'LOG_LEVEL_FILE')
+
+    if has_legacy_keys:
+        with open(ini_path, 'w', encoding='utf-8') as ini_file:
+            config_parser.write(ini_file)
 
     return config_parser['DEFAULT']
 
@@ -558,7 +568,7 @@ async def clear_activity(
         return False
 
 
-async def ws_listener(
+async def websocket_listener(
     session: ClientSession,
     config: SectionProxy,
     polling_rate: int,
@@ -580,28 +590,28 @@ async def ws_listener(
         ws_url = f'{ws_protocol}{ws_host}/socket?deviceId={device_id}'
         headers = {'Authorization': build_auth_header(device_id, jf_api_key)}
         try:
-            async with session.ws_connect(ws_url, headers=headers, heartbeat=30.0) as ws:
+            async with session.ws_connect(ws_url, headers=headers, heartbeat=30.0) as websocket:
                 ws_state['ws_connected'] = True
                 initial_attempt = True
 
                 async def ping_loop() -> None:
                     while True:
                         await asyncio.sleep(30)
-                        await ws.send_str(json.dumps({'MessageType': 'KeepAlive'}))
+                        await websocket.send_str(json.dumps({'MessageType': 'KeepAlive'}))
 
                 ping_task = asyncio.create_task(ping_loop())
                 try:
-                    await ws.send_str(
+                    await websocket.send_str(
                         json.dumps({'MessageType': 'SessionsStart', 'Data': '0,1500'})
                     )
-                    async for msg in ws:
-                        if msg.type == WSMsgType.TEXT:
-                            payload = json.loads(msg.data)
+                    async for message in websocket:
+                        if message.type == WSMsgType.TEXT:
+                            payload = json.loads(message.data)
                             if payload.get('MessageType') == 'Sessions':
                                 ws_state['sessions'] = payload.get('Data', [])
                                 ws_state['last_packet'] = time.time()
                                 wake_event.set()
-                        elif msg.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
+                        elif message.type in (WSMsgType.CLOSED, WSMsgType.ERROR):
                             break
                 finally:
                     ping_task.cancel()
@@ -1192,7 +1202,7 @@ async def monitor_activity(
                 logger.warning(f'Missing URL Protocol: {jf_host}')
 
             ws_task = asyncio.create_task(
-                ws_listener(jf_session, config, polling_rate, ws_state, wake_event)
+                websocket_listener(jf_session, config, polling_rate, ws_state, wake_event)
             )
 
             try:
