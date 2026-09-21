@@ -46,7 +46,6 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `JELLYFIN_HOST` | — | Jellyfin server URL (e.g., `https://jellyfin.example.com` or `http://localhost:8096`). |
 | `JELLYFIN_API_KEY` | — | Jellyfin API key (generated automatically when authenticating with Quick Connect). |
 | `JELLYFIN_USERNAME` | — | Jellyfin username to display media activity for in Discord. |
-| `DISCORD_CLIENT_ID` | — | Optional custom Discord application client ID. Uses the provided application if unset. |
 | `TMDB_API_KEY` | — | Optional API key from TMDB (required for posters if your Jellyfin server is local). |
 | `MEDIA_TYPES` | `Shows, Movies, Music` | Comma-separated list of media types to display activities for (`Shows`, `Movies`, `Music`). |
 | `SHOW_WHEN_PAUSED` | `true` | Shows the activity with a paused indicator instead of a progress bar. If disabled, the activity stops displaying when paused. |
@@ -59,15 +58,16 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `SEASON_OVER_SERIES` | `false` | Controls whether season posters are preferred over series posters for shows. |
 | `ALWAYS_USE_MUSICBRAINZ` | `false` | Controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider for local artwork from Jellyfin. |
 | `RELEASE_OVER_GROUP` | `false` | Controls whether [release](https://musicbrainz.org/doc/Release) artwork is preferred over [release group](https://musicbrainz.org/doc/Release_Group) artwork on MusicBrainz. |
-| `FILTER_MODE` | `BLACKLIST` | Controls whether the library filter uses a whitelist (allowed) or blacklist (blocked). |
-| `FILTER_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
+| `LIBRARY_FILTER_TYPE` | `BLACKLIST` | Controls whether the library filter uses a whitelist (allowed) or blacklist (blocked). |
+| `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions (or the minimum delay/fallback interval between WebSocket events). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
-| `SINGLETON_PORT` | `57634` | Local TCP port used to prevent multiple instances and focus the active window on launch. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
-| `FILE_HDLR_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
+| `LOG_FILE_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |
 | `LOG_MAX_FILES` | `3` | Maximum number of log files to keep before deleting the oldest. |
+| `DISCORD_CLIENT_ID` | — | Optional custom Discord application client ID. Uses the provided application if unset. |
+| `SINGLETON_PORT` | `57634` | Local TCP port used to prevent multiple instances and focus the active window on launch. |
 
 ## CLI Usage (Headless)
 

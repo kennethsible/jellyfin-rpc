@@ -143,8 +143,8 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
         jf_host: str,
         jf_api_key: str,
         jf_username: str,
-        var_filter_mode: ctk.StringVar,
-        var_filter_libraries: ctk.StringVar,
+        var_library_filter_type: ctk.StringVar,
+        var_selected_libraries: ctk.StringVar,
     ):
         super().__init__(master)
         self.title(f'Jellyfin RPC v{__version__}')
@@ -156,11 +156,11 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
         self.jf_host = jf_host
         self.jf_api_key = jf_api_key
         self.jf_username = jf_username
-        self.var_filter_libraries = var_filter_libraries
+        self.var_selected_libraries = var_selected_libraries
         self.checkbox_map: dict[str, ctk.BooleanVar] = {}
 
         self.scroll_frame = ctk.CTkScrollableFrame(
-            master=self, label_text=f'{var_filter_mode.get()}ed Libraries'
+            master=self, label_text=f'{var_library_filter_type.get()}ed Libraries'
         )
         self.scroll_frame.pack(fill='both', expand=True, padx=10, pady=10)
 
@@ -205,14 +205,14 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
                 ctk.CTkLabel(self.scroll_frame, text='No Libraries Retrieved.').pack()
                 return
 
-            filter_libraries = [
-                x.strip() for x in self.var_filter_libraries.get().split(',') if x.strip()
+            selected_libraries = [
+                x.strip() for x in self.var_selected_libraries.get().split(',') if x.strip()
             ]
             for library in libraries:
                 library_id = library.get('Id')
                 library_name = library.get('Name')
 
-                var_checkbox = ctk.BooleanVar(value=library_id in filter_libraries)
+                var_checkbox = ctk.BooleanVar(value=library_id in selected_libraries)
                 checkbox = ctk.CTkCheckBox(
                     master=self.scroll_frame, text=library_name, variable=var_checkbox
                 )
@@ -226,7 +226,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
 
     def save_selection(self):
         library_ids = [library_id for library_id, var in self.checkbox_map.items() if var.get()]
-        self.var_filter_libraries.set(','.join(library_ids))
+        self.var_selected_libraries.set(','.join(library_ids))
         self.destroy()
 
 
@@ -234,8 +234,8 @@ def save_config(
     ini_path: str,
     entries: dict[str, dict[str, Any]],
     checkboxes: dict[str, ctk.CTkCheckBox],
-    var_filter_mode: ctk.StringVar,
-    var_filter_libraries: ctk.StringVar,
+    var_library_filter_type: ctk.StringVar,
+    var_selected_libraries: ctk.StringVar,
     var_log_level: ctk.StringVar,
     var_polling_rate: ctk.StringVar,
     var_seek_threshold: ctk.StringVar,
@@ -250,18 +250,18 @@ def save_config(
         'POSTER_LANGUAGES',
     ):
         config_parser.set('DEFAULT', key, entries[key]['entry'].get())
-    config_parser.set('DEFAULT', 'FILTER_MODE', var_filter_mode.get())
-    config_parser.set('DEFAULT', 'FILTER_LIBRARIES', var_filter_libraries.get())
+    config_parser.set('DEFAULT', 'LIBRARY_FILTER_TYPE', var_library_filter_type.get())
+    config_parser.set('DEFAULT', 'SELECTED_LIBRARIES', var_selected_libraries.get())
     config_parser.set('DEFAULT', 'POLLING_RATE', var_polling_rate.get().rstrip('s'))
     config_parser.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
     config_parser.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
 
     media_types = []
-    if checkboxes['MOVIES']._variable.get():
+    if checkboxes['MOVIES'].get():
         media_types.append('Movies')
-    if checkboxes['SHOWS']._variable.get():
+    if checkboxes['SHOWS'].get():
         media_types.append('Shows')
-    if checkboxes['MUSIC']._variable.get():
+    if checkboxes['MUSIC'].get():
         media_types.append('Music')
     config_parser.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
@@ -278,7 +278,7 @@ def save_config(
         'START_MINIMIZED',
         'MINIMIZE_ON_CLOSE',
     ):
-        config_parser.set('DEFAULT', key, str(bool(checkboxes[key]._variable.get())).lower())
+        config_parser.set('DEFAULT', key, str(bool(checkboxes[key].get())).lower())
 
     with open(ini_path, 'w', encoding='utf-8') as ini_file:
         config_parser.write(ini_file)
@@ -590,8 +590,10 @@ def main() -> None:
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
-    filter_mode = config.get('FILTER_MODE', 'BLACKLIST').capitalize()
-    filter_libraries = config.get('FILTER_LIBRARIES', '')
+    FILTER_TYPE_MAP = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}
+    library_filter_type = config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').capitalize()
+    library_filter_type = FILTER_TYPE_MAP.get(library_filter_type, library_filter_type)
+    selected_libraries = config.get('SELECTED_LIBRARIES', '')
 
     start_minimized = config.getboolean('START_MINIMIZED', True)
     minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
@@ -674,8 +676,8 @@ def main() -> None:
         entry_jf_username.insert(0, jf_username)
     entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
 
-    def change_filter_mode(value: str) -> None:
-        var_filter_mode.set(value)
+    def change_library_filter_type(value: str) -> None:
+        var_library_filter_type.set(value)
         on_click(
             cast(ctk.CTkButton, context['button_connect']),
             entries,
@@ -683,15 +685,15 @@ def main() -> None:
             only_disconnect=True,
         )
 
-    var_filter_mode = ctk.StringVar(value=filter_mode.capitalize())
-    segmented_filter_mode = ctk.CTkSegmentedButton(
+    var_library_filter_type = ctk.StringVar(value=library_filter_type.capitalize())
+    segmented_library_filter_type = ctk.CTkSegmentedButton(
         master=col1,
-        values=['Blacklist', 'Whitelist'],
-        variable=var_filter_mode,
-        command=lambda value: change_filter_mode(value),
+        values=['Denylist', 'Allowlist'],
+        variable=var_library_filter_type,
+        command=lambda value: change_library_filter_type(value),
     )
-    segmented_filter_mode.pack(pady=(10, 0), padx=10, fill='x')
-    var_filter_libraries = ctk.StringVar(value=filter_libraries)
+    segmented_library_filter_type.pack(pady=(10, 0), padx=10, fill='x')
+    var_selected_libraries = ctk.StringVar(value=selected_libraries)
 
     def select_libraries() -> None:
         jf_host_str = entry_jf_host.get().rstrip('/')
@@ -710,8 +712,8 @@ def main() -> None:
             jf_host_str,
             jf_api_key_str,
             jf_username_str,
-            var_filter_mode,
-            var_filter_libraries,
+            var_library_filter_type,
+            var_selected_libraries,
         )
         on_click(
             cast(ctk.CTkButton, context['button_connect']),
@@ -974,7 +976,7 @@ def main() -> None:
                 continue
             checkbox.configure(
                 command=lambda: set_close_behavior(
-                    root, on_close_callback, checkboxes['MINIMIZE_ON_CLOSE']._variable.get()
+                    root, on_close_callback, bool(checkboxes['MINIMIZE_ON_CLOSE'].get())
                 )
             )
         elif key != 'START_MINIMIZED':
@@ -1053,8 +1055,8 @@ def main() -> None:
             ini_path,
             entries,
             checkboxes,
-            var_filter_mode,
-            var_filter_libraries,
+            var_library_filter_type,
+            var_selected_libraries,
             var_log_level,
             var_polling_rate,
             var_seek_threshold,
@@ -1071,8 +1073,8 @@ def main() -> None:
             ini_path,
             entries,
             checkboxes,
-            var_filter_mode,
-            var_filter_libraries,
+            var_library_filter_type,
+            var_selected_libraries,
             var_log_level,
             var_polling_rate,
             var_seek_threshold,

@@ -44,12 +44,18 @@ USER_AGENT = f'Jellyfin-RPC/{RPC_VERSION} ( {contact_info} )'
 def load_config(ini_path: str) -> SectionProxy:
     config_parser = ConfigParser()
     config_parser.read(ini_path, encoding='utf-8')
-    if config_parser.get('DEFAULT', 'API_TOKEN', fallback=None):
-        jf_api_key = config_parser.get('DEFAULT', 'API_TOKEN')
-        config_parser.set('DEFAULT', 'JELLYFIN_API_KEY', jf_api_key)
-    if config_parser.get('DEFAULT', 'USERNAME', fallback=None):
-        jf_username = config_parser.get('DEFAULT', 'USERNAME')
-        config_parser.set('DEFAULT', 'JELLYFIN_USERNAME', jf_username)
+
+    def migrate_key(legacy_key: str, modern_key: str) -> None:
+        if value := config_parser.get('DEFAULT', legacy_key, fallback=None):
+            config_parser.set('DEFAULT', modern_key, value)
+
+    migrate_key('API_TOKEN', 'JELLYFIN_API_KEY')
+    migrate_key('USERNAME', 'JELLYFIN_USERNAME')
+    migrate_key('FILTER_MODE', 'LIBRARY_FILTER_TYPE')
+    migrate_key('FILTER_LIBRARIES', 'SELECTED_LIBRARIES')
+    migrate_key('REFRESH_RATE', 'POLLING_RATE')
+    migrate_key('FILE_HDLR_LEVEL', 'LOG_LEVEL_FILE')
+
     return config_parser['DEFAULT']
 
 
@@ -640,6 +646,7 @@ async def activity_loop(
     ini_path: str,
     polling_rate: int,
     seek_threshold: int,
+    stale_grace_period: int,
     ws_state: dict[str, Any],
     wake_event: asyncio.Event,
 ) -> None:
@@ -680,8 +687,8 @@ async def activity_loop(
     always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
-    filter_mode = config.get('FILTER_MODE', 'BLACKLIST').upper()
-    filter_libraries = parse_delimited_list(config, 'FILTER_LIBRARIES')
+    library_filter_type = config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').upper()
+    selected_libraries = parse_delimited_list(config, 'SELECTED_LIBRARIES')
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     jf_media_types = set()
@@ -780,8 +787,7 @@ async def activity_loop(
             except (ValueError, KeyError, TypeError) as e:
                 logger.debug(e)
 
-            STALE_GRACE_PERIOD = 5
-            if current_end and time.time() >= (current_end + STALE_GRACE_PERIOD):
+            if current_end and time.time() >= (current_end + stale_grace_period):
                 if rpc_state.last_activity_str:
                     if not await clear_activity(discord_rpc, polling_rate, 'Stale Session'):
                         continue
@@ -834,11 +840,11 @@ async def activity_loop(
                             )
                             logger.debug(e)
 
-                    match filter_mode:
-                        case 'WHITELIST':
-                            is_allowed = bool(library_id and library_id in filter_libraries)
-                        case 'BLACKLIST':
-                            is_allowed = not (library_id and library_id in filter_libraries)
+                    match library_filter_type:
+                        case 'ALLOWLIST' | 'WHITELIST':
+                            is_allowed = bool(library_id and library_id in selected_libraries)
+                        case 'DENYLIST' | 'BLACKLIST':
+                            is_allowed = not (library_id and library_id in selected_libraries)
                         case _:
                             is_allowed = True
 
@@ -859,8 +865,8 @@ async def activity_loop(
                             season = media_dict['ParentIndexNumber']
                             episode = media_dict['IndexNumber']
                             details_str = media_dict['SeriesName']
-                            state_str = f'{f"S{season}:E{episode}"} - {media_dict["Name"]}'
-                            activity_str = f'{details_str} {state_str.split(" - ")[0]}'
+                            state_str = f'{f"S{season}:E{episode}"} \u2022 {media_dict["Name"]}'
+                            activity_str = f'{details_str} {state_str.split(" \u2022 ")[0]}'
                         case 'Movie':
                             activity_type = ActivityType.WATCHING
                             details_str = media_dict['Name']
@@ -873,13 +879,13 @@ async def activity_loop(
                                 state_str = ', '.join(artists)
                             if album_name := media_dict.get('Album'):
                                 if state_str:
-                                    state_str += f' - {album_name}'
+                                    state_str += f' \u2022 {album_name}'
                                 else:
                                     state_str = album_name
                             details_str = media_dict['Name']
                             activity_str = details_str
                             if state_str:
-                                activity_str += f' - {state_str.split(" - ")[0]}'
+                                activity_str += f' \u2022 {state_str.split(" \u2022 ")[0]}'
                         case _:
                             if not last_unsupported_warning:
                                 logger.warning(
@@ -952,9 +958,9 @@ async def activity_loop(
                         if not always_use_tmdb:
                             season_id = media_dict.get('SeasonId')
                             if season_over_series and season_id and is_https:
-                                poster_url = f'{jf_host}/Items/{season_id}/Images/Primary'
+                                poster_url = f'{jf_host}/Items/{season_id}/Images/Primary/0'
                             elif series_id and is_https:
-                                poster_url = f'{jf_host}/Items/{series_id}/Images/Primary'
+                                poster_url = f'{jf_host}/Items/{series_id}/Images/Primary/0'
                             elif tmdb_api_key and tmdb_id:
                                 if season_over_series:
                                     poster_url = await get_season_poster(
@@ -1002,7 +1008,7 @@ async def activity_loop(
                                 )
 
                         if not always_use_tmdb and item_id and is_https:
-                            poster_url = f'{jf_host}/Items/{item_id}/Images/Primary'
+                            poster_url = f'{jf_host}/Items/{item_id}/Images/Primary/0'
                         elif tmdb_api_key and tmdb_id:
                             poster_url = await get_movie_poster(
                                 cache_session, tmdb_api_key, tmdb_id, languages
@@ -1050,7 +1056,7 @@ async def activity_loop(
                                 )
 
                         if not always_use_musicbrainz and album_id and is_https:
-                            poster_url = f'{jf_host}/Items/{album_id}/Images/Primary'
+                            poster_url = f'{jf_host}/Items/{album_id}/Images/Primary/0'
                         elif group_id:
                             cover_release_id = release_id if release_over_group else None
                             poster_url = await get_release_cover(
@@ -1154,7 +1160,11 @@ async def activity_loop(
 
 
 async def monitor_activity(
-    config: SectionProxy, ini_path: str, polling_rate: int, seek_threshold: int
+    config: SectionProxy,
+    ini_path: str,
+    polling_rate: int,
+    seek_threshold: int,
+    stale_grace_period: int,
 ) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
     discord_rpc = AioPresence(client_id)
@@ -1194,6 +1204,7 @@ async def monitor_activity(
                     ini_path,
                     polling_rate,
                     seek_threshold,
+                    stale_grace_period,
                     ws_state,
                     wake_event,
                 )
@@ -1214,10 +1225,11 @@ def start_discord_rpc(
     config = load_config(ini_path)
     polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
+    stale_grace_period = max(1, config.getint('STALE_GRACE_PERIOD', 5))
 
     logger.setLevel(logging.DEBUG)
     log_level = get_valid_level(config.get('LOG_LEVEL', ''), logging.INFO)
-    file_hdlr_level = get_valid_level(config.get('FILE_HDLR_LEVEL', ''), logging.DEBUG)
+    log_level_file = get_valid_level(config.get('LOG_LEVEL_FILE', ''), logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
 
     if log_path is not None:
@@ -1228,7 +1240,7 @@ def start_discord_rpc(
             log_path, maxBytes=max_bytes, backupCount=max_files, encoding='utf-8'
         )
         file_hdlr.setFormatter(formatter)
-        file_hdlr.setLevel(file_hdlr_level)
+        file_hdlr.setLevel(log_level_file)
         logger.addHandler(file_hdlr)
 
     stream_hdlr = logging.StreamHandler(sys.stdout)
@@ -1241,7 +1253,9 @@ def start_discord_rpc(
         queue_hdlr.setLevel(log_level)
         logger.addHandler(queue_hdlr)
 
-    asyncio.run(monitor_activity(config, ini_path, polling_rate, seek_threshold))
+    asyncio.run(
+        monitor_activity(config, ini_path, polling_rate, seek_threshold, stale_grace_period)
+    )
 
 
 def main() -> None:
