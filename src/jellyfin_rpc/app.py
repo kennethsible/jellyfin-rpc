@@ -202,7 +202,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
             views_data = response.json()
             libraries = views_data.get('Items', [])
             if not libraries:
-                ctk.CTkLabel(self.scroll_frame, text='No Libraries Found.').pack()
+                ctk.CTkLabel(self.scroll_frame, text='No Libraries Found').pack()
                 return
 
             selected_libraries = [
@@ -222,7 +222,7 @@ class LibrarySelectorWindow(ctk.CTkToplevel):
 
         except RequestException as e:
             logger.error(f'Failed to Retrieve Libraries: {e}')
-            ctk.CTkLabel(self.scroll_frame, text='Error Retrieving Libraries.').pack()
+            ctk.CTkLabel(self.scroll_frame, text='Error Retrieving Libraries').pack()
 
     def save_selection(self):
         library_ids = [library_id for library_id, var in self.checkbox_map.items() if var.get()]
@@ -467,7 +467,7 @@ def check_for_updates(
             label_update.after(0, show_label_update)
 
     except (RequestException, JSONDecodeError, KeyError) as e:
-        logger.warning(f'GitHub Version Check Failed ({type(e).__name__}). Skipping...')
+        logger.warning(f'GitHub Version Check Failed ({type(e).__name__})')
         logger.debug(e)
 
 
@@ -490,38 +490,38 @@ def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[Lo
     return log_queue
 
 
-def activate_existing_instance(singleton_port: int) -> bool:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-            client.settimeout(1.0)
-            client.connect(('127.0.0.1', singleton_port))
-            client.sendall(b'FOCUS\n')
-            return True
-    except (ConnectionRefusedError, TimeoutError, OSError):
-        return False
-
-
-def start_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket.socket | None:
+def setup_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket.socket:
     try:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # IPv4 TCP
         server.bind(('127.0.0.1', singleton_port))
         server.listen(5)
-
-        def listener():
-            while True:
-                try:
-                    connection, _ = server.accept()
-                    with connection:
-                        message = connection.recv(1024).strip()
-                        if message == b'FOCUS':
-                            gui_queue.put('FOCUS')
-                except OSError:
-                    break
-
-        threading.Thread(target=listener, daemon=True).start()
-        return server
     except OSError:
-        return None
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+                client.settimeout(1.0)
+                client.connect(('127.0.0.1', singleton_port))
+                client.sendall(b'FOCUS\n')
+                if client.recv(16).strip() == b'ACK':
+                    sys.exit(0)
+        except (ConnectionRefusedError, TimeoutError, OSError):
+            pass
+        logger.error(f'Singleton Port {singleton_port} Already In Use')
+        sys.exit(1)
+
+    def listen_for_focus():
+        while True:
+            try:
+                connection, _ = server.accept()
+                with connection:
+                    connection.settimeout(1.0)
+                    if connection.recv(1024).strip() == b'FOCUS':
+                        gui_queue.put('FOCUS')
+                        connection.sendall(b'ACK\n')
+            except OSError:
+                break
+
+    threading.Thread(target=listen_for_focus, daemon=True).start()
+    return server
 
 
 def focus_window(root: ctk.CTk) -> None:
@@ -569,8 +569,8 @@ def main() -> None:
     config = load_config(ini_path)
     singleton_port = config.getint('SINGLETON_PORT', fallback=SINGLE_INSTANCE_PORT)
 
-    if activate_existing_instance(singleton_port):
-        sys.exit(0)
+    gui_queue: queue.Queue[str] = queue.Queue()
+    ipc_server = setup_ipc_server(gui_queue, singleton_port)
 
     jf_host = config.get('JELLYFIN_HOST', '')
     jf_api_key = config.get('JELLYFIN_API_KEY', '')
@@ -602,9 +602,6 @@ def main() -> None:
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
-
-    gui_queue: queue.Queue[str] = queue.Queue()
-    ipc_server = start_ipc_server(gui_queue, singleton_port)
 
     color_theme = 'dark' if sys.platform == 'linux' else 'system'
     appearance_mode = config.get('APPEARANCE_MODE', color_theme)

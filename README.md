@@ -64,7 +64,7 @@ If running in headless/CLI mode, configuration is loaded from an [INI file](http
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
 | `STALE_GRACE_PERIOD` | `5` | Buffer in seconds to wait after media finishes before clearing a stale session. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
-| `LOG_FILE_LEVEL` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
+| `LOG_LEVEL_FILE` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |
 | `LOG_MAX_FILES` | `3` | Maximum number of log files to keep before deleting the oldest. |
 | `DISCORD_CLIENT_ID` | — | Optional custom Discord application client ID. Uses the provided application if unset. |
