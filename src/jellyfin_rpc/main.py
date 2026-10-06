@@ -277,6 +277,35 @@ async def check_tmdb_auth(session: ClientSession, api_key: str) -> None:
         logger.debug(e)
 
 
+async def get_imdb_episode_id(
+    session: ClientSession, api_key: str, tmdb_id: str, season: int, episode: int
+) -> str | None:
+    search_url = (
+        f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/episode/{episode}/external_ids'
+    )
+    try:
+        async with session.get(search_url, params={'api_key': api_key}) as response:
+            if response.status == 404:
+                return None
+            if response.status == 429:
+                logger.warning('TMDB API Rate Limit Exceeded (HTTP 429)')
+                return None
+            response.raise_for_status()
+            data = await response.json()
+            return data.get('imdb_id')
+    except aiohttp.ClientResponseError as e:
+        obfuscated_url = e.request_info.real_url.with_query(None)
+        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.debug(f'HTTP {e.status} at {obfuscated_url}')
+    except (aiohttp.ClientError, TimeoutError) as e:
+        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.debug(e)
+    except (ValueError, KeyError, IndexError) as e:
+        logger.warning(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.debug(e)
+    return None
+
+
 async def get_series_id(
     session: ClientSession, api_key: str, title: str, year: int | None = None
 ) -> str | None:
@@ -370,11 +399,11 @@ async def get_music_id_from_search(session: ClientSession, artist: str, album: s
 
 
 async def get_music_id_from_release(session: ClientSession, release_id: str) -> str | None:
-    lookup_url = f'https://musicbrainz.org/ws/2/release/{release_id}'
+    search_url = f'https://musicbrainz.org/ws/2/release/{release_id}'
     headers = {'User-Agent': USER_AGENT, 'Accept': 'application/json'}
     params = {'inc': 'release-groups', 'fmt': 'json'}
     try:
-        async with session.get(lookup_url, headers=headers, params=params) as response:
+        async with session.get(search_url, headers=headers, params=params) as response:
             if response.status == 404:
                 return None
             if response.status == 429:
@@ -622,6 +651,7 @@ def resolve_series_provider_urls(
     season: int | None = None,
     episode: int | None = None,
     use_imdb: bool = False,
+    episode_imdb_id: str | None = None,
 ) -> tuple[str | None, str | None]:
     episode_urls = {
         entry['Name'].lower(): entry['Url']
@@ -636,11 +666,19 @@ def resolve_series_provider_urls(
         if not series_url:
             continue
         state_url = episode_urls.get(provider)
-        if not state_url and provider in ('tmdb', 'themoviedb') and season is not None:
-            if episode is not None:
-                state_url = f'{series_url}/season/{season}/episode/{episode}'
-            else:
-                state_url = f'{series_url}/season/{season}'
+        if not state_url and season is not None:
+            if provider == 'imdb':
+                if episode_imdb_id:
+                    state_url = f'https://www.imdb.com/title/{episode_imdb_id}'
+                elif season > 0:
+                    state_url = f'{series_url.rstrip("/")}/episodes?season={season}'
+                else:
+                    state_url = f'{series_url.rstrip("/")}/episodes'
+            elif provider in ('tmdb', 'themoviedb'):
+                if episode is not None:
+                    state_url = f'{series_url.rstrip("/")}/season/{season}/episode/{episode}'
+                else:
+                    state_url = f'{series_url.rstrip("/")}/season/{season}'
         return series_url, state_url
     return None, None
 
@@ -1104,16 +1142,33 @@ async def activity_loop(
                                     cache_session, tmdb_api_key, tmdb_id, languages
                                 )
 
+                        episode_imdb_id = None
+                        if (
+                            imdb_external_urls
+                            and tmdb_id
+                            and tmdb_api_key
+                            and season is not None
+                            and episode is not None
+                            and not any(
+                                url.get('Name', '').lower() == 'imdb'
+                                for url in episode_external_urls
+                            )
+                        ):
+                            episode_imdb_id = await get_imdb_episode_id(
+                                cache_session, tmdb_api_key, tmdb_id, season, episode
+                            )
+
                         details_url, state_url = resolve_series_provider_urls(
                             series_external_urls,
                             episode_external_urls,
                             season,
                             episode,
                             use_imdb=imdb_external_urls,
+                            episode_imdb_id=episode_imdb_id,
                         )
                         if not details_url and tmdb_id:
                             details_url = f'https://www.themoviedb.org/tv/{tmdb_id}'
-                            if season is not None:
+                            if not state_url and season is not None:
                                 if episode is not None:
                                     state_url = f'{details_url}/season/{season}/episode/{episode}'
                                 else:
