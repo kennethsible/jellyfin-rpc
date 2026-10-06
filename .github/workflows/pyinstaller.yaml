@@ -57,9 +57,15 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         shell: bash
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0
+
           mkdir -p dist/AppDir/usr/bin
+          mkdir -p dist/AppDir/usr/lib
           cp images/icon.png dist/AppDir/jellyfin-rpc.png
           mv "dist/Jellyfin RPC" dist/AppDir/usr/bin/jellyfin-rpc
+
+          cp -P /usr/lib/x86_64-linux-gnu/libxcb-cursor.so* dist/AppDir/usr/lib/
 
           mkdir -p dist/AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p dist/AppDir/usr/share/icons/hicolor/512x512/apps
@@ -81,6 +87,7 @@ jobs:
           cat << 'EOF' > dist/AppDir/AppRun
           #!/bin/sh
           APPDIR="$(dirname "$(readlink -f "${0}")")"
+          export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH}"
           exec "${APPDIR}/usr/bin/jellyfin-rpc" "$@"
           EOF
           chmod +x dist/AppDir/AppRun

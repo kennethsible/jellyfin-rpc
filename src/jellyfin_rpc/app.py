@@ -609,6 +609,16 @@ class JellyfinRPCWindow(QWidget):
         self.button_connect.clicked.connect(self.toggle_connection)
         main_layout.addWidget(self.button_connect, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            checkbox_minimize = self.checkboxes.get('MINIMIZE_ON_CLOSE')
+            if checkbox_minimize:
+                checkbox_minimize.setChecked(False)
+                checkbox_minimize.setEnabled(False)
+                checkbox_minimize.setCursor(Qt.CursorShape.ForbiddenCursor)
+                checkbox_minimize.setToolTip(
+                    'This desktop environment does not have a system tray.'
+                )
+
     def create_header(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -710,6 +720,12 @@ class JellyfinRPCWindow(QWidget):
         for key, default in checkbox_vars:
             self.checkboxes[key].setChecked(self.config.getboolean(key, default))
 
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            checkbox_minimize = self.checkboxes.get('MINIMIZE_ON_CLOSE')
+            if checkbox_minimize:
+                checkbox_minimize.setChecked(False)
+                checkbox_minimize.setEnabled(False)
+
         self.advanced_vars['POLLING_RATE'].setText(
             f'{max(1, self.config.getint("POLLING_RATE", 5))}s'
         )
@@ -806,7 +822,7 @@ class JellyfinRPCWindow(QWidget):
                 if entry_data.obfuscate:
                     entry_data.widget.setEchoMode(QLineEdit.EchoMode.Password)
             self.button_connect.setText('Disconnect')
-            if hasattr(self, 'tray_icon'):
+            if getattr(self, 'tray_icon', None):
                 self.action_connect.setText('Disconnect')
                 self.tray_icon.setToolTip('Jellyfin RPC\nConnected')
             self.is_connected = True
@@ -818,38 +834,39 @@ class JellyfinRPCWindow(QWidget):
                 if entry_data.obfuscate:
                     entry_data.widget.setEchoMode(QLineEdit.EchoMode.Normal)
             self.button_connect.setText('Connect')
-            if hasattr(self, 'tray_icon'):
+            if getattr(self, 'tray_icon', None):
                 self.action_connect.setText('Connect')
                 self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
             self.is_connected = False
 
     def setup_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
         icon = QIcon(self.png_bundle_path)
         if icon.isNull():
             icon = self.style().standardIcon(self.style().StandardPixmap.SP_TitleBarMenuButton)
 
-        menu = QMenu(self)
+        self.tray_menu = QMenu(self)
         self.tray_icon = QSystemTrayIcon(icon, self)
         self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
 
-        self.action_connect = menu.addAction('Connect')
+        self.action_connect = self.tray_menu.addAction('Connect')
         font = self.action_connect.font()
         font.setBold(True)
         self.action_connect.setFont(font)
         self.action_connect.triggered.connect(self.toggle_connection)
 
         window_text = 'Hide' if self.isVisible() and not self.isMinimized() else 'Show'
-        self.action_window = menu.addAction(f'{window_text} Window')
+        self.action_window = self.tray_menu.addAction(f'{window_text} Window')
         self.action_window.triggered.connect(self.toggle_window)
 
-        menu.addSeparator()
-        action_quit = menu.addAction('Quit Jellyfin RPC')
+        self.tray_menu.addSeparator()
+        action_quit = self.tray_menu.addAction('Quit Jellyfin RPC')
         action_quit.triggered.connect(self.quit_window)
 
-        if sys.platform == 'darwin':
-            self.tray_menu = menu
-        else:
-            self.tray_icon.setContextMenu(menu)
+        if sys.platform != 'darwin':
+            self.tray_icon.setContextMenu(self.tray_menu)
 
         self.tray_icon.activated.connect(self.activate_tray)
         self.tray_icon.show()
@@ -928,8 +945,10 @@ class JellyfinRPCWindow(QWidget):
             pass
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        has_tray = getattr(self, 'tray_icon', None) is not None
         if (
-            self.checkboxes.get('MINIMIZE_ON_CLOSE')
+            has_tray
+            and self.checkboxes.get('MINIMIZE_ON_CLOSE')
             and self.checkboxes['MINIMIZE_ON_CLOSE'].isChecked()
             and event.spontaneous()
         ):
@@ -955,7 +974,7 @@ class JellyfinRPCWindow(QWidget):
     def quit_window(self) -> None:
         self.save_config()
         self.rpc_process.stop()
-        if hasattr(self, 'tray_icon'):
+        if getattr(self, 'tray_icon', None):
             self.tray_icon.hide()
             self.tray_icon.deleteLater()
         QApplication.quit()
@@ -1041,6 +1060,9 @@ def apply_theme(app: QApplication) -> None:
         QCheckBox:hover { 
             color: #ffffff; 
         }
+        QCheckBox:disabled {
+            color: #565b5e;
+        }
         QCheckBox::indicator { 
             width: 20px; 
             height: 20px; 
@@ -1051,6 +1073,10 @@ def apply_theme(app: QApplication) -> None:
         QCheckBox::indicator:hover { 
             border-color: #3daee9; 
         }
+        QCheckBox::indicator:disabled {
+            border-color: #3e4244;
+            background-color: #242424;
+        }
         QCheckBox::indicator:checked { 
             background-color: #1f6aa5; 
             border: 2px solid #1f6aa5; 
@@ -1058,6 +1084,10 @@ def apply_theme(app: QApplication) -> None:
         QCheckBox::indicator:checked:hover { 
             background-color: #2980b9; 
             border-color: #2980b9; 
+        }
+        QCheckBox::indicator:checked:disabled {
+            background-color: #2c3e50;
+            border-color: #2c3e50;
         }
         QTextBrowser { 
             background-color: #2b2b2b; 
