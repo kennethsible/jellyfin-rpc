@@ -10,6 +10,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('jellyfin_rpc.ini', '.'),
+        ('images/icon_menubar.png', '.'),
         ('images/icon.png', '.'),
         ('images/icon.ico', '.'),
         *collect_data_files('certifi'),

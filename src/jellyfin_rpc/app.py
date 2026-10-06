@@ -1,4 +1,5 @@
 import functools
+import html
 import logging
 import multiprocessing as mp
 import os
@@ -10,21 +11,36 @@ import socket
 import subprocess
 import sys
 import threading
-import tkinter as tk
-import webbrowser
 from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
+from dataclasses import dataclass
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from multiprocessing.queues import Queue
 from types import FrameType
-from typing import Any, TypedDict, cast
 
 import certifi
-import customtkinter as ctk
-import pystray
 import requests
-from PIL import Image
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QColor, QIcon, QPalette, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QScrollArea,
+    QSystemTrayIcon,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 from requests.exceptions import RequestException
 
 from jellyfin_rpc import __version__, start_discord_rpc
@@ -40,311 +56,11 @@ SINGLE_INSTANCE_PORT = 57634
 logger = logging.getLogger('GUI')
 logging.addLevelName(15, 'VERBOSE')
 
-button_connect_text = ''
 
-
-class RPCProcess:
-    def __init__(self, target: Callable[[Queue[LogRecord]], None], log_queue: Queue[LogRecord]):
-        self.target = target
-        self.log_queue = log_queue
-        self.process: mp.Process | None = None
-
-    def start(self) -> None:
-        self.process = mp.Process(target=self.target, args=(self.log_queue,))
-        self.process.start()
-
-    def stop(self) -> None:
-        if self.process is None:
-            return
-        if self.process.is_alive():
-            self.process.terminate()
-            self.process.join()
-            logger.info('RPC Stopped')
-
-    def has_failed(self) -> bool:
-        if self.process is None:
-            return False
-        if self.process.exitcode is None:
-            return False
-        if self.process.exitcode in (0, -15):
-            self.process = None
-            return False
-        logger.error('RPC Crashed')
-        self.process = None
-        return True
-
-
-class RPCLogger:
-    def __init__(
-        self, frame: ctk.CTkFrame, log_queue: Queue[LogRecord], text_widget: ctk.CTkTextbox
-    ):
-        self.frame = frame
-        self.log_queue = log_queue
-        self.text_widget = text_widget
-
-        self.text_widget.tag_config('DEBUG', foreground='#95A5A6')
-        self.text_widget.tag_config('VERBOSE', foreground='#7DC2E7')
-        self.text_widget.tag_config('INFO', foreground='#3DAEE9')
-        self.text_widget.tag_config('WARNING', foreground='#F67400')
-        self.text_widget.tag_config('ERROR', foreground='#DA4453')
-        self.text_widget.tag_config('CRITICAL', foreground='#DA4453')
-
-        self.frame.after(100, self.poll_log_queue)
-
-    def poll_log_queue(self) -> None:
-        if not self.text_widget.winfo_exists():
-            return
-        while not self.log_queue.empty():
-            record = self.log_queue.get_nowait()
-            try:
-                self.display_record(record)
-            except (tk.TclError, RuntimeError):
-                pass
-        self.frame.after(100, self.poll_log_queue)
-
-    def display_record(self, record: LogRecord) -> None:
-        message = self.format_log_record(record)
-        self.text_widget.configure(state='normal')
-        start_index = self.text_widget.index('end-1c')
-        self.text_widget.insert(ctk.END, message)
-        end_index = f'{start_index}+{len(record.levelname)}c'
-        self.text_widget.tag_add(record.levelname, start_index, end_index)
-
-        tk_text = self.text_widget._textbox
-        mode_index = 0 if ctk.get_appearance_mode() == 'Light' else 1
-        link_color = ctk.ThemeManager.theme['CTkButton']['fg_color'][mode_index]
-        bold_font = ctk.CTkFont(family=tk_text.cget('font'), weight='bold')
-
-        for match in re.finditer(r'https?://\S+', message):
-            url = match.group(0)
-            tag_name = f'link_{id(url)}_{match.start()}'
-
-            link_start = f'{start_index}+{match.start()}c'
-            link_end = f'{start_index}+{match.end()}c'
-
-            tk_text.tag_add(tag_name, link_start, link_end)
-            tk_text.tag_configure(tag_name, foreground=link_color, font=bold_font)
-            tk_text.tag_bind(tag_name, '<Button-1>', lambda _, u=url: webbrowser.open_new_tab(u))
-            tk_text.tag_bind(tag_name, '<Enter>', lambda event: event.widget.config(cursor='hand2'))
-            tk_text.tag_bind(tag_name, '<Leave>', lambda event: event.widget.config(cursor=''))
-
-        self.text_widget.configure(state='disabled')
-        self.text_widget.see(ctk.END)
-
-    def format_log_record(self, record: LogRecord) -> str:
-        return f'{record.levelname}: {record.getMessage()}\n'
-
-
-class LibrarySelectorWindow(ctk.CTkToplevel):
-    def __init__(
-        self,
-        master: Any,
-        config: SectionProxy,
-        jf_host: str,
-        jf_api_key: str,
-        jf_username: str,
-        var_library_filter_type: ctk.StringVar,
-        var_selected_libraries: ctk.StringVar,
-    ):
-        super().__init__(master)
-        self.title('Library Selector')
-        self.geometry('200x300')
-        self.minsize(200, 300)
-        self.resizable(True, True)
-        self.transient(master)
-        self.wait_visibility()
-        self.grab_set()
-
-        self.jf_host = jf_host
-        self.jf_api_key = jf_api_key
-        self.jf_username = jf_username
-        self.var_selected_libraries = var_selected_libraries
-        self.checkbox_map: dict[str, ctk.BooleanVar] = {}
-
-        self.button_save_selection = ctk.CTkButton(
-            master=self, text='Save Selection', command=self.save_selection
-        )
-        self.button_save_selection.pack(side='bottom', fill='x', padx=10, pady=(5, 10))
-
-        label_font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
-        self.scroll_frame = ctk.CTkScrollableFrame(
-            master=self,
-            label_text=var_library_filter_type.get(),
-            label_font=label_font,
-        )
-        self.scroll_frame.pack(side='top', fill='both', expand=True, padx=10, pady=(10, 5))
-
-        self.retrieve_libraries(config)
-
-    def retrieve_libraries(self, config: SectionProxy):
-        device_id = get_device_id(config)
-        headers = {
-            'Accept': 'application/json',
-            'Authorization': build_auth_header(device_id, self.jf_api_key),
-        }
-        try:
-            response = requests.get(
-                f'{self.jf_host}/Users', headers=headers, timeout=5, verify=certifi.where()
-            )
-            response.raise_for_status()
-            users_data = response.json()
-
-            user_id = None
-            for user in users_data:
-                if self.jf_username == user.get('Name', ''):
-                    user_id = user.get('Id')
-            if user_id is None:
-                ctk.CTkLabel(self.scroll_frame, text=f'User Not Found: {self.jf_username}').pack()
-                return
-
-            response = requests.get(
-                f'{self.jf_host}/Users/{user_id}/Views',
-                headers=headers,
-                timeout=5,
-                verify=certifi.where(),
-            )
-            response.raise_for_status()
-            views_data = response.json()
-            libraries = views_data.get('Items', [])
-            if not libraries:
-                ctk.CTkLabel(self.scroll_frame, text='No Libraries Found').pack()
-                return
-
-            selected_libraries = [
-                x.strip() for x in self.var_selected_libraries.get().split(',') if x.strip()
-            ]
-            for library in libraries:
-                library_id = library.get('Id')
-                library_name = library.get('Name')
-
-                var_checkbox = ctk.BooleanVar(value=library_id in selected_libraries)
-                checkbox = ctk.CTkCheckBox(
-                    master=self.scroll_frame, text=library_name, variable=var_checkbox
-                )
-                checkbox.pack(anchor='w', pady=5, padx=10)
-
-                self.checkbox_map[library_id] = var_checkbox
-
-        except RequestException as e:
-            logger.error(f'Failed to Retrieve Libraries: {e}')
-            ctk.CTkLabel(self.scroll_frame, text='Error Retrieving Libraries').pack()
-
-    def save_selection(self):
-        library_ids = [library_id for library_id, var in self.checkbox_map.items() if var.get()]
-        self.var_selected_libraries.set(','.join(library_ids))
-        self.destroy()
-
-
-def save_config(
-    ini_path: str,
-    entries: dict[str, dict[str, Any]],
-    checkboxes: dict[str, ctk.CTkCheckBox],
-    var_library_filter_type: ctk.StringVar,
-    var_selected_libraries: ctk.StringVar,
-    var_log_level: ctk.StringVar,
-    var_polling_rate: ctk.StringVar,
-    var_seek_threshold: ctk.StringVar,
-) -> None:
-    config_parser = ConfigParser()
-    config_parser.read(ini_path, encoding='utf-8')
-    for key in (
-        'JELLYFIN_HOST',
-        'JELLYFIN_API_KEY',
-        'JELLYFIN_USERNAME',
-        'TMDB_API_KEY',
-        'POSTER_LANGUAGES',
-    ):
-        config_parser.set('DEFAULT', key, entries[key]['entry'].get())
-    config_parser.set('DEFAULT', 'LIBRARY_FILTER_TYPE', var_library_filter_type.get())
-    config_parser.set('DEFAULT', 'SELECTED_LIBRARIES', var_selected_libraries.get())
-    config_parser.set('DEFAULT', 'POLLING_RATE', var_polling_rate.get().rstrip('s'))
-    config_parser.set('DEFAULT', 'SEEK_THRESHOLD', var_seek_threshold.get().rstrip('s'))
-    config_parser.set('DEFAULT', 'LOG_LEVEL', var_log_level.get())
-
-    media_types = []
-    if checkboxes['MOVIES'].get():
-        media_types.append('Movies')
-    if checkboxes['SHOWS'].get():
-        media_types.append('Shows')
-    if checkboxes['MUSIC'].get():
-        media_types.append('Music')
-    config_parser.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
-
-    for key in (
-        'SHOW_WHEN_PAUSED',
-        'SHOW_SERVER_NAME',
-        'SHOW_JELLYFIN_LOGO',
-        'IMDB_EXTERNAL_URLS',
-        'ALWAYS_USE_TMDB',
-        'TEXTLESS_POSTERS',
-        'SEASON_OVER_SERIES',
-        'ALWAYS_USE_MUSICBRAINZ',
-        'RELEASE_OVER_GROUP',
-        'START_MINIMIZED',
-        'MINIMIZE_ON_CLOSE',
-    ):
-        config_parser.set('DEFAULT', key, str(bool(checkboxes[key].get())).lower())
-
-    with open(ini_path, 'w', encoding='utf-8') as ini_file:
-        config_parser.write(ini_file)
-
-
-def on_click(
-    button_connect: ctk.CTkButton,
-    entries: dict[str, dict[str, Any]],
-    rpc_process: RPCProcess,
-    tray_icon: pystray._base.Icon | None = None,
-    only_disconnect: bool = False,
-) -> None:
-    global button_connect_text
-    if tray_icon is not None:
-        tray_icon.title = f'Jellyfin RPC\n{button_connect_text}ed'
-    if button_connect_text == 'Connect' and not only_disconnect:
-        rpc_process.start()
-        for entry in entries.values():
-            show = '*' if entry['obfuscate'] else ''
-            entry['entry'].configure(state='readonly', show=show)
-            entry['entry'].update()
-        button_connect_text = 'Disconnect'
-        button_connect.configure(text=button_connect_text)
-    else:
-        rpc_process.stop()
-        for entry in entries.values():
-            entry['entry'].configure(state='normal', show='')
-            entry['entry'].update()
-        button_connect_text = 'Connect'
-        button_connect.configure(text=button_connect_text)
-    if tray_icon is not None:
-        tray_icon.update_menu()
-    button_connect.update()
-
-
-def on_maximize(
-    label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, frame_bottom: ctk.CTkFrame, root: ctk.CTk
-) -> None:
-    threading.Thread(
-        target=check_for_updates, args=(label_update, frame_grid, frame_bottom, root), daemon=True
-    ).start()
-    root.after(0, root.deiconify)
-
-
-def on_close(
-    root: ctk.CTk, rpc_process: RPCProcess, tray_icon: pystray._base.Icon | None = None
-) -> None:
-    rpc_process.stop()
-    if tray_icon is not None:
-        tray_icon.visible = False
-        tray_icon.stop()
-    root.destroy()
-
-
-def set_close_behavior(
-    root: ctk.CTk, on_close_callback: Callable[[], None], withdraw: bool
-) -> None:
-    if withdraw and sys.platform != 'linux':
-        root.protocol('WM_DELETE_WINDOW', root.withdraw)
-    else:
-        root.protocol('WM_DELETE_WINDOW', on_close_callback)
+@dataclass
+class LabeledEntry:
+    widget: QLineEdit
+    obfuscate: bool
 
 
 def get_executable_path() -> str:
@@ -432,48 +148,8 @@ def open_file(filepath: str) -> None:
         os.startfile(filepath)
     elif sys.platform == 'darwin':
         subprocess.call(('open', filepath))
-    else:
+    elif sys.platform == 'linux':
         subprocess.call(('xdg-open', filepath))
-
-
-def parse_version(version_tag: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version_tag.lstrip('v').split('.'))
-
-
-def check_for_updates(
-    label_update: ctk.CTkLabel, frame_grid: ctk.CTkFrame, frame_bottom: ctk.CTkFrame, root: ctk.CTk
-) -> None:
-    try:
-        response = requests.get(
-            'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest',
-            timeout=5,
-            verify=certifi.where(),
-        )
-        response.raise_for_status()
-        version_tag = response.json()['tag_name'].lstrip('v')
-        version_tuple = parse_version(version_tag)
-
-        if parse_version(__version__) < version_tuple:
-            label_text = f'Update Available ({__version__} \u2192 {version_tag})'
-            label_font = ctk.CTkFont(family='Roboto', size=14, weight='bold')
-
-            def show_label_update() -> None:
-                label_update.configure(text=label_text, font=label_font)
-                frame_grid.grid(row=1, column=0, sticky='nsew', padx=10, pady=5)
-                frame_bottom.grid(row=2, column=0, sticky='ew', padx=10, pady=10)
-                root.children['!ctkframe'].grid_rowconfigure(0, weight=0)
-                root.children['!ctkframe'].grid_rowconfigure(1, weight=1)
-                root.children['!ctkframe'].grid_rowconfigure(2, weight=0)
-                label_update.grid(row=0, column=0, pady=(10, 5), padx=10, sticky='ew')
-
-                root.update_idletasks()
-                root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
-
-            label_update.after(0, show_label_update)
-
-    except (RequestException, JSONDecodeError, KeyError) as e:
-        logger.warning(f'GitHub Version Check Failed ({type(e).__name__})')
-        logger.debug(e)
 
 
 def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[LogRecord]:
@@ -513,7 +189,7 @@ def setup_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket
         logger.error(f'Singleton Port {singleton_port} Already In Use')
         sys.exit(1)
 
-    def listen_for_focus():
+    def listen_for_focus() -> None:
         while True:
             try:
                 connection, _ = server.accept()
@@ -529,22 +205,892 @@ def setup_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket
     return server
 
 
-def focus_window(root: ctk.CTk) -> None:
-    if root.state() == 'withdrawn' or root.state() == 'iconic':
-        root.deiconify()
-    root.lift()
-    root.focus_force()
-    if sys.platform == 'win32':
-        root.attributes('-topmost', True)
-        root.after_idle(root.attributes, '-topmost', False)
+class RPCProcess:
+    def __init__(
+        self, target: Callable[[Queue[LogRecord]], None], log_queue: Queue[LogRecord]
+    ) -> None:
+        self.target = target
+        self.log_queue = log_queue
+        self.process: mp.Process | None = None
+
+    def start(self) -> None:
+        self.process = mp.Process(target=self.target, args=(self.log_queue,))
+        self.process.start()
+
+    def stop(self) -> None:
+        if self.process is None:
+            return
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join()
+            logger.info('RPC Stopped')
+        self.process = None
+
+    def has_failed(self) -> bool:
+        if self.process is None:
+            return False
+        if self.process.exitcode is None:
+            return False
+        if self.process.exitcode in (0, -15):
+            self.process = None
+            return False
+        logger.error('RPC Crashed')
+        self.process = None
+        return True
+
+
+class UpdateChecker(QThread):
+    update_signal = Signal(str)
+
+    @staticmethod
+    def parse_version(version_tag: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in version_tag.lstrip('v').split('.'))
+
+    def run(self) -> None:
+        try:
+            response = requests.get(
+                'https://api.github.com/repos/kennethsible/jellyfin-rpc/releases/latest',
+                timeout=5,
+                verify=certifi.where(),
+            )
+            response.raise_for_status()
+            version_tag = response.json()['tag_name'].lstrip('v')
+            if self.parse_version(__version__) < self.parse_version(version_tag):
+                self.update_signal.emit(version_tag)
+        except (RequestException, JSONDecodeError, KeyError) as e:
+            logger.warning(f'GitHub Version Check Failed ({type(e).__name__})')
+            logger.debug(e)
+
+
+class SegmentedButton(QWidget):
+    def __init__(self, options: list[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.button_group = QButtonGroup(self)
+        self.button_group.setExclusive(True)
+        self.buttons: dict[str, QPushButton] = {}
+
+        for i, text in enumerate(options):
+            button = QPushButton(text)
+            button.setFixedHeight(28)
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            if i == 0:
+                button.setStyleSheet('border-top-right-radius: 0; border-bottom-right-radius: 0;')
+            else:
+                button.setStyleSheet('border-top-left-radius: 0; border-bottom-left-radius: 0;')
+
+            self.button_group.addButton(button, i)
+            layout.addWidget(button)
+            self.buttons[text] = button
+
+    def set_value(self, value: str) -> None:
+        if value in self.buttons:
+            self.buttons[value].setChecked(True)
+
+    def get_value(self) -> str:
+        button = self.button_group.checkedButton()
+        return button.text() if button else ''
+
+
+class LibrarySelectorWindow(QDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        config: SectionProxy,
+        jf_host: str,
+        jf_api_key: str,
+        jf_username: str,
+        library_filter_type: str,
+        selected_libraries: str,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Library Selector')
+        self.resize(200, 300)
+        self.setModal(True)
+
+        self.jf_host = jf_host
+        self.jf_api_key = jf_api_key
+        self.jf_username = jf_username
+        self.selected_libraries = selected_libraries
+        self.checkbox_map: dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+        title = QLabel(library_filter_type)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet('font-weight: bold; font-size: 14px; margin-bottom: 8px;')
+        layout.addWidget(title)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll_area.setWidget(self.scroll_content)
+        layout.addWidget(self.scroll_area)
+
+        self.button_save = QPushButton('Save Selection')
+        self.button_save.setFixedHeight(28)
+        self.button_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button_save.clicked.connect(self.save_selection)
+        layout.addWidget(self.button_save)
+
+        self.retrieve_libraries(config)
+
+    def retrieve_libraries(self, config: SectionProxy) -> None:
+        device_id = get_device_id(config)
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': build_auth_header(device_id, self.jf_api_key),
+        }
+        try:
+            response = requests.get(
+                f'{self.jf_host}/Users', headers=headers, timeout=5, verify=certifi.where()
+            )
+            response.raise_for_status()
+            users_data = response.json()
+
+            user_id = None
+            for user in users_data:
+                if self.jf_username == user.get('Name', ''):
+                    user_id = user.get('Id')
+            if user_id is None:
+                self.scroll_layout.addWidget(QLabel(f'User Not Found: {self.jf_username}'))
+                return
+
+            response = requests.get(
+                f'{self.jf_host}/Users/{user_id}/Views',
+                headers=headers,
+                timeout=5,
+                verify=certifi.where(),
+            )
+            response.raise_for_status()
+            if not (libraries := response.json().get('Items', [])):
+                self.scroll_layout.addWidget(QLabel('No Libraries Found'))
+                return
+
+            selected_list = [x.strip() for x in self.selected_libraries.split(',') if x.strip()]
+            for library in libraries:
+                library_id = library.get('Id')
+                checkbox = QCheckBox(library.get('Name'))
+                checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+                checkbox.setChecked(library_id in selected_list)
+                self.scroll_layout.addWidget(checkbox)
+                self.checkbox_map[library_id] = checkbox
+
+        except RequestException as e:
+            logger.error(f'Failed to Retrieve Libraries: {e}')
+            self.scroll_layout.addWidget(QLabel('Error Retrieving Libraries'))
+
+    def save_selection(self):
+        self.selected_libraries = ','.join(
+            [
+                library_id
+                for library_id, checkbox in self.checkbox_map.items()
+                if checkbox.isChecked()
+            ]
+        )
+        self.accept()
+
+
+class JellyfinRPCWindow(QWidget):
+    def __init__(
+        self,
+        ini_path: str,
+        log_path: str,
+        config: SectionProxy,
+        gui_queue: queue.Queue[str],
+        log_queue: Queue[LogRecord],
+        png_bundle_path: str,
+    ) -> None:
+        super().__init__()
+        self.ipc_server: socket.socket | None = None
+
+        self.ini_path = ini_path
+        self.log_path = log_path
+        self.config = config
+        self.gui_queue = gui_queue
+        self.log_queue = log_queue
+        self.png_bundle_path = png_bundle_path
+
+        self.rpc_process = RPCProcess(
+            functools.partial(start_discord_rpc, ini_path, log_path), log_queue
+        )
+        self.is_connected = False
+
+        self.entries: dict[str, LabeledEntry] = {}
+        self.checkboxes: dict[str, QCheckBox] = {}
+        self.advanced_vars: dict[str, QLineEdit] = {}
+
+        self.create_window()
+        self.load_config()
+        self.setup_tray()
+
+        self.gui_timer = QTimer(self)
+        self.gui_timer.timeout.connect(self.poll_gui_queue)
+        self.gui_timer.start(100)
+
+        self.log_timer = QTimer(self)
+        self.log_timer.timeout.connect(self.poll_log_queue)
+        self.log_timer.start(100)
+
+        self.status_timer = QTimer(self)
+        self.status_timer.timeout.connect(self.poll_process_status)
+        self.status_timer.start(1000)
+
+        self.update_checker = UpdateChecker(self)
+        self.update_checker.update_signal.connect(self.show_update_banner)
+        self.update_checker.start()
+
+        if self.entries['JELLYFIN_HOST'].widget.text():
+            self.toggle_connection()
+            if not self.checkboxes['START_MINIMIZED'].isChecked():
+                self.show()
+        else:
+            self.show()
+            logger.info('Enter Host and Click Connect')
+
+    def create_window(self):
+        self.setWindowTitle(f'Jellyfin RPC v{__version__}')
+        self.setMinimumSize(850, 560)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(25, 10, 25, 18)
+
+        self.label_update = QLabel('')
+        self.label_update.setOpenExternalLinks(True)
+        self.label_update.setStyleSheet('font-weight: bold; font-size: 14px;')
+        self.label_update.hide()
+        main_layout.addWidget(self.label_update, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        grid_layout = QHBoxLayout()
+        grid_layout.setSpacing(35)
+        main_layout.addLayout(grid_layout, stretch=1)
+
+        col1 = QVBoxLayout()
+        col1.setSpacing(8)
+        col2 = QVBoxLayout()
+        col2.setSpacing(8)
+        col3 = QVBoxLayout()
+        col3.setSpacing(8)
+
+        grid_layout.addLayout(col1, stretch=1)
+        grid_layout.addLayout(col2, stretch=1)
+        grid_layout.addLayout(col3, stretch=1)
+
+        col1.addWidget(self.create_header('Jellyfin Settings'))
+        self.entries['JELLYFIN_HOST'] = self.create_labeled_entry(col1, 'Jellyfin Host')
+        self.entries['JELLYFIN_API_KEY'] = self.create_labeled_entry(
+            col1, 'Jellyfin API Key', 'Leave Blank for Quick Connect', obfuscate=True
+        )
+        self.entries['JELLYFIN_USERNAME'] = self.create_labeled_entry(
+            col1, 'Jellyfin Username', 'Leave Blank for Quick Connect'
+        )
+
+        library_layout = QVBoxLayout()
+        library_layout.setSpacing(6)
+
+        self.segmented_filter_type = SegmentedButton(['Denylist', 'Allowlist'])
+        self.segmented_filter_type.button_group.buttonClicked.connect(self.on_setting_changed)
+        library_layout.addWidget(self.segmented_filter_type)
+
+        button_select_libraries = QPushButton('Select Libraries')
+        button_select_libraries.setFixedHeight(28)
+        button_select_libraries.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_select_libraries.clicked.connect(self.select_libraries)
+        library_layout.addWidget(button_select_libraries)
+
+        col1.addLayout(library_layout)
+
+        self.text_log = QTextBrowser()
+        self.text_log.setOpenExternalLinks(True)
+        col1.addWidget(self.text_log, stretch=1)
+
+        col2.addWidget(self.create_header('Poster Settings'))
+        self.entries['TMDB_API_KEY'] = self.create_labeled_entry(
+            col2, 'TMDB API Key', 'Leave Blank to Disable', obfuscate=True
+        )
+        self.entries['POSTER_LANGUAGES'] = self.create_labeled_entry(
+            col2, 'Poster Language(s)', 'Leave Blank to Disable'
+        )
+
+        self.create_checkbox(col2, 'ALWAYS_USE_TMDB', 'Always Use The Movie Database')
+        self.create_checkbox(col2, 'SEASON_OVER_SERIES', 'Prefer Season Poster Over Series')
+        self.create_checkbox(col2, 'TEXTLESS_POSTERS', 'Prefer Textless TMDB Posters')
+
+        col2.addWidget(self.create_header('Album Cover Settings'))
+        self.create_checkbox(col2, 'ALWAYS_USE_MUSICBRAINZ', 'Always Use The Cover Art Archive')
+        self.create_checkbox(col2, 'RELEASE_OVER_GROUP', 'Prefer Release Cover Over Group')
+
+        col2.addWidget(self.create_header('Media Settings'))
+        self.create_checkbox(col2, 'MOVIES', 'Show Watching Activity for Movies')
+        self.create_checkbox(col2, 'SHOWS', 'Show Watching Activity for Shows')
+        self.create_checkbox(col2, 'MUSIC', 'Show Listening Activity for Music')
+        col2.addStretch()
+
+        col3.addWidget(self.create_header('Activity Settings'))
+        self.create_checkbox(col3, 'SHOW_WHEN_PAUSED', 'Show Activity While Paused')
+        self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Jellyfin Logo (Small Image)')
+        self.create_checkbox(col3, 'SHOW_SERVER_NAME', 'Show Jellyfin Server Name')
+        self.create_checkbox(col3, 'IMDB_EXTERNAL_URLS', 'Prefer IMDb for External URLs')
+
+        col3.addWidget(self.create_header('System Settings'))
+        if sys.platform in ('win32', 'linux'):  # TODO
+            checkbox_startup = QCheckBox('Open Jellyfin RPC on Startup')
+            checkbox_startup.setCursor(Qt.CursorShape.PointingHandCursor)
+            checkbox_startup.setChecked(get_startup_status())
+            checkbox_startup.toggled.connect(set_startup_status)
+            col3.addWidget(checkbox_startup)
+
+        self.create_checkbox(col3, 'START_MINIMIZED', 'Start Minimized (If Connected)')
+        self.create_checkbox(col3, 'MINIMIZE_ON_CLOSE', 'Close Button Minimizes to Tray')
+
+        col3.addWidget(self.create_header('Advanced Settings'))
+
+        advanced_wrapper = QHBoxLayout()
+        advanced_wrapper.addStretch()
+
+        advanced_layout = QGridLayout()
+        advanced_layout.setHorizontalSpacing(8)
+        advanced_layout.setVerticalSpacing(8)
+        advanced_wrapper.addLayout(advanced_layout)
+
+        advanced_wrapper.addStretch()
+        col3.addLayout(advanced_wrapper)
+
+        self.advanced_vars['POLLING_RATE'] = self.create_spinbox_row(
+            advanced_layout, 0, 'Polling Rate'
+        )
+        self.advanced_vars['SEEK_THRESHOLD'] = self.create_spinbox_row(
+            advanced_layout, 1, 'Seek Threshold'
+        )
+
+        label_log_level = QLabel('Console Log Level')
+        label_log_level.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        advanced_layout.addWidget(label_log_level, 2, 0)
+
+        self.checkbox_log_level = QComboBox()
+        self.checkbox_log_level.setFixedHeight(28)
+        self.checkbox_log_level.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.checkbox_log_level.addItems(
+            ['DEBUG', 'VERBOSE', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        )
+        self.checkbox_log_level.currentTextChanged.connect(self.on_setting_changed)
+        advanced_layout.addWidget(self.checkbox_log_level, 2, 1, 1, 3)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        button_open_ini = QPushButton('Open INI')
+        button_open_ini.setFixedSize(100, 28)
+        button_open_ini.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_open_ini.clicked.connect(lambda: open_file(self.ini_path))
+
+        button_open_log = QPushButton('Open Log')
+        button_open_log.setFixedSize(100, 28)
+        button_open_log.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_open_log.clicked.connect(lambda: open_file(self.log_path))
+
+        button_layout.addWidget(button_open_ini)
+        button_layout.addWidget(button_open_log)
+
+        col3.addSpacing(6)
+        col3.addLayout(button_layout)
+        col3.addStretch()
+
+        main_layout.addSpacing(6)
+        self.button_connect = QPushButton('Connect')
+        self.button_connect.setFixedSize(130, 28)
+        self.button_connect.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button_connect.clicked.connect(self.toggle_connection)
+        main_layout.addWidget(self.button_connect, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def create_header(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(
+            'font-weight: bold; font-size: 15px; margin-top: 10px; margin-bottom: 4px;'
+        )
+        return label
+
+    def create_labeled_entry(
+        self, layout: QVBoxLayout, label_text: str, placeholder: str = '', obfuscate: bool = False
+    ) -> LabeledEntry:
+        container = QVBoxLayout()
+        container.setSpacing(2)
+        container.setContentsMargins(0, 0, 0, 0)
+        container.addWidget(QLabel(label_text))
+
+        entry = QLineEdit()
+        entry.setFixedHeight(28)
+        entry.setPlaceholderText(placeholder)
+        if obfuscate:
+            entry.setEchoMode(QLineEdit.EchoMode.Password)
+        container.addWidget(entry)
+
+        layout.addLayout(container)
+        return LabeledEntry(entry, obfuscate)
+
+    def create_checkbox(self, layout: QVBoxLayout, key: str, text: str) -> QCheckBox:
+        checkbox = QCheckBox(text)
+        checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        checkbox.clicked.connect(self.on_setting_changed)
+        layout.addWidget(checkbox)
+        self.checkboxes[key] = checkbox
+        return checkbox
+
+    def create_spinbox_row(self, layout: QGridLayout, row: int, text: str) -> QLineEdit:
+        layout.addWidget(QLabel(text), row, 0, Qt.AlignmentFlag.AlignRight)
+
+        button_dec = QPushButton('-')
+        button_dec.setObjectName('spin_button')
+        button_dec.setFixedSize(28, 28)
+        button_dec.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        entry = QLineEdit()
+        entry.setFixedSize(50, 28)
+        entry.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        entry.setReadOnly(True)
+
+        button_inc = QPushButton('+')
+        button_inc.setObjectName('spin_button')
+        button_inc.setFixedSize(28, 28)
+        button_inc.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def adjust(offset: int) -> None:
+            old_value = int(entry.text().rstrip('s'))
+            new_value = max(1, old_value + offset)
+            entry.setText(f'{new_value}s')
+            self.on_setting_changed()
+
+        button_dec.clicked.connect(lambda: adjust(-1))
+        button_inc.clicked.connect(lambda: adjust(1))
+
+        layout.addWidget(button_dec, row, 1)
+        layout.addWidget(entry, row, 2)
+        layout.addWidget(button_inc, row, 3)
+        return entry
+
+    def load_config(self) -> None:
+        self.entries['JELLYFIN_HOST'].widget.setText(self.config.get('JELLYFIN_HOST', ''))
+        self.entries['JELLYFIN_API_KEY'].widget.setText(self.config.get('JELLYFIN_API_KEY', ''))
+        self.entries['JELLYFIN_USERNAME'].widget.setText(self.config.get('JELLYFIN_USERNAME', ''))
+        self.entries['TMDB_API_KEY'].widget.setText(self.config.get('TMDB_API_KEY', ''))
+        self.entries['POSTER_LANGUAGES'].widget.setText(self.config.get('POSTER_LANGUAGES', ''))
+
+        library_filter_type = self.config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').capitalize()
+        library_filter_type = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}.get(
+            library_filter_type, library_filter_type
+        )
+        self.segmented_filter_type.set_value(str(library_filter_type))
+        self.selected_libraries = self.config.get('SELECTED_LIBRARIES', '')
+
+        media_types = parse_delimited_list(self.config, 'MEDIA_TYPES')
+        self.checkboxes['MOVIES'].setChecked('Movies' in media_types)
+        self.checkboxes['SHOWS'].setChecked('Shows' in media_types)
+        self.checkboxes['MUSIC'].setChecked('Music' in media_types)
+
+        checkbox_vars = [
+            ('SHOW_WHEN_PAUSED', True),
+            ('SHOW_SERVER_NAME', False),
+            ('SHOW_JELLYFIN_LOGO', True),
+            ('IMDB_EXTERNAL_URLS', False),
+            ('ALWAYS_USE_TMDB', False),
+            ('TEXTLESS_POSTERS', False),
+            ('SEASON_OVER_SERIES', False),
+            ('ALWAYS_USE_MUSICBRAINZ', False),
+            ('RELEASE_OVER_GROUP', False),
+            ('START_MINIMIZED', True),
+            ('MINIMIZE_ON_CLOSE', True),
+        ]
+        for key, default in checkbox_vars:
+            self.checkboxes[key].setChecked(self.config.getboolean(key, default))
+
+        self.advanced_vars['POLLING_RATE'].setText(
+            f'{max(1, self.config.getint("POLLING_RATE", 5))}s'
+        )
+        self.advanced_vars['SEEK_THRESHOLD'].setText(
+            f'{max(1, self.config.getint("SEEK_THRESHOLD", 10))}s'
+        )
+
+        log_level = self.config.get('LOG_LEVEL', 'INFO').upper()
+        self.checkbox_log_level.setCurrentText(log_level)
+
+    def save_config(self) -> None:
+        config_parser = ConfigParser()
+        config_parser.read(self.ini_path, encoding='utf-8')
+
+        for key in [
+            'JELLYFIN_HOST',
+            'JELLYFIN_API_KEY',
+            'JELLYFIN_USERNAME',
+            'TMDB_API_KEY',
+            'POSTER_LANGUAGES',
+        ]:
+            config_parser.set('DEFAULT', key, self.entries[key].widget.text())
+
+        config_parser.set('DEFAULT', 'LIBRARY_FILTER_TYPE', self.segmented_filter_type.get_value())
+        config_parser.set('DEFAULT', 'SELECTED_LIBRARIES', self.selected_libraries)
+        config_parser.set(
+            'DEFAULT', 'POLLING_RATE', self.advanced_vars['POLLING_RATE'].text().rstrip('s')
+        )
+        config_parser.set(
+            'DEFAULT', 'SEEK_THRESHOLD', self.advanced_vars['SEEK_THRESHOLD'].text().rstrip('s')
+        )
+        config_parser.set('DEFAULT', 'LOG_LEVEL', self.checkbox_log_level.currentText())
+
+        media_types = [
+            key.capitalize()
+            for key in ['MOVIES', 'SHOWS', 'MUSIC']
+            if self.checkboxes[key].isChecked()
+        ]
+        config_parser.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
+
+        for key in self.checkboxes:
+            if key not in ('MOVIES', 'SHOWS', 'MUSIC'):
+                config_parser.set('DEFAULT', key, str(self.checkboxes[key].isChecked()).lower())
+
+        with open(self.ini_path, 'w', encoding='utf-8') as f:
+            config_parser.write(f)
+
+    def select_libraries(self) -> None:
+        jf_host = self.entries['JELLYFIN_HOST'].widget.text().rstrip('/')
+        if not jf_host:
+            logger.error('Missing Jellyfin Host')
+            return
+
+        jf_api = self.entries['JELLYFIN_API_KEY'].widget.text()
+        if not jf_api:
+            logger.error('Missing Jellyfin API Key')
+            return
+
+        selector = LibrarySelectorWindow(
+            self,
+            self.config,
+            jf_host,
+            jf_api,
+            self.entries['JELLYFIN_USERNAME'].widget.text(),
+            self.segmented_filter_type.get_value(),
+            self.selected_libraries,
+        )
+        if selector.exec():
+            self.selected_libraries = selector.selected_libraries
+            self.on_setting_changed()
+
+    def on_setting_changed(self):
+        if self.sender() in (
+            self.checkboxes['START_MINIMIZED'],
+            self.checkboxes.get('MINIMIZE_ON_CLOSE'),
+        ):
+            self.save_config()
+            return
+
+        self.save_config()
+        if self.is_connected:
+            self.toggle_connection()
+
+        if self.sender() == self.checkbox_log_level:
+            logger.setLevel(get_valid_level(self.checkbox_log_level.currentText(), logging.INFO))
+
+    def toggle_connection(self) -> None:
+        self.save_config()
+        if not self.is_connected:
+            self.rpc_process.start()
+            for entry_data in self.entries.values():
+                entry_data.widget.setReadOnly(True)
+                entry_data.widget.setEnabled(False)
+                if entry_data.obfuscate:
+                    entry_data.widget.setEchoMode(QLineEdit.EchoMode.Password)
+            self.button_connect.setText('Disconnect')
+            if hasattr(self, 'tray_icon'):
+                self.action_connect.setText('Disconnect')
+                self.tray_icon.setToolTip('Jellyfin RPC\nConnected')
+            self.is_connected = True
+        else:
+            self.rpc_process.stop()
+            for entry_data in self.entries.values():
+                entry_data.widget.setReadOnly(False)
+                entry_data.widget.setEnabled(True)
+                if entry_data.obfuscate:
+                    entry_data.widget.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.button_connect.setText('Connect')
+            if hasattr(self, 'tray_icon'):
+                self.action_connect.setText('Connect')
+                self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
+            self.is_connected = False
+
+    def setup_tray(self) -> None:
+        icon = QIcon(self.png_bundle_path)
+        if icon.isNull():
+            icon = self.style().standardIcon(self.style().StandardPixmap.SP_TitleBarMenuButton)
+
+        menu = QMenu(self)
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
+
+        self.action_connect = menu.addAction('Connect')
+        font = self.action_connect.font()
+        font.setBold(True)
+        self.action_connect.setFont(font)
+        self.action_connect.triggered.connect(self.toggle_connection)
+
+        window_text = 'Hide' if self.isVisible() and not self.isMinimized() else 'Show'
+        self.action_window = menu.addAction(f'{window_text} Window')
+        self.action_window.triggered.connect(self.toggle_window)
+
+        menu.addSeparator()
+        action_quit = menu.addAction('Quit Jellyfin RPC')
+        action_quit.triggered.connect(self.quit_window)
+
+        if sys.platform == 'darwin':
+            self.tray_menu = menu
+        else:
+            self.tray_icon.setContextMenu(menu)
+
+        self.tray_icon.activated.connect(self.activate_tray)
+        self.tray_icon.show()
+
+    def activate_tray(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.maximize_window()
+        elif (
+            reason == QSystemTrayIcon.ActivationReason.Context
+            and sys.platform == 'darwin'
+            and hasattr(self, 'tray_menu')
+        ):
+            from PySide6.QtGui import QCursor
+
+            self.tray_menu.exec(QCursor.pos())
+
+    def show_update_banner(self, version_tag: str) -> None:
+        releases_url = 'https://github.com/kennethsible/jellyfin-rpc/releases'
+        html_content = f'Update Available ({__version__} &rarr; {version_tag})'
+        html_link = f'<a href="{releases_url}" style="color: #3DAEE9; text-decoration: none;">{html_content}</a>'
+        self.label_update.setText(html_link)
+        self.label_update.show()
+
+    def poll_log_queue(self) -> None:
+        color_map = {
+            'DEBUG': '#95A5A6',
+            'VERBOSE': '#7DC2E7',
+            'INFO': '#3DAEE9',
+            'WARNING': '#F67400',
+            'ERROR': '#DA4453',
+            'CRITICAL': '#DA4453',
+        }
+        while not self.log_queue.empty():
+            try:
+                record = self.log_queue.get_nowait()
+                message = html.escape(record.getMessage())
+                message = re.sub(
+                    r'(https?://\S+)',
+                    r'<a href="\1" style="color:#1f6aa5; text-decoration:none;">\1</a>',
+                    message,
+                )
+                html_str = f'<font color="{color_map.get(record.levelname, "#ffffff")}">{record.levelname}</font>: {message}'
+
+                self.text_log.moveCursor(QTextCursor.MoveOperation.End)
+                self.text_log.insertHtml(html_str + '<br>')
+                self.text_log.moveCursor(QTextCursor.MoveOperation.End)
+            except (queue.Empty, RuntimeError):
+                pass
+
+    def poll_process_status(self) -> None:
+        status_text = self.text_log.toPlainText()
+        if (
+            not self.entries['JELLYFIN_API_KEY'].widget.text()
+            and 'via Quick Connect' in status_text
+        ):
+            config_parser = load_config(self.ini_path)
+            jf_api = config_parser.get('JELLYFIN_API_KEY', '')
+            jf_user = config_parser.get('JELLYFIN_USERNAME', '')
+            if jf_api and jf_user:
+                self.entries['JELLYFIN_API_KEY'].widget.setText(jf_api)
+                self.entries['JELLYFIN_USERNAME'].widget.setText(jf_user)
+
+        if self.rpc_process.has_failed():
+            self.toggle_connection()
+
+    def poll_gui_queue(self) -> None:
+        try:
+            message = self.gui_queue.get_nowait()
+            if message == 'CONNECT':
+                self.toggle_connection()
+            elif message in ('MAXIMIZE', 'FOCUS'):
+                self.maximize_window()
+            elif message == 'QUIT':
+                self.quit_window()
+        except queue.Empty:
+            pass
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if (
+            self.checkboxes.get('MINIMIZE_ON_CLOSE')
+            and self.checkboxes['MINIMIZE_ON_CLOSE'].isChecked()
+            and event.spontaneous()
+        ):
+            self.action_window.setText('Show Window')
+            event.ignore()
+            self.hide()
+        else:
+            self.quit_window()
+
+    def maximize_window(self) -> None:
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+        self.action_window.setText('Hide Window')
+
+    def toggle_window(self) -> None:
+        if self.isVisible() and not self.isMinimized():
+            self.hide()
+            self.action_window.setText('Show Window')
+        else:
+            self.maximize_window()
+
+    def quit_window(self) -> None:
+        self.save_config()
+        self.rpc_process.stop()
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+            self.tray_icon.deleteLater()
+        QApplication.quit()
+        os._exit(0)
+
+
+def apply_theme(app: QApplication) -> None:
+    app.setStyle('Fusion')
+    palette = QPalette()
+    background_color = QColor(36, 36, 36)
+    text_color = QColor(220, 228, 232)
+
+    palette.setColor(QPalette.ColorRole.Window, background_color)
+    palette.setColor(QPalette.ColorRole.WindowText, text_color)
+    palette.setColor(QPalette.ColorRole.Base, QColor(43, 43, 43))
+    palette.setColor(QPalette.ColorRole.AlternateBase, background_color)
+    palette.setColor(QPalette.ColorRole.ToolTipBase, background_color)
+    palette.setColor(QPalette.ColorRole.ToolTipText, text_color)
+    palette.setColor(QPalette.ColorRole.Text, text_color)
+    palette.setColor(QPalette.ColorRole.Button, QColor(52, 54, 56))
+    palette.setColor(QPalette.ColorRole.ButtonText, text_color)
+    palette.setColor(QPalette.ColorRole.Link, QColor(31, 106, 165))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(31, 106, 165))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    app.setPalette(palette)
+
+    app.setStyleSheet("""
+        QWidget { 
+            font-family: "Roboto", "Segoe UI", Arial, sans-serif; 
+            font-size: 13px; 
+        }
+        QLineEdit, QComboBox { 
+            background-color: #343638; 
+            border: 1px solid #565b5e; 
+            border-radius: 4px; 
+            padding: 4px 8px; 
+            color: #dce4e8; 
+        }
+        QLineEdit:disabled, QComboBox:disabled { 
+            background-color: #2a2d2e; 
+            color: #7a8489; 
+        }
+        QPushButton { 
+            background-color: #1f6aa5; 
+            border-radius: 4px; 
+            padding: 6px 12px; 
+            color: white; 
+            font-weight: bold; 
+        }
+        QPushButton:hover { 
+            background-color: #144870; 
+        }
+        QPushButton:disabled { 
+            background-color: #2a2d2e; 
+            color: #7a8489; 
+        }
+        QPushButton#spin_button {
+            padding: 0px;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        SegmentedButton QPushButton {
+            background-color: #2b2b2b;
+            border: 1px solid #565b5e;
+            color: #a2a8ab;
+            font-weight: normal;
+            padding: 4px 0px;
+        }
+        SegmentedButton QPushButton:hover:!checked {
+            background-color: #343638;
+            color: #ffffff;
+        }
+        SegmentedButton QPushButton:checked {
+            background-color: #1f6aa5;
+            border: 1px solid #1f6aa5;
+            color: #ffffff;
+            font-weight: bold;
+        }
+        QCheckBox { 
+            spacing: 7px;
+            color: #dce4e8;
+        }
+        QCheckBox:hover { 
+            color: #ffffff; 
+        }
+        QCheckBox::indicator { 
+            width: 20px; 
+            height: 20px; 
+            border-radius: 4px; 
+            border: 2px solid #565b5e; 
+            background-color: #343638; 
+        }
+        QCheckBox::indicator:hover { 
+            border-color: #3daee9; 
+        }
+        QCheckBox::indicator:checked { 
+            background-color: #1f6aa5; 
+            border: 2px solid #1f6aa5; 
+        }
+        QCheckBox::indicator:checked:hover { 
+            background-color: #2980b9; 
+            border-color: #2980b9; 
+        }
+        QTextBrowser { 
+            background-color: #2b2b2b; 
+            border-radius: 4px; 
+            border: 1px solid #565b5e; 
+            padding: 6px; 
+        }
+        QScrollBar:vertical { 
+            background: #242424; 
+            width: 12px; 
+            margin: 0px; 
+        }
+        QScrollBar::handle:vertical { 
+            background: #565b5e; 
+            min-height: 20px; 
+            border-radius: 6px; 
+            margin: 2px; 
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { 
+            height: 0px; 
+        }
+    """)
 
 
 def main() -> None:
+    app = QApplication(sys.argv)
+    apply_theme(app)
+
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
+    png_name = 'icon_menubar.png' if sys.platform == 'darwin' else 'icon.png'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
     ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
-    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'icon.png'))
-    ico_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'icon.ico'))
+    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, png_name))
     os.chdir(os.path.dirname(get_executable_path()))
 
     data_dir = ''
@@ -557,12 +1103,14 @@ def main() -> None:
     else:
         root_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
         data_dir = os.path.join(root_dir, 'jellyfin-rpc')
+
     if data_dir:
         os.makedirs(data_dir, exist_ok=True)
         ini_path = os.path.join(data_dir, ini_name)
         log_path = os.path.join(data_dir, log_name)
     else:
         ini_path, log_path = ini_name, log_name
+
     if not os.path.isfile(ini_path):
         if data_dir and os.path.isfile(ini_name):
             logger.info(f'Migrating INI to {ini_path}')
@@ -577,608 +1125,19 @@ def main() -> None:
     gui_queue: queue.Queue[str] = queue.Queue()
     ipc_server = setup_ipc_server(gui_queue, singleton_port)
 
-    jf_host = config.get('JELLYFIN_HOST', '')
-    jf_api_key = config.get('JELLYFIN_API_KEY', '')
-    jf_username = config.get('JELLYFIN_USERNAME', '')
-
-    show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
-    show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
-    show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
-    imdb_external_urls = config.getboolean('IMDB_EXTERNAL_URLS', False)
-
-    tmdb_api_key = config.get('TMDB_API_KEY', '')
-    poster_languages = config.get('POSTER_LANGUAGES', '')
-    always_use_tmdb = config.getboolean('ALWAYS_USE_TMDB', False)
-    textless_posters = config.getboolean('TEXTLESS_POSTERS', False)
-    season_over_series = config.getboolean('SEASON_OVER_SERIES', False)
-
-    always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
-    release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
-
-    FILTER_TYPE_MAP = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}
-    library_filter_type = config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').capitalize()
-    library_filter_type = FILTER_TYPE_MAP.get(library_filter_type, library_filter_type)
-    selected_libraries = config.get('SELECTED_LIBRARIES', '')
-
-    start_minimized = config.getboolean('START_MINIMIZED', True)
-    minimize_on_close = config.getboolean('MINIMIZE_ON_CLOSE', True)
-
-    polling_rate = max(1, config.getint('POLLING_RATE', 5))
-    seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
 
-    color_theme = 'dark' if sys.platform == 'linux' else 'system'
-    appearance_mode = config.get('APPEARANCE_MODE', color_theme)
-    ctk.set_appearance_mode(appearance_mode)
-
-    root = ctk.CTk(className='jellyfin-rpc')
-    root.title(f'Jellyfin RPC v{__version__}')
-    root.rowconfigure(0, weight=1)
-    root.columnconfigure(0, weight=1)
-
-    frame_main = ctk.CTkFrame(master=root)
-    frame_main.grid(row=0, column=0, sticky='nsew')
-    frame_main.grid_rowconfigure(0, weight=1)
-    frame_main.grid_rowconfigure(1, weight=0)
-    frame_main.grid_columnconfigure(0, weight=1)
-
-    frame_grid = ctk.CTkFrame(master=frame_main, fg_color='transparent')
-    frame_grid.grid(row=0, column=0, sticky='nsew', padx=10, pady=5)
-    frame_grid.grid_rowconfigure(0, weight=1)
-    frame_grid.grid_columnconfigure((0, 1, 2), weight=1, uniform='column')
-
-    frame_bottom = ctk.CTkFrame(master=frame_main, fg_color='transparent')
-    frame_bottom.grid(row=1, column=0, sticky='ew', padx=10, pady=10)
-
-    col1 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
-    col1.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
-    col2 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
-    col2.grid(row=0, column=1, sticky='nsew', padx=5)
-    col3 = ctk.CTkFrame(master=frame_grid, fg_color='transparent')
-    col3.grid(row=0, column=2, sticky='nsew', padx=(5, 0))
-
-    label_update = ctk.CTkLabel(master=frame_main, cursor='hand2')
-    label_update.bind(
-        '<Button-1>',
-        lambda _: webbrowser.open_new_tab('https://github.com/kennethsible/jellyfin-rpc/releases'),
+    rpc_window = JellyfinRPCWindow(
+        ini_path, log_path, config, gui_queue, log_queue, png_bundle_path
     )
-
-    threading.Thread(
-        target=check_for_updates, args=(label_update, frame_grid, frame_bottom, root), daemon=True
-    ).start()
-
-    font_header = ctk.CTkFont(family='Roboto', size=14, weight='bold')
-    font_label = ctk.CTkFont(size=12)
-
-    label_jellyfin_settings = ctk.CTkLabel(master=col1, text='Jellyfin Settings', font=font_header)
-    label_jellyfin_settings.pack(pady=(10, 0), padx=10)
-
-    label_host = ctk.CTkLabel(master=col1, text='Jellyfin Host', font=font_label)
-    label_host.pack(anchor='w', padx=10)
-
-    entry_jf_host = ctk.CTkEntry(master=col1)
-    if jf_host:
-        entry_jf_host.insert(0, jf_host)
-    entry_jf_host.pack(pady=(0, 5), padx=10, fill='x')
-
-    label_jf_api_key = ctk.CTkLabel(master=col1, text='Jellyfin API Key', font=font_label)
-    label_jf_api_key.pack(anchor='w', padx=10)
-
-    entry_jf_api_key = ctk.CTkEntry(master=col1, placeholder_text='Leave Blank for Quick Connect')
-    if jf_api_key:
-        entry_jf_api_key.insert(0, jf_api_key)
-    entry_jf_api_key.pack(pady=(0, 5), padx=10, fill='x')
-
-    label_jf_username = ctk.CTkLabel(master=col1, text='Jellyfin Username', font=font_label)
-    label_jf_username.pack(anchor='w', padx=10)
-
-    entry_jf_username = ctk.CTkEntry(master=col1, placeholder_text='Leave Blank for Quick Connect')
-    if jf_username:
-        entry_jf_username.insert(0, jf_username)
-    entry_jf_username.pack(pady=(0, 5), padx=10, fill='x')
-
-    def change_library_filter_type(value: str) -> None:
-        var_library_filter_type.set(value)
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    var_library_filter_type = ctk.StringVar(value=library_filter_type.capitalize())
-    segmented_library_filter_type = ctk.CTkSegmentedButton(
-        master=col1,
-        values=['Denylist', 'Allowlist'],
-        variable=var_library_filter_type,
-        command=lambda value: change_library_filter_type(value),
-    )
-    segmented_library_filter_type.pack(pady=(10, 0), padx=10, fill='x')
-    var_selected_libraries = ctk.StringVar(value=selected_libraries)
-
-    def select_libraries() -> None:
-        jf_host_str = entry_jf_host.get().rstrip('/')
-        if not jf_host_str:
-            logger.error('Missing Jellyfin Host')
-            return
-        jf_api_key_str = entry_jf_api_key.get()
-        if not jf_api_key_str:
-            logger.error('Missing Jellyfin API Key')
-            return
-        jf_username_str = entry_jf_username.get()
-
-        LibrarySelectorWindow(
-            root,
-            config,
-            jf_host_str,
-            jf_api_key_str,
-            jf_username_str,
-            var_library_filter_type,
-            var_selected_libraries,
-        )
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    button_select_libraries = ctk.CTkButton(
-        master=col1, text='Select Libraries', command=select_libraries
-    )
-    button_select_libraries.pack(pady=5, padx=10, fill='x')
-
-    textbox_status_monitor = ctk.CTkTextbox(master=col1, height=100)
-    textbox_status_monitor.configure(state='disabled')
-    textbox_status_monitor.pack(pady=(10, 0), padx=10, fill='both', expand=True)
-
-    label_poster_settings = ctk.CTkLabel(master=col2, text='Poster Settings', font=font_header)
-    label_poster_settings.pack(pady=(10, 0), padx=10)
-
-    label_tmdb_api_key = ctk.CTkLabel(master=col2, text='TMDB API Key', font=font_label)
-    label_tmdb_api_key.pack(anchor='w', padx=10)
-
-    entry_tmdb_api_key = ctk.CTkEntry(master=col2, placeholder_text='Leave Blank to Disable')
-    if tmdb_api_key:
-        entry_tmdb_api_key.insert(0, tmdb_api_key)
-    entry_tmdb_api_key.pack(pady=(0, 5), padx=10, fill='x')
-
-    label_languages = ctk.CTkLabel(master=col2, text='Poster Language(s)')
-    label_languages.pack(anchor='w', padx=10)
-
-    entry_languages = ctk.CTkEntry(master=col2, placeholder_text='Leave Blank to Disable')
-    if poster_languages:
-        entry_languages.insert(0, poster_languages)
-    entry_languages.pack(pady=(0, 5), padx=10, fill='x')
-
-    var_always_use_tmdb = ctk.IntVar(value=always_use_tmdb)
-    checkbox_always_use_tmdb = ctk.CTkCheckBox(
-        master=col2, text='Always Use The Movie Database', variable=var_always_use_tmdb
-    )
-    checkbox_always_use_tmdb.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_season_over_series = ctk.IntVar(value=season_over_series)
-    checkbox_season_over_series = ctk.CTkCheckBox(
-        master=col2, text='Prefer Season Poster Over Series', variable=var_season_over_series
-    )
-    checkbox_season_over_series.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_textless_posters = ctk.IntVar(value=textless_posters)
-    checkbox_textless_posters = ctk.CTkCheckBox(
-        master=col2, text='Prefer Textless TMDB Posters', variable=var_textless_posters
-    )
-    checkbox_textless_posters.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    label_cover_settings = ctk.CTkLabel(master=col2, text='Album Cover Settings', font=font_header)
-    label_cover_settings.pack(pady=(10, 0), padx=10)
-
-    var_always_use_musicbrainz = ctk.IntVar(value=always_use_musicbrainz)
-    checkbox_always_use_musicbrainz = ctk.CTkCheckBox(
-        master=col2, text='Always Use The Cover Art Archive', variable=var_always_use_musicbrainz
-    )
-    checkbox_always_use_musicbrainz.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_release_over_group = ctk.IntVar(value=release_over_group)
-    checkbox_release_over_group = ctk.CTkCheckBox(
-        master=col2, text='Prefer Release Cover Over Group', variable=var_release_over_group
-    )
-    checkbox_release_over_group.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    label_media_settings = ctk.CTkLabel(master=col2, text='Media Settings', font=font_header)
-    label_media_settings.pack(pady=(10, 0), padx=10)
-
-    media_types = parse_delimited_list(config, 'MEDIA_TYPES')
-    var_movies = ctk.IntVar(value=int('Movies' in media_types))
-    checkbox_movies = ctk.CTkCheckBox(
-        master=col2, text='Show Watching Activity for Movies', variable=var_movies
-    )
-    checkbox_movies.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_shows = ctk.IntVar(value=int('Shows' in media_types))
-    checkbox_shows = ctk.CTkCheckBox(
-        master=col2, text='Show Watching Activity for Shows', variable=var_shows
-    )
-    checkbox_shows.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_music = ctk.IntVar(value=int('Music' in media_types))
-    checkbox_music = ctk.CTkCheckBox(
-        master=col2, text='Show Listening Activity for Music', variable=var_music
-    )
-    checkbox_music.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    label_activity_settings = ctk.CTkLabel(master=col3, text='Activity Settings', font=font_header)
-    label_activity_settings.pack(pady=(10, 0), padx=10)
-
-    var_paused = ctk.IntVar(value=show_when_paused)
-    checkbox_paused = ctk.CTkCheckBox(
-        master=col3, text='Show Activity While Paused', variable=var_paused
-    )
-    checkbox_paused.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_jf_logo = ctk.IntVar(value=show_jf_logo)
-    checkbox_jf_logo = ctk.CTkCheckBox(
-        master=col3, text='Show Jellyfin Logo (Small Image)', variable=var_jf_logo
-    )
-    checkbox_jf_logo.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_server_name = ctk.IntVar(value=show_server_name)
-    checkbox_server_name = ctk.CTkCheckBox(
-        master=col3, text='Show Jellyfin Server Name', variable=var_server_name
-    )
-    checkbox_server_name.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_imdb_urls = ctk.IntVar(value=imdb_external_urls)
-    checkbox_imdb_urls = ctk.CTkCheckBox(
-        master=col3, text='Prefer IMDb for External URLs', variable=var_imdb_urls
-    )
-    checkbox_imdb_urls.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    label_system_settings = ctk.CTkLabel(master=col3, text='System Settings', font=font_header)
-    label_system_settings.pack(pady=(10, 0), padx=10)
-
-    if sys.platform in ('win32', 'linux'):
-        var_startup_status = ctk.IntVar(value=int(get_startup_status()))
-        checkbox_startup_status = ctk.CTkCheckBox(
-            master=col3,
-            text='Open Jellyfin RPC on Startup',
-            variable=var_startup_status,
-            command=lambda: set_startup_status(bool(var_startup_status.get())),
-        )
-        checkbox_startup_status.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    var_start_minimized = ctk.IntVar(value=start_minimized)
-    checkbox_start_minimized = ctk.CTkCheckBox(
-        master=col3, text='Start Minimized (If Connected)', variable=var_start_minimized
-    )
-    checkbox_start_minimized.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    background_type = 'Dock' if sys.platform == 'darwin' else 'Tray'
-    var_minimize_on_close = ctk.IntVar(value=minimize_on_close)
-    checkbox_minimize_on_close = ctk.CTkCheckBox(
-        master=col3,
-        text=f'Close Button Minimizes to {background_type}',
-        variable=var_minimize_on_close,
-    )
-    if sys.platform != 'linux':
-        checkbox_minimize_on_close.pack(anchor='w', pady=5, padx=10, fill='x')
-
-    label_advanced_settings = ctk.CTkLabel(master=col3, text='Advanced Settings', font=font_header)
-    label_advanced_settings.pack(pady=(10, 0), padx=10)
-
-    frame_advanced_settings = ctk.CTkFrame(master=col3, fg_color='transparent')
-    frame_advanced_settings.pack(pady=5)
-    frame_advanced_settings.grid_columnconfigure(0, weight=0)
-    frame_advanced_settings.grid_columnconfigure(1, weight=0)
-    frame_advanced_settings.grid_columnconfigure(2, weight=0)
-    frame_advanced_settings.grid_columnconfigure(3, weight=0)
-
-    label_polling_rate = ctk.CTkLabel(master=frame_advanced_settings, text='Polling Rate')
-    label_polling_rate.grid(row=0, column=0, padx=(0, 10), pady=5, sticky='e')
-
-    button_polling_rate_dec = ctk.CTkButton(
-        master=frame_advanced_settings, text='-', width=28, height=28
-    )
-    button_polling_rate_dec.grid(row=0, column=1, padx=(0, 5), pady=5, sticky='e')
-
-    var_polling_rate = ctk.StringVar(value=f'{polling_rate}s')
-    entry_polling_rate = ctk.CTkEntry(
-        master=frame_advanced_settings, textvariable=var_polling_rate, width=50, justify='center'
-    )
-    entry_polling_rate.configure(state='disabled')
-    entry_polling_rate.grid(row=0, column=2, pady=5, sticky='e')
-
-    button_polling_rate_inc = ctk.CTkButton(
-        master=frame_advanced_settings, text='+', width=28, height=28
-    )
-    button_polling_rate_inc.grid(row=0, column=3, padx=(5, 0), pady=5, sticky='e')
-
-    label_seek_threshold = ctk.CTkLabel(master=frame_advanced_settings, text='Seek Threshold')
-    label_seek_threshold.grid(row=1, column=0, padx=(0, 10), pady=5, sticky='e')
-
-    button_seek_threshold_dec = ctk.CTkButton(
-        master=frame_advanced_settings, text='-', width=28, height=28
-    )
-    button_seek_threshold_dec.grid(row=1, column=1, padx=(0, 5), pady=5, sticky='e')
-
-    var_seek_threshold = ctk.StringVar(value=f'{seek_threshold}s')
-    entry_seek_threshold = ctk.CTkEntry(
-        master=frame_advanced_settings, textvariable=var_seek_threshold, width=50, justify='center'
-    )
-    entry_seek_threshold.configure(state='disabled')
-    entry_seek_threshold.grid(row=1, column=2, pady=5, sticky='e')
-
-    button_seek_threshold_inc = ctk.CTkButton(
-        master=frame_advanced_settings, text='+', width=28, height=28
-    )
-    button_seek_threshold_inc.grid(row=1, column=3, padx=(5, 0), pady=5, sticky='e')
-
-    label_log_level = ctk.CTkLabel(master=frame_advanced_settings, text='Log Level (Console)')
-    label_log_level.grid(row=2, column=0, padx=(0, 10), pady=5, sticky='e')
-
-    values_log_level = ['DEBUG', 'VERBOSE', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-    var_log_level = ctk.StringVar(value=log_level)
-    optionmenu_log_level = ctk.CTkOptionMenu(
-        master=frame_advanced_settings, values=values_log_level, variable=var_log_level, width=0
-    )
-    optionmenu_log_level.grid(row=2, column=1, columnspan=3, pady=5, sticky='ew')
-
-    frame_open_buttons = ctk.CTkFrame(master=col3, fg_color='transparent')
-    frame_open_buttons.pack(anchor='center')
-    frame_open_buttons.grid_columnconfigure((0, 1), weight=1, uniform='open_buttons')
-
-    button_open_ini = ctk.CTkButton(
-        master=frame_open_buttons, text='Open INI', width=100, command=lambda: open_file(ini_path)
-    )
-    button_open_ini.grid(row=0, column=0, padx=5, sticky='ew')
-
-    button_open_log = ctk.CTkButton(
-        master=frame_open_buttons, text='Open Log', width=100, command=lambda: open_file(log_path)
-    )
-    button_open_log.grid(row=0, column=1, padx=5, sticky='ew')
-
-    RPCLogger(frame_main, log_queue, textbox_status_monitor)
-    rpc_process = RPCProcess(functools.partial(start_discord_rpc, ini_path, log_path), log_queue)
-
-    global button_connect_text
-    button_connect_text = 'Connect'
-
-    class AppContext(TypedDict):
-        button_connect: ctk.CTkButton | None
-        tray_icon: pystray._base.Icon | None
-
-    context: AppContext = {'button_connect': None, 'tray_icon': None}
-    entries = {
-        'JELLYFIN_HOST': {'entry': entry_jf_host, 'obfuscate': False},
-        'JELLYFIN_API_KEY': {'entry': entry_jf_api_key, 'obfuscate': True},
-        'JELLYFIN_USERNAME': {'entry': entry_jf_username, 'obfuscate': False},
-        'TMDB_API_KEY': {'entry': entry_tmdb_api_key, 'obfuscate': True},
-        'POSTER_LANGUAGES': {'entry': entry_languages, 'obfuscate': False},
-    }
-    checkboxes = {
-        'MOVIES': checkbox_movies,
-        'SHOWS': checkbox_shows,
-        'MUSIC': checkbox_music,
-        'START_MINIMIZED': checkbox_start_minimized,
-        'MINIMIZE_ON_CLOSE': checkbox_minimize_on_close,
-        'SEASON_OVER_SERIES': checkbox_season_over_series,
-        'RELEASE_OVER_GROUP': checkbox_release_over_group,
-        'SHOW_WHEN_PAUSED': checkbox_paused,
-        'SHOW_SERVER_NAME': checkbox_server_name,
-        'SHOW_JELLYFIN_LOGO': checkbox_jf_logo,
-        'IMDB_EXTERNAL_URLS': checkbox_imdb_urls,
-        'ALWAYS_USE_TMDB': checkbox_always_use_tmdb,
-        'ALWAYS_USE_MUSICBRAINZ': checkbox_always_use_musicbrainz,
-        'TEXTLESS_POSTERS': checkbox_textless_posters,
-    }
-
-    for key, checkbox in checkboxes.items():
-        if key == 'MINIMIZE_ON_CLOSE':
-            if sys.platform == 'linux':
-                continue
-            checkbox.configure(
-                command=lambda: set_close_behavior(
-                    root, on_close_callback, bool(checkboxes['MINIMIZE_ON_CLOSE'].get())
-                )
-            )
-        elif key != 'START_MINIMIZED':
-            checkbox.configure(
-                command=lambda: on_click(
-                    cast(ctk.CTkButton, context['button_connect']),
-                    entries,
-                    rpc_process,
-                    only_disconnect=True,
-                )
-            )
-
-    def set_log_level(level: str) -> None:
-        logger.setLevel(get_valid_level(level, logging.INFO))
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    def inc_polling_rate() -> None:
-        value = int(var_polling_rate.get().rstrip('s'))
-        var_polling_rate.set(f'{value + 1}s')
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    def dec_polling_rate() -> None:
-        value = int(var_polling_rate.get().rstrip('s'))
-        if value > 1:
-            var_polling_rate.set(f'{value - 1}s')
-        else:
-            var_polling_rate.set('1s')
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    def inc_seek_threshold() -> None:
-        value = int(var_seek_threshold.get().rstrip('s'))
-        var_seek_threshold.set(f'{value + 1}s')
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    def dec_seek_threshold() -> None:
-        value = int(var_seek_threshold.get().rstrip('s'))
-        if value > 1:
-            var_seek_threshold.set(f'{value - 1}s')
-        else:
-            var_seek_threshold.set('1s')
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            only_disconnect=True,
-        )
-
-    optionmenu_log_level.configure(command=set_log_level)
-    button_polling_rate_inc.configure(command=inc_polling_rate)
-    button_polling_rate_dec.configure(command=dec_polling_rate)
-    button_seek_threshold_inc.configure(command=inc_seek_threshold)
-    button_seek_threshold_dec.configure(command=dec_seek_threshold)
-
-    def on_click_callback() -> None:
-        save_config(
-            ini_path,
-            entries,
-            checkboxes,
-            var_library_filter_type,
-            var_selected_libraries,
-            var_log_level,
-            var_polling_rate,
-            var_seek_threshold,
-        )
-        on_click(
-            cast(ctk.CTkButton, context['button_connect']),
-            entries,
-            rpc_process,
-            context['tray_icon'],
-        )
-
-    def on_close_callback() -> None:
-        save_config(
-            ini_path,
-            entries,
-            checkboxes,
-            var_library_filter_type,
-            var_selected_libraries,
-            var_log_level,
-            var_polling_rate,
-            var_seek_threshold,
-        )
-        on_close(root, rpc_process, context['tray_icon'])
-
-    tray_icon = None
-    if sys.platform == 'darwin':
-        root.createcommand(
-            '::tk::mac::ReopenApplication',
-            lambda: on_maximize(label_update, frame_grid, frame_bottom, root),
-        )
-    elif sys.platform == 'win32':
-        tray_icon = pystray.Icon(
-            'jellyfin-rpc',
-            Image.open(png_bundle_path),
-            'Jellyfin RPC',
-            menu=pystray.Menu(
-                pystray.MenuItem(lambda _: button_connect_text, lambda: gui_queue.put('CONNECT')),
-                pystray.MenuItem('Maximize', lambda: gui_queue.put('MAXIMIZE'), default=True),
-                pystray.MenuItem('Quit', lambda: gui_queue.put('QUIT')),
-            ),
-        )
-        tray_icon.run_detached()
-    context['tray_icon'] = tray_icon
-
-    button_connect = ctk.CTkButton(
-        master=frame_bottom, text=button_connect_text, command=on_click_callback
-    )
-    button_connect.pack(pady=(5, 10))
-    context['button_connect'] = button_connect
-    if jf_host:
-        on_click_callback()
-        if start_minimized and button_connect_text == 'Disconnect':
-            if sys.platform == 'linux':
-                root.iconify()
-            else:
-                root.withdraw()
-    else:
-        logger.info('Enter Host and Click Connect')
-
-    def poll_process_status() -> None:
-        status_text = textbox_status_monitor.get('1.0', 'end')
-        if not entry_jf_api_key.get() and 'via Quick Connect' in status_text:
-            config = load_config(ini_path)
-            jf_api_key = config.get('JELLYFIN_API_KEY', '')
-            jf_username = config.get('JELLYFIN_USERNAME', '')
-
-            if jf_api_key and jf_username:
-                entry_jf_api_key.configure(state='normal')
-                entry_jf_username.configure(state='normal')
-                entry_jf_api_key.set(jf_api_key)
-                entry_jf_username.set(jf_username)
-                entry_jf_api_key.configure(state='readonly', show='*')
-                entry_jf_username.configure(state='readonly')
-
-        if rpc_process.has_failed():
-            on_click_callback()
-        root.after(1000, lambda: poll_process_status())
-
-    poll_process_status()
-
-    def poll_gui_queue() -> None:
-        try:
-            match gui_queue.get_nowait():
-                case 'CONNECT':
-                    on_click_callback()
-                case 'MAXIMIZE':
-                    on_maximize(label_update, frame_grid, frame_bottom, root)
-                case 'FOCUS':
-                    on_maximize(label_update, frame_grid, frame_bottom, root)
-                    focus_window(root)
-                case 'QUIT':
-                    on_close_callback()
-        except queue.Empty:
-            pass
-        finally:
-            root.after(100, lambda: poll_gui_queue())
-
-    poll_gui_queue()
-
-    if sys.platform == 'win32':
-        root.iconbitmap(ico_bundle_path)
-    root.update_idletasks()
-    root.minsize(root.winfo_reqwidth(), root.winfo_reqheight())
-    root.resizable(True, True)
-
-    def exit_cleanup():
-        if ipc_server:
-            try:
-                ipc_server.close()
-            except OSError:
-                pass
-        on_close_callback()
+    rpc_window.ipc_server = ipc_server
 
     def signal_handler(signum: int, frame: FrameType | None) -> None:
-        exit_cleanup()
+        rpc_window.quit_window()
 
     signal.signal(signal.SIGINT, signal_handler)
-
-    set_close_behavior(root, exit_cleanup, minimize_on_close)
-    root.mainloop()
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

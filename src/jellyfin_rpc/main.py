@@ -405,7 +405,7 @@ def select_poster(posters: list[dict[str, Any]], languages: list[str]) -> dict[s
             poster.get('width', 0),
         )
 
-    posters_by_lang = {}
+    posters_by_lang: dict[str | None, list[dict[str, Any]]] = {}
     for poster in posters:
         lang_code = poster.get('iso_639_1') or None
         if lang_code not in posters_by_lang:
@@ -819,7 +819,7 @@ async def activity_loop(
     selected_libraries = parse_delimited_list(config, 'SELECTED_LIBRARIES')
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
-    jf_media_types = set()
+    jf_media_types: set[str] = set()
     if 'Shows' in media_types:
         jf_media_types.add('Episode')
     if 'Movies' in media_types:
@@ -1250,10 +1250,12 @@ async def activity_loop(
                             logger.log(15, f'Seek Detected ({payload})')
                         case 'playstate_changed':
                             logger.log(15, f'PlayState {payload}')
+                        case _:
+                            pass
                     rpc_state.pending_payload = None
 
                 try:
-                    await discord_rpc.update(
+                    await discord_rpc.update(  # type: ignore
                         **cached_kwargs,
                         start=current_start,
                         end=current_end,
@@ -1297,7 +1299,7 @@ async def monitor_activity(
     jf_connector = aiohttp.TCPConnector(ssl=ssl_context)
     cache_connector = aiohttp.TCPConnector(ssl=ssl_context)
 
-    ws_state = {'sessions': [], 'ws_connected': False}
+    ws_state: dict[str, Any] = {'sessions': [], 'ws_connected': False}
     wake_event = asyncio.Event()
 
     try:

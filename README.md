@@ -16,15 +16,27 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ## Installation
 
-- For the desktop GUI (Windows, macOS, or Linux), download the latest version from the [Releases](https://github.com/kennethsible/jellyfin-rpc/releases) page.
-- For the CLI tool (headless/terminal), download the [INI file](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini) from GitHub and install the package via [pip](https://pip.pypa.io/en/stable/installation/).
+### Desktop GUI (Windows, macOS, Linux)
 
-    ```bash
-    pip install git+https://github.com/kennethsible/jellyfin-rpc.git
-    ```
+Download the executable for your platform from the [GitHub Releases](https://github.com/kennethsible/jellyfin-rpc/releases) page. A [Homebrew](https://brew.sh/) Cask is also available for macOS users. You might need to strip the quarantine attribute on macOS if [Gatekeeper](https://github.com/orgs/pyinstaller/discussions/8976) blocks the application.
+
+#### macOS (Homebrew)
+
+```bash
+brew install --cask kennethsible/tap/jellyfin-rpc
+xattr -rd com.apple.quarantine "/Applications/Jellyfin RPC.app"
+```
 
 > [!NOTE]
-> On Linux, [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) can automatically create a desktop shortcut and place Jellyfin RPC into your system's application launcher.
+> For Linux users, [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) can automatically create a desktop shortcut and place Jellyfin RPC into your system's application launcher.
+
+### Command-Line Interface (CLI)
+
+Install the Python package via [pip](https://pip.pypa.io/en/stable/installation/) and then download [`jellyfin_rpc.ini`](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini) to configure the CLI tool. Refer to the [CLI usage](#cli-usage-headless) section for more details.
+
+```bash
+pip install git+https://github.com/kennethsible/jellyfin-rpc.git
+```
 
 ## Configuration
 
@@ -36,7 +48,7 @@ After entering your Jellyfin host, click **Connect** and use [Quick Connect](htt
   <img src="images/jellyfin_rpc_gui.png" alt="Jellyfin RPC GUI" width="450" />
 </p>
 
-If running in headless/CLI mode, configuration is loaded from an [INI file](https://github.com/kennethsible/jellyfin-rpc/blob/main/jellyfin_rpc.ini). If you encounter any issues, set the log level to `DEBUG` (via the GUI or INI file) and include the log output when opening a [GitHub issue](https://github.com/kennethsible/jellyfin-rpc/issues).
+If running in headless/CLI mode, configuration is loaded from an INI file. If you encounter any issues, set the log level to `DEBUG` (via the GUI or INI file) and include the log output when opening a [GitHub issue](https://github.com/kennethsible/jellyfin-rpc/issues).
 
 > [!NOTE]
 > TMDB can *optionally* be used to fetch posters for movies and TV shows. However, you must create a [TMDB account](https://www.themoviedb.org/signup/) and generate an [API key](https://developer.themoviedb.org/docs/getting-started). The Cover Art Archive can be used to fetch album covers without an API key.
