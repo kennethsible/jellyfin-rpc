@@ -5,8 +5,8 @@ import platform
 from PyInstaller.utils.hooks import collect_data_files
 
 a = Analysis(
-    ['src/jellyfin_rpc/app.py'],
-    pathex=[],
+    ['src/jellyfin_rpc/__main__.py'],
+    pathex=['src'],
     binaries=[],
     datas=[
         ('jellyfin_rpc.ini', '.'),
