@@ -13,6 +13,8 @@ a = Analysis(
         ('images/icon_menubar.png', '.'),
         ('images/icon.png', '.'),
         ('images/icon.ico', '.'),
+        ('images/check_white.svg', '.'),
+        ('images/check_gray.svg', '.'),
         *collect_data_files('certifi'),
         *collect_data_files('language_data'),
     ],

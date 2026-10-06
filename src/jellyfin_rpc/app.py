@@ -1,3 +1,4 @@
+import base64
 import functools
 import html
 import logging
@@ -459,7 +460,7 @@ class RPCWindow(QWidget):
     def create_window(self):
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
         self.setWindowIcon(QIcon(self.png_bundle_path))
-        self.setMinimumSize(850, 560)
+        self.setMinimumSize(860, 560)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(25, 10, 25, 18)
@@ -1001,7 +1002,17 @@ class RPCApplication(QApplication):
         return super().event(event)
 
 
-def apply_theme(app: QApplication) -> None:
+def get_checkmark_url(color: str) -> str:
+    svg_url = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" '
+        f'fill="none" stroke="{color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">'
+        f'<polyline points="20 6 9 17 4 12"/></svg>'
+    )
+    b64_str = base64.b64encode(svg_url.encode('utf-8')).decode('utf-8')
+    return f'url("data:image/svg+xml;base64,{b64_str}")'
+
+
+def apply_theme(app: QApplication, bundle_dir: str) -> None:
     app.setStyle('Fusion')
     palette = QPalette()
     background_color = QColor(36, 36, 36)
@@ -1021,9 +1032,11 @@ def apply_theme(app: QApplication) -> None:
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
     app.setPalette(palette)
 
-    app.setStyleSheet("""
+    check_white = os.path.join(bundle_dir, 'check_white.svg').replace('\\', '/')
+    check_gray = os.path.join(bundle_dir, 'check_gray.svg').replace('\\', '/')
+
+    static_css = """
         QWidget { 
-            font-family: "Roboto", "Segoe UI", Arial, sans-serif; 
             font-size: 13px; 
         }
         QLineEdit, QComboBox { 
@@ -1097,18 +1110,6 @@ def apply_theme(app: QApplication) -> None:
             border-color: #3e4244;
             background-color: #242424;
         }
-        QCheckBox::indicator:checked { 
-            background-color: #1f6aa5; 
-            border: 2px solid #1f6aa5; 
-        }
-        QCheckBox::indicator:checked:hover { 
-            background-color: #2980b9; 
-            border-color: #2980b9; 
-        }
-        QCheckBox::indicator:checked:disabled {
-            background-color: #2c3e50;
-            border-color: #2c3e50;
-        }
         QTextBrowser { 
             background-color: #2b2b2b; 
             border-radius: 4px; 
@@ -1129,14 +1130,36 @@ def apply_theme(app: QApplication) -> None:
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { 
             height: 0px; 
         }
-    """)
+    """
+
+    dynamic_css = f"""
+        QCheckBox::indicator:checked {{ 
+            background-color: #1f6aa5; 
+            border: 2px solid #1f6aa5; 
+            image: url("{check_white}");
+        }}
+        QCheckBox::indicator:checked:hover {{ 
+            background-color: #2980b9; 
+            border-color: #2980b9; 
+            image: url("{check_white}");
+        }}
+        QCheckBox::indicator:checked:disabled {{
+            background-color: #2c3e50;
+            border-color: #2c3e50;
+            image: url("{check_gray}");
+        }}
+    """
+
+    app.setStyleSheet(static_css + dynamic_css)
 
 
 def main() -> None:
     gui_queue: queue.Queue[str] = queue.Queue()
 
     app = RPCApplication(sys.argv, gui_queue)
-    apply_theme(app)
+    base_dir = os.path.abspath(os.path.dirname(__file__))
+    bundle_dir = getattr(sys, '_MEIPASS', base_dir)
+    apply_theme(app, bundle_dir)
 
     client = QLocalSocket()
     ipc_server_name = 'jellyfin_rpc'
@@ -1161,7 +1184,6 @@ def main() -> None:
 
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     png_name = 'icon_menubar.png' if sys.platform == 'darwin' else 'icon.png'
-    bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
     ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
     png_bundle_path = os.path.abspath(os.path.join(bundle_dir, png_name))
     os.chdir(os.path.dirname(get_executable_path()))
