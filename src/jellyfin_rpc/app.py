@@ -65,12 +65,16 @@ class LabeledEntry:
 
 def get_executable_path() -> str:
     if getattr(sys, 'frozen', False):
-        return sys.executable
+        exe = os.path.abspath(sys.executable)
+        if sys.platform == 'darwin' and '.app/Contents/MacOS' in exe:
+            return exe.split('.app/Contents/MacOS')[0] + '.app'
+        return exe
     else:
         return os.path.abspath(__file__)
 
 
 def set_startup_status(enabled: bool) -> None:
+    app_name = 'Jellyfin RPC'
     exe_path = get_executable_path()
 
     if sys.platform == 'win32':
@@ -89,6 +93,29 @@ def set_startup_status(enabled: bool) -> None:
                     winreg.DeleteValue(key, 'Jellyfin RPC')
                 except FileNotFoundError:
                     pass
+
+    elif sys.platform == 'darwin':
+        if enabled:
+            applescript = f'''
+            tell application "System Events"
+                set itemRecord to {{name:"{app_name}", path:"{exe_path}", hidden:false}}
+                if not (exists login item "{app_name}") then
+                    make new login item at end with properties itemRecord
+                end if
+            end tell
+            '''
+        else:
+            applescript = f'''
+            tell application "System Events"
+                if exists login item "{app_name}" then
+                    delete login item "{app_name}"
+                end if
+            end tell
+            '''
+        try:
+            subprocess.run(['osascript', '-e', applescript], capture_output=True, check=True)
+        except subprocess.SubprocessError:
+            pass
 
     elif sys.platform == 'linux':
         autostart_dir = os.path.expanduser('~/.config/autostart')
@@ -134,6 +161,17 @@ def get_startup_status() -> bool:
                 set_startup_status(True)
             return True
         except FileNotFoundError:
+            return False
+
+    elif sys.platform == 'darwin':
+        applescript = 'tell application "System Events" to get name of every login item'
+        try:
+            result = subprocess.run(
+                ['osascript', '-e', applescript], capture_output=True, check=True, text=True
+            )
+            login_items = [item.strip() for item in result.stdout.split(',')]
+            return 'Jellyfin RPC' in login_items
+        except subprocess.SubprocessError:
             return False
 
     elif sys.platform == 'linux':
@@ -538,12 +576,11 @@ class JellyfinRPCWindow(QWidget):
         self.create_checkbox(col3, 'IMDB_EXTERNAL_URLS', 'Prefer IMDb for External URLs')
 
         col3.addWidget(self.create_header('System Settings'))
-        if sys.platform in ('win32', 'linux'):  # TODO
-            checkbox_startup = QCheckBox('Open Jellyfin RPC on Startup')
-            checkbox_startup.setCursor(Qt.CursorShape.PointingHandCursor)
-            checkbox_startup.setChecked(get_startup_status())
-            checkbox_startup.toggled.connect(set_startup_status)
-            col3.addWidget(checkbox_startup)
+        checkbox_startup = QCheckBox('Open Jellyfin RPC on Startup')
+        checkbox_startup.setCursor(Qt.CursorShape.PointingHandCursor)
+        checkbox_startup.setChecked(get_startup_status())
+        checkbox_startup.toggled.connect(set_startup_status)
+        col3.addWidget(checkbox_startup)
 
         self.create_checkbox(col3, 'START_MINIMIZED', 'Start Minimized (If Connected)')
         self.create_checkbox(col3, 'MINIMIZE_ON_CLOSE', 'Close Button Minimizes to Tray')
