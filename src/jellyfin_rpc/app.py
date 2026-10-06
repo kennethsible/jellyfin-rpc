@@ -22,7 +22,7 @@ from types import FrameType
 import certifi
 import requests
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QColor, QIcon, QPalette, QTextCursor
+from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPalette, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -221,11 +221,11 @@ def setup_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket
                 client.connect(('127.0.0.1', singleton_port))
                 client.sendall(b'FOCUS\n')
                 if client.recv(16).strip() == b'ACK':
-                    sys.exit(0)
+                    os._exit(0)
         except (ConnectionRefusedError, TimeoutError, OSError):
             pass
         logger.error(f'Singleton Port {singleton_port} Already In Use')
-        sys.exit(1)
+        os._exit(1)
 
     def listen_for_focus() -> None:
         while True:
@@ -493,6 +493,7 @@ class JellyfinRPCWindow(QWidget):
 
     def create_window(self):
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
+        self.setWindowIcon(QIcon(self.png_bundle_path))
         self.setMinimumSize(850, 560)
 
         main_layout = QVBoxLayout(self)
@@ -655,6 +656,12 @@ class JellyfinRPCWindow(QWidget):
                 checkbox_minimize.setToolTip(
                     'This desktop environment does not have a system tray.'
                 )
+
+        if sys.platform == 'darwin':
+            macos_quit_action = QAction('Quit Jellyfin RPC', self)
+            macos_quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+            macos_quit_action.triggered.connect(self.quit_window)
+            self.addAction(macos_quit_action)
 
     def create_header(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -1150,9 +1157,6 @@ def apply_theme(app: QApplication) -> None:
 
 
 def main() -> None:
-    app = QApplication(sys.argv)
-    apply_theme(app)
-
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     png_name = 'icon_menubar.png' if sys.platform == 'darwin' else 'icon.png'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
@@ -1194,6 +1198,9 @@ def main() -> None:
 
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
+
+    app = QApplication(sys.argv)
+    apply_theme(app)
 
     rpc_window = JellyfinRPCWindow(
         ini_path, log_path, config, gui_queue, log_queue, png_bundle_path
