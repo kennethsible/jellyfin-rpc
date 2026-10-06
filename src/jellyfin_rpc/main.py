@@ -1013,13 +1013,13 @@ async def activity_loop(
                             is_allowed = True
 
                     if not is_allowed:
+                        cached_kwargs.clear()
                         if rpc_state.last_activity_str:
                             if not await clear_activity(
                                 discord_rpc, polling_rate, 'Library Blocked'
                             ):
                                 continue
                             rpc_state.reset()
-                            cached_kwargs.clear()
                         continue
 
                     state_str = details_str = None
@@ -1055,12 +1055,12 @@ async def activity_loop(
                                 logger.warning(f'Unsupported Media Type "{media_type}"')
                                 last_unsupported_warning = True
                             if rpc_state.last_activity_str:
+                                cached_kwargs.clear()
                                 if not await clear_activity(
                                     discord_rpc, polling_rate, 'Unsupported Media'
                                 ):
                                     continue
                                 rpc_state.reset()
-                                cached_kwargs.clear()
                             continue
 
                     if len(details_str) < 2:
@@ -1294,6 +1294,11 @@ async def activity_loop(
                 rpc_state.has_pending_update
                 and (time.time() - rpc_state.last_rpc_update) >= polling_rate
             ):
+                if not cached_kwargs:
+                    rpc_state.has_pending_update = False
+                    rpc_state.pending_payload = None
+                    continue
+
                 small_image = (
                     'media_paused' if session_paused else 'small_image' if show_jf_logo else None
                 )
