@@ -5,9 +5,11 @@ import json
 import logging
 import os
 import platform
+import queue
 import re
 import ssl
 import sys
+import threading
 import time
 import uuid
 from configparser import ConfigParser, SectionProxy
@@ -17,7 +19,6 @@ from email.utils import parseaddr
 from importlib.metadata import metadata
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
-from multiprocessing.queues import Queue
 from typing import Any
 from urllib.parse import urlparse
 
@@ -59,6 +60,7 @@ def load_config(ini_path: str) -> SectionProxy:
     migrate_key('USERNAME', 'JELLYFIN_USERNAME')
     migrate_key('FILTER_MODE', 'LIBRARY_FILTER_TYPE')
     migrate_key('FILTER_LIBRARIES', 'SELECTED_LIBRARIES')
+    migrate_key('IMDB_EXTERNAL_URLS', 'IMDB_EXTERNAL_LINKS')
     migrate_key('REFRESH_RATE', 'POLLING_RATE')
     migrate_key('FILE_HDLR_LEVEL', 'LOG_LEVEL_FILE')
 
@@ -782,7 +784,7 @@ async def activity_loop(
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
-    imdb_external_urls = config.getboolean('IMDB_EXTERNAL_URLS', False)
+    imdb_external_urls = config.getboolean('IMDB_EXTERNAL_LINKS', False)
 
     user_id, server_name = await get_jf_user_and_server(
         jf_session, config, ini_path, show_server_name, polling_rate
@@ -1344,7 +1346,10 @@ async def monitor_activity(
 
 
 def start_discord_rpc(
-    ini_path: str, log_path: str | None = None, log_queue: Queue[LogRecord] | None = None
+    ini_path: str,
+    log_path: str | None = None,
+    log_queue: queue.Queue[LogRecord] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> None:
     config = load_config(ini_path)
     polling_rate = max(1, config.getint('POLLING_RATE', 5))
@@ -1377,9 +1382,29 @@ def start_discord_rpc(
         queue_hdlr.setLevel(log_level)
         logger.addHandler(queue_hdlr)
 
-    asyncio.run(
-        monitor_activity(config, ini_path, polling_rate, seek_threshold, stale_grace_period)
-    )
+    async def runner() -> None:
+        main_task = asyncio.create_task(
+            monitor_activity(config, ini_path, polling_rate, seek_threshold, stale_grace_period)
+        )
+        watcher_task = None
+        if stop_event is not None:
+
+            async def stop_watcher(event: threading.Event) -> None:
+                while not event.is_set():
+                    await asyncio.sleep(0.2)
+                main_task.cancel()
+
+            watcher_task = asyncio.create_task(stop_watcher(stop_event))
+
+        try:
+            await main_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if watcher_task is not None:
+                watcher_task.cancel()
+
+    asyncio.run(runner())
 
 
 def main() -> None:

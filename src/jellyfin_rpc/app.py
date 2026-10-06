@@ -2,7 +2,6 @@ import base64
 import functools
 import html
 import logging
-import multiprocessing as mp
 import os
 import queue
 import re
@@ -10,18 +9,28 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
 from dataclasses import dataclass
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
-from multiprocessing.queues import Queue
+from queue import Queue
 from types import FrameType
 
 import certifi
 import requests
 from PySide6.QtCore import QEvent, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPalette, QTextCursor
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QColor,
+    QHideEvent,
+    QIcon,
+    QPalette,
+    QShowEvent,
+    QTextCursor,
+)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
@@ -43,17 +52,20 @@ from PySide6.QtWidgets import (
 )
 from requests.exceptions import RequestException
 
-from jellyfin_rpc import __version__, start_discord_rpc
-from jellyfin_rpc.main import (
+from jellyfin_rpc import __version__
+
+from .main import (
     build_auth_header,
     get_device_id,
     get_valid_level,
     load_config,
     parse_delimited_list,
+    start_discord_rpc,
 )
 
 SINGLE_INSTANCE_PORT = 57634
-logger = logging.getLogger('GUI')
+rpc_logger = logging.getLogger('RPC')
+gui_logger = logging.getLogger('GUI')
 logging.addLevelName(15, 'VERBOSE')
 
 
@@ -191,56 +203,62 @@ def open_file(filepath: str) -> None:
 
 
 def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[LogRecord]:
-    logger.setLevel(log_level)
+    gui_logger.setLevel(log_level)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
 
     if log_path:
         file_hdlr = logging.FileHandler(log_path, encoding='utf-8')
         file_hdlr.setFormatter(formatter)
-        logger.addHandler(file_hdlr)
+        gui_logger.addHandler(file_hdlr)
 
     stream_hdlr = logging.StreamHandler(sys.stdout)
     stream_hdlr.setFormatter(formatter)
-    logger.addHandler(stream_hdlr)
+    gui_logger.addHandler(stream_hdlr)
 
-    log_queue: Queue[LogRecord] = mp.Queue()
+    log_queue: Queue[LogRecord] = Queue()
     queue_hdlr = handlers.QueueHandler(log_queue)
-    logger.addHandler(queue_hdlr)
+    gui_logger.addHandler(queue_hdlr)
     return log_queue
 
 
-class RPCProcess:
+class RPCWorker:
     def __init__(
-        self, target: Callable[[Queue[LogRecord]], None], log_queue: Queue[LogRecord]
+        self,
+        target: Callable[[Queue[LogRecord], threading.Event], None],
+        log_queue: Queue[LogRecord],
     ) -> None:
         self.target = target
         self.log_queue = log_queue
-        self.process: mp.Process | None = None
+        self.thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
 
     def start(self) -> None:
-        self.process = mp.Process(target=self.target, args=(self.log_queue,))
-        self.process.start()
+        self.stop_event.clear()
+        self.thread = threading.Thread(
+            target=self.target, args=(self.log_queue, self.stop_event), daemon=True
+        )
+        self.thread.start()
 
     def stop(self) -> None:
-        if self.process is None:
+        if self.thread is None:
             return
-        if self.process.is_alive():
-            self.process.terminate()
-            self.process.join()
-            logger.info('RPC Stopped')
-        self.process = None
+        if self.thread.is_alive():
+            self.stop_event.set()
+            self.thread.join(timeout=3.0)
+            gui_logger.info('RPC Stopped')
+        rpc_logger.handlers.clear()
+        self.thread = None
 
     def has_failed(self) -> bool:
-        if self.process is None:
+        if self.thread is None:
             return False
-        if self.process.exitcode is None:
-            return False
-        if self.process.exitcode in (0, -15):
-            self.process = None
-            return False
-        logger.error('RPC Crashed')
-        self.process = None
-        return True
+        if not self.thread.is_alive():
+            if not self.stop_event.is_set():
+                gui_logger.error('RPC Crashed')
+                self.thread = None
+                return True
+            self.thread = None
+        return False
 
 
 class UpdateChecker(QThread):
@@ -262,8 +280,8 @@ class UpdateChecker(QThread):
             if self.parse_version(__version__) < self.parse_version(version_tag):
                 self.update_signal.emit(version_tag)
         except (RequestException, JSONDecodeError, KeyError) as e:
-            logger.warning(f'GitHub Version Check Failed ({type(e).__name__})')
-            logger.debug(e)
+            gui_logger.warning(f'GitHub Version Check Failed ({type(e).__name__})')
+            gui_logger.debug(e)
 
 
 class SegmentedButton(QWidget):
@@ -386,7 +404,7 @@ class LibrarySelectorWindow(QDialog):
                 self.checkbox_map[library_id] = checkbox
 
         except RequestException as e:
-            logger.error(f'Failed to Retrieve Libraries: {e}')
+            gui_logger.error(f'Failed to Retrieve Libraries: {e}')
             self.scroll_layout.addWidget(QLabel('Error Retrieving Libraries'))
 
     def save_selection(self):
@@ -406,12 +424,16 @@ class RPCWindow(QWidget):
         ini_path: str,
         log_path: str,
         config: SectionProxy,
-        gui_queue: queue.Queue[str],
+        gui_queue: Queue[str],
         log_queue: Queue[LogRecord],
         png_bundle_path: str,
     ) -> None:
         super().__init__()
         self.ipc_server: QLocalServer | None = None
+        self.tray_icon: QSystemTrayIcon | None = None
+        self.tray_menu: QMenu | None = None
+        self.action_connect: QAction | None = None
+        self.action_window: QAction | None = None
 
         self.ini_path = ini_path
         self.log_path = log_path
@@ -420,10 +442,11 @@ class RPCWindow(QWidget):
         self.log_queue = log_queue
         self.png_bundle_path = png_bundle_path
 
-        self.rpc_process = RPCProcess(
+        self.rpc_worker = RPCWorker(
             functools.partial(start_discord_rpc, ini_path, log_path), log_queue
         )
         self.is_connected = False
+        self.is_quitting = False
 
         self.entries: dict[str, LabeledEntry] = {}
         self.checkboxes: dict[str, QCheckBox] = {}
@@ -431,7 +454,6 @@ class RPCWindow(QWidget):
 
         self.create_window()
         self.load_config()
-        self.setup_tray()
 
         self.gui_timer = QTimer(self)
         self.gui_timer.timeout.connect(self.poll_gui_queue)
@@ -455,7 +477,9 @@ class RPCWindow(QWidget):
                 self.show()
         else:
             self.show()
-            logger.info('Enter Host and Click Connect')
+            gui_logger.info('Enter Host and Click Connect')
+
+        self.setup_tray()
 
     def create_window(self):
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
@@ -540,7 +564,7 @@ class RPCWindow(QWidget):
         self.create_checkbox(col3, 'SHOW_WHEN_PAUSED', 'Show Activity While Paused')
         self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Jellyfin Logo (Small Image)')
         self.create_checkbox(col3, 'SHOW_SERVER_NAME', 'Show Jellyfin Server Name')
-        self.create_checkbox(col3, 'IMDB_EXTERNAL_URLS', 'Prefer IMDb for External URLs')
+        self.create_checkbox(col3, 'IMDB_EXTERNAL_LINKS', 'Prefer External IMDb Links')
 
         col3.addWidget(self.create_header('System Settings'))
         checkbox_startup = QCheckBox('Open Jellyfin RPC on Startup')
@@ -718,7 +742,7 @@ class RPCWindow(QWidget):
             ('SHOW_WHEN_PAUSED', True),
             ('SHOW_SERVER_NAME', False),
             ('SHOW_JELLYFIN_LOGO', True),
-            ('IMDB_EXTERNAL_URLS', False),
+            ('IMDB_EXTERNAL_LINKS', False),
             ('ALWAYS_USE_TMDB', False),
             ('TEXTLESS_POSTERS', False),
             ('SEASON_OVER_SERIES', False),
@@ -786,12 +810,12 @@ class RPCWindow(QWidget):
     def select_libraries(self) -> None:
         jf_host = self.entries['JELLYFIN_HOST'].widget.text().rstrip('/')
         if not jf_host:
-            logger.error('Missing Jellyfin Host')
+            gui_logger.error('Missing Jellyfin Host')
             return
 
         jf_api = self.entries['JELLYFIN_API_KEY'].widget.text()
         if not jf_api:
-            logger.error('Missing Jellyfin API Key')
+            gui_logger.error('Missing Jellyfin API Key')
             return
 
         selector = LibrarySelectorWindow(
@@ -820,31 +844,33 @@ class RPCWindow(QWidget):
             self.toggle_connection()
 
         if self.sender() == self.checkbox_log_level:
-            logger.setLevel(get_valid_level(self.checkbox_log_level.currentText(), logging.INFO))
+            gui_logger.setLevel(
+                get_valid_level(self.checkbox_log_level.currentText(), logging.INFO)
+            )
 
     def toggle_connection(self) -> None:
         self.save_config()
         if not self.is_connected:
-            self.rpc_process.start()
+            self.rpc_worker.start()
             for entry_data in self.entries.values():
                 entry_data.widget.setReadOnly(True)
                 entry_data.widget.setEnabled(False)
                 if entry_data.obfuscate:
                     entry_data.widget.setEchoMode(QLineEdit.EchoMode.Password)
             self.button_connect.setText('Disconnect')
-            if getattr(self, 'tray_icon', None):
+            if self.tray_icon is not None and self.action_connect is not None:
                 self.action_connect.setText('Disconnect')
                 self.tray_icon.setToolTip('Jellyfin RPC\nConnected')
             self.is_connected = True
         else:
-            self.rpc_process.stop()
+            self.rpc_worker.stop()
             for entry_data in self.entries.values():
                 entry_data.widget.setReadOnly(False)
                 entry_data.widget.setEnabled(True)
                 if entry_data.obfuscate:
                     entry_data.widget.setEchoMode(QLineEdit.EchoMode.Normal)
             self.button_connect.setText('Connect')
-            if getattr(self, 'tray_icon', None):
+            if self.tray_icon is not None and self.action_connect is not None:
                 self.action_connect.setText('Connect')
                 self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
             self.is_connected = False
@@ -859,17 +885,19 @@ class RPCWindow(QWidget):
 
         self.tray_menu = QMenu(self)
         self.tray_icon = QSystemTrayIcon(icon, self)
-        self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
+        rpc_state = 'Connected' if self.is_connected else 'Disconnected'
+        self.tray_icon.setToolTip(f'Jellyfin RPC\n{rpc_state}')
 
-        self.action_connect = self.tray_menu.addAction('Connect')
+        action_text = 'Disconnect' if self.is_connected else 'Connect'
+        self.action_connect = self.tray_menu.addAction(action_text)
         font = self.action_connect.font()
         font.setBold(True)
         self.action_connect.setFont(font)
         self.action_connect.triggered.connect(self.toggle_connection)
 
-        window_text = 'Hide' if self.isVisible() and not self.isMinimized() else 'Show'
-        self.action_window = self.tray_menu.addAction(f'{window_text} Window')
+        self.action_window = self.tray_menu.addAction('Toggle Window')
         self.action_window.triggered.connect(self.toggle_window)
+        self.sync_tray_text()
 
         self.tray_menu.addSeparator()
         action_quit = self.tray_menu.addAction('Quit Jellyfin RPC')
@@ -882,12 +910,15 @@ class RPCWindow(QWidget):
         self.tray_icon.show()
 
     def activate_tray(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
             self.maximize_window()
         elif (
             reason == QSystemTrayIcon.ActivationReason.Context
             and sys.platform == 'darwin'
-            and hasattr(self, 'tray_menu')
+            and self.tray_menu is not None
         ):
             from PySide6.QtGui import QCursor
 
@@ -939,7 +970,7 @@ class RPCWindow(QWidget):
                 self.entries['JELLYFIN_API_KEY'].widget.setText(jf_api)
                 self.entries['JELLYFIN_USERNAME'].widget.setText(jf_user)
 
-        if self.rpc_process.has_failed():
+        if self.rpc_worker.has_failed():
             self.toggle_connection()
 
     def poll_gui_queue(self) -> None:
@@ -954,51 +985,79 @@ class RPCWindow(QWidget):
         except queue.Empty:
             pass
 
+    def sync_tray_text(self) -> None:
+        if self.action_window is not None:
+            if self.isVisible() and not self.isMinimized():
+                self.action_window.setText('Hide Window')
+            else:
+                self.action_window.setText('Show Window')
+
+    def showEvent(self, event: QShowEvent) -> None:
+        self.sync_tray_text()
+        super().showEvent(event)
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self.sync_tray_text()
+        super().hideEvent(event)
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.sync_tray_text()
+        super().changeEvent(event)
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        has_tray = getattr(self, 'tray_icon', None) is not None
         if (
-            has_tray
-            and self.checkboxes.get('MINIMIZE_ON_CLOSE')
+            self.tray_icon is not None
             and self.checkboxes['MINIMIZE_ON_CLOSE'].isChecked()
             and event.spontaneous()
         ):
-            self.action_window.setText('Show Window')
             event.ignore()
             self.hide()
         else:
+            event.accept()
             self.quit_window()
 
     def maximize_window(self) -> None:
         self.showNormal()
         self.activateWindow()
         self.raise_()
-        self.action_window.setText('Hide Window')
 
     def toggle_window(self) -> None:
         if self.isVisible() and not self.isMinimized():
             self.hide()
-            self.action_window.setText('Show Window')
         else:
             self.maximize_window()
 
     def quit_window(self) -> None:
+        if self.is_quitting:
+            return
+
+        self.is_quitting = True
         self.save_config()
-        self.rpc_process.stop()
-        if getattr(self, 'tray_icon', None):
+        self.rpc_worker.stop()
+
+        if self.tray_icon is not None:
             self.tray_icon.hide()
-            self.tray_icon.deleteLater()
-        QApplication.quit()
+
         os._exit(0)
 
 
 class RPCApplication(QApplication):
-    def __init__(self, argv, gui_queue: queue.Queue):
+    def __init__(self, argv: list[str], gui_queue: Queue[str]) -> None:
         super().__init__(argv)
         self.gui_queue = gui_queue
+        self._prev_state = self.applicationState()
 
     def event(self, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.ApplicationActivate:
-            self.gui_queue.put('MAXIMIZE')
+        if sys.platform == 'darwin' and event.type() == QEvent.Type.ApplicationStateChange:
+            state = self.applicationState()
+            if (
+                self._prev_state == Qt.ApplicationState.ApplicationActive
+                and state == Qt.ApplicationState.ApplicationActive
+            ):
+                self.gui_queue.put('MAXIMIZE')
+
+            self._prev_state = state
         return super().event(event)
 
 
@@ -1154,7 +1213,7 @@ def apply_theme(app: QApplication, bundle_dir: str) -> None:
 
 
 def main() -> None:
-    gui_queue: queue.Queue[str] = queue.Queue()
+    gui_queue: Queue[str] = Queue()
 
     app = RPCApplication(sys.argv, gui_queue)
     base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -1167,7 +1226,7 @@ def main() -> None:
     if client.waitForConnected(500):
         client.write(b'FOCUS')
         client.waitForBytesWritten(500)
-        os._exit(0)
+        sys.exit(0)
 
     QLocalServer.removeServer(ipc_server_name)
     ipc_server = QLocalServer()
@@ -1208,10 +1267,10 @@ def main() -> None:
 
     if not os.path.isfile(ini_path):
         if data_dir and os.path.isfile(ini_name):
-            logger.info(f'Migrating INI to {ini_path}')
+            gui_logger.info(f'Migrating INI to {ini_path}')
             shutil.copyfile(ini_name, ini_path)
         else:
-            logger.info(f'Extracting INI to {ini_path}')
+            gui_logger.info(f'Extracting INI to {ini_path}')
             shutil.copyfile(ini_bundle_path, ini_path)
 
     config = load_config(ini_path)
@@ -1222,12 +1281,13 @@ def main() -> None:
     rpc_window.ipc_server = ipc_server
 
     def signal_handler(signum: int, frame: FrameType | None) -> None:
-        rpc_window.quit_window()
+        if rpc_window.is_quitting:
+            os._exit(0)
+        QTimer.singleShot(0, QApplication.quit)
 
     signal.signal(signal.SIGINT, signal_handler)
     sys.exit(app.exec())
 
 
 if __name__ == '__main__':
-    mp.freeze_support()
     main()

@@ -18,7 +18,7 @@ Jellyfin RPC updates your Discord status with what you're watching or listening 
 
 ### Desktop GUI (Windows, macOS, Linux)
 
-Download the executable for your platform from the [GitHub Releases](https://github.com/kennethsible/jellyfin-rpc/releases) page. A [Homebrew](https://brew.sh/) Cask is also available for macOS users. You might need to strip the quarantine attribute on macOS if [Gatekeeper](https://github.com/orgs/pyinstaller/discussions/8976) blocks the application.
+Download the executable for your platform from the [GitHub Releases](https://github.com/kennethsible/jellyfin-rpc/releases) page. A [Homebrew](https://brew.sh/) Cask is also available for macOS users. If [Gatekeeper](https://github.com/orgs/pyinstaller/discussions/8976) blocks the application on macOS, you might need to strip the quarantine attribute. Similarly, if SmartScreen blocks the application on Windows, select "More info" and then "Run anyway."
 
 #### macOS (Homebrew)
 
@@ -45,7 +45,7 @@ Jellyfin host can be either a public or local URL for your server. However, post
 After entering your Jellyfin host, click **Connect** and use [Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) to authenticate with a user access token. To generate an API key instead, go to the server dashboard and select **API Keys** under **Advanced**.
 
 <p align="center">
-  <img src="images/jellyfin_rpc_gui.png" alt="Jellyfin RPC GUI" width="450" />
+  <img src="images/jellyfin_rpc_gui.png" alt="Jellyfin RPC GUI" />
 </p>
 
 If running in headless/CLI mode, configuration is loaded from an INI file. If you encounter any issues, set the log level to `DEBUG` (via the GUI or INI file) and include the log output when opening a [GitHub issue](https://github.com/kennethsible/jellyfin-rpc/issues).
@@ -63,7 +63,7 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `SHOW_WHEN_PAUSED` | `true` | Shows the activity with a paused indicator instead of a progress bar. If disabled, the activity stops displaying when paused. |
 | `SHOW_SERVER_NAME` | `false` | Shows your server name as the activity name instead of saying "Jellyfin". |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
-| `IMDB_EXTERNAL_URLS` | `false` | Controls whether IMDb is prioritized over other providers for external URLs. |
+| `IMDB_EXTERNAL_LINKS` | `false` | Controls whether IMDb is prioritized over other providers for external links. |
 | `POSTER_LANGUAGES` | — | Comma-separated list of languages (preferably two-letter [ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1) language codes) for TMDB. Uses TMDB's default image order if unset. |
 | `TEXTLESS_POSTERS` | `false` | Controls whether textless TMDB posters are prioritized over language posters. |
 | `ALWAYS_USE_TMDB` | `false` | Controls whether TMDB is the default source for posters or a fallback provider for local artwork from Jellyfin. |
