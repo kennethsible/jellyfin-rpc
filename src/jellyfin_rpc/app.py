@@ -7,10 +7,8 @@ import queue
 import re
 import shutil
 import signal
-import socket
 import subprocess
 import sys
-import threading
 from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
 from dataclasses import dataclass
@@ -21,8 +19,9 @@ from types import FrameType
 
 import certifi
 import requests
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPalette, QTextCursor
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -207,40 +206,6 @@ def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[Lo
     queue_hdlr = handlers.QueueHandler(log_queue)
     logger.addHandler(queue_hdlr)
     return log_queue
-
-
-def setup_ipc_server(gui_queue: queue.Queue[str], singleton_port: int) -> socket.socket:
-    try:
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # IPv4 TCP
-        server.bind(('127.0.0.1', singleton_port))
-        server.listen(5)
-    except OSError:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-                client.settimeout(1.0)
-                client.connect(('127.0.0.1', singleton_port))
-                client.sendall(b'FOCUS\n')
-                if client.recv(16).strip() == b'ACK':
-                    os._exit(0)
-        except (ConnectionRefusedError, TimeoutError, OSError):
-            pass
-        logger.error(f'Singleton Port {singleton_port} Already In Use')
-        os._exit(1)
-
-    def listen_for_focus() -> None:
-        while True:
-            try:
-                connection, _ = server.accept()
-                with connection:
-                    connection.settimeout(1.0)
-                    if connection.recv(1024).strip() == b'FOCUS':
-                        gui_queue.put('FOCUS')
-                        connection.sendall(b'ACK\n')
-            except OSError:
-                break
-
-    threading.Thread(target=listen_for_focus, daemon=True).start()
-    return server
 
 
 class RPCProcess:
@@ -434,7 +399,7 @@ class LibrarySelectorWindow(QDialog):
         self.accept()
 
 
-class JellyfinRPCWindow(QWidget):
+class RPCWindow(QWidget):
     def __init__(
         self,
         ini_path: str,
@@ -445,7 +410,7 @@ class JellyfinRPCWindow(QWidget):
         png_bundle_path: str,
     ) -> None:
         super().__init__()
-        self.ipc_server: socket.socket | None = None
+        self.ipc_server: QLocalServer | None = None
 
         self.ini_path = ini_path
         self.log_path = log_path
@@ -1025,6 +990,17 @@ class JellyfinRPCWindow(QWidget):
         os._exit(0)
 
 
+class RPCApplication(QApplication):
+    def __init__(self, argv, gui_queue: queue.Queue):
+        super().__init__(argv)
+        self.gui_queue = gui_queue
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ApplicationActivate:
+            self.gui_queue.put('MAXIMIZE')
+        return super().event(event)
+
+
 def apply_theme(app: QApplication) -> None:
     app.setStyle('Fusion')
     palette = QPalette()
@@ -1157,6 +1133,32 @@ def apply_theme(app: QApplication) -> None:
 
 
 def main() -> None:
+    gui_queue: queue.Queue[str] = queue.Queue()
+
+    app = RPCApplication(sys.argv, gui_queue)
+    apply_theme(app)
+
+    client = QLocalSocket()
+    ipc_server_name = 'jellyfin_rpc'
+    client.connectToServer(ipc_server_name)
+    if client.waitForConnected(500):
+        client.write(b'FOCUS')
+        client.waitForBytesWritten(500)
+        os._exit(0)
+
+    QLocalServer.removeServer(ipc_server_name)
+    ipc_server = QLocalServer()
+    ipc_server.listen(ipc_server_name)
+
+    def handle_ipc():
+        conn = ipc_server.nextPendingConnection()
+        if conn.waitForReadyRead(500) and conn.readAll().data() == b'FOCUS':
+            gui_queue.put('FOCUS')
+        conn.disconnectFromServer()
+        conn.deleteLater()
+
+    ipc_server.newConnection.connect(handle_ipc)
+
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
     png_name = 'icon_menubar.png' if sys.platform == 'darwin' else 'icon.png'
     bundle_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
@@ -1191,20 +1193,10 @@ def main() -> None:
             shutil.copyfile(ini_bundle_path, ini_path)
 
     config = load_config(ini_path)
-    singleton_port = config.getint('SINGLETON_PORT', fallback=SINGLE_INSTANCE_PORT)
-
-    gui_queue: queue.Queue[str] = queue.Queue()
-    ipc_server = setup_ipc_server(gui_queue, singleton_port)
-
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
 
-    app = QApplication(sys.argv)
-    apply_theme(app)
-
-    rpc_window = JellyfinRPCWindow(
-        ini_path, log_path, config, gui_queue, log_queue, png_bundle_path
-    )
+    rpc_window = RPCWindow(ini_path, log_path, config, gui_queue, log_queue, png_bundle_path)
     rpc_window.ipc_server = ipc_server
 
     def signal_handler(signum: int, frame: FrameType | None) -> None:
