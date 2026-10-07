@@ -1,4 +1,3 @@
-import base64
 import functools
 import html
 import logging
@@ -25,6 +24,7 @@ from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
+    QCursor,
     QHideEvent,
     QIcon,
     QPalette,
@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -63,7 +64,6 @@ from .main import (
     start_discord_rpc,
 )
 
-SINGLE_INSTANCE_PORT = 57634
 rpc_logger = logging.getLogger('RPC')
 gui_logger = logging.getLogger('GUI')
 logging.addLevelName(15, 'VERBOSE')
@@ -601,6 +601,7 @@ class RPCWindow(QWidget):
         advanced_layout.addWidget(label_log_level, 2, 0)
 
         self.checkbox_log_level = QComboBox()
+        self.checkbox_log_level.setView(QListView())
         self.checkbox_log_level.setFixedHeight(28)
         self.checkbox_log_level.setCursor(Qt.CursorShape.PointingHandCursor)
         self.checkbox_log_level.addItems(
@@ -920,8 +921,6 @@ class RPCWindow(QWidget):
             and sys.platform == 'darwin'
             and self.tray_menu is not None
         ):
-            from PySide6.QtGui import QCursor
-
             self.tray_menu.exec(QCursor.pos())
 
     def show_update_banner(self, version_tag: str) -> None:
@@ -1031,14 +1030,11 @@ class RPCWindow(QWidget):
     def quit_window(self) -> None:
         if self.is_quitting:
             return
-
         self.is_quitting = True
         self.save_config()
         self.rpc_worker.stop()
-
         if self.tray_icon is not None:
             self.tray_icon.hide()
-
         os._exit(0)
 
 
@@ -1061,16 +1057,6 @@ class RPCApplication(QApplication):
         return super().event(event)
 
 
-def get_checkmark_url(color: str) -> str:
-    svg_url = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" '
-        f'fill="none" stroke="{color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">'
-        f'<polyline points="20 6 9 17 4 12"/></svg>'
-    )
-    b64_str = base64.b64encode(svg_url.encode('utf-8')).decode('utf-8')
-    return f'url("data:image/svg+xml;base64,{b64_str}")'
-
-
 def apply_theme(app: QApplication, bundle_dir: str) -> None:
     app.setStyle('Fusion')
     palette = QPalette()
@@ -1091,37 +1077,79 @@ def apply_theme(app: QApplication, bundle_dir: str) -> None:
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
     app.setPalette(palette)
 
-    check_white = os.path.join(bundle_dir, 'check_white.svg').replace('\\', '/')
-    check_gray = os.path.join(bundle_dir, 'check_gray.svg').replace('\\', '/')
+    assets_dir = os.path.join(bundle_dir, 'images', 'assets')
+    checkmark = os.path.join(assets_dir, 'checkmark.svg').replace('\\', '/')
+    checkmark_disabled = os.path.join(assets_dir, 'checkmark_disabled.svg').replace('\\', '/')
+    chevron = os.path.join(assets_dir, 'chevron.svg').replace('\\', '/')
+    chevron_disabled = os.path.join(assets_dir, 'chevron_disabled.svg').replace('\\', '/')
 
     static_css = """
-        QWidget { 
-            font-size: 13px; 
+        QWidget {
+            font-size: 13px;
         }
-        QLineEdit, QComboBox { 
-            background-color: #343638; 
-            border: 1px solid #565b5e; 
-            border-radius: 4px; 
-            padding: 4px 8px; 
-            color: #dce4e8; 
+        QLineEdit,
+        QComboBox {
+            background-color: #343638;
+            border: 1px solid #565b5e;
+            border-radius: 4px;
+            padding: 4px 8px;
+            color: #dce4e8;
         }
-        QLineEdit:disabled, QComboBox:disabled { 
-            background-color: #2a2d2e; 
-            color: #7a8489; 
+        QLineEdit:disabled,
+        QComboBox:disabled {
+            background-color: #2a2d2e;
+            color: #7a8489;
+            border-color: #3e4244;
         }
-        QPushButton { 
-            background-color: #1f6aa5; 
-            border-radius: 4px; 
-            padding: 6px 12px; 
-            color: white; 
-            font-weight: bold; 
+        QComboBox {
+            padding-right: 24px;
         }
-        QPushButton:hover { 
-            background-color: #144870; 
+        QComboBox:hover {
+            border-color: #3daee9;
         }
-        QPushButton:disabled { 
-            background-color: #2a2d2e; 
-            color: #7a8489; 
+        QComboBox:on {
+            border-color: #1f6aa5;
+        }
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 20px;
+            border-left: none;
+            background: transparent;
+        }
+        QComboBoxPrivateContainer {
+            background-color: #2b2b2b;
+            border: 1px solid #565b5e;
+        }
+        QComboBox QAbstractItemView {
+            background-color: transparent;
+            border: none;
+            color: #dce4e8;
+            outline: 0px;
+        }
+        QComboBox QAbstractItemView::item {
+            min-height: 24px;
+            padding-left: 6px;
+            padding-right: 6px;
+        }
+        QComboBox QAbstractItemView::item:hover,
+        QComboBox QAbstractItemView::item:selected {
+            background-color: #1f6aa5;
+            color: #ffffff;
+        }
+        QPushButton {
+            background-color: #1f6aa5;
+            border-radius: 4px;
+            padding: 6px 12px;
+            color: white;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #144870;
+        }
+        QPushButton:disabled {
+            background-color: #2a2d2e;
+            color: #7a8489;
         }
         QPushButton#spin_button {
             padding: 0px;
@@ -1145,67 +1173,80 @@ def apply_theme(app: QApplication, bundle_dir: str) -> None:
             color: #ffffff;
             font-weight: bold;
         }
-        QCheckBox { 
+        QCheckBox {
             spacing: 7px;
             color: #dce4e8;
         }
-        QCheckBox:hover { 
-            color: #ffffff; 
+        QCheckBox:hover {
+            color: #ffffff;
         }
         QCheckBox:disabled {
             color: #565b5e;
         }
-        QCheckBox::indicator { 
-            width: 20px; 
-            height: 20px; 
-            border-radius: 4px; 
-            border: 2px solid #565b5e; 
-            background-color: #343638; 
+        QCheckBox::indicator {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 2px solid #565b5e;
+            background-color: #343638;
         }
-        QCheckBox::indicator:hover { 
-            border-color: #3daee9; 
+        QCheckBox::indicator:hover {
+            border-color: #3daee9;
         }
         QCheckBox::indicator:disabled {
             border-color: #3e4244;
             background-color: #242424;
         }
-        QTextBrowser { 
-            background-color: #2b2b2b; 
-            border-radius: 4px; 
-            border: 1px solid #565b5e; 
-            padding: 6px; 
+        QTextBrowser {
+            background-color: #2b2b2b;
+            border-radius: 4px;
+            border: 1px solid #565b5e;
+            padding: 6px;
         }
-        QScrollBar:vertical { 
-            background: #242424; 
-            width: 12px; 
-            margin: 0px; 
+        QScrollBar:vertical {
+            background: #242424;
+            width: 12px;
+            margin: 0px;
         }
-        QScrollBar::handle:vertical { 
-            background: #565b5e; 
-            min-height: 20px; 
-            border-radius: 6px; 
-            margin: 2px; 
+        QScrollBar::handle:vertical {
+            background: #565b5e;
+            min-height: 20px;
+            border-radius: 6px;
+            margin: 2px;
         }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { 
-            height: 0px; 
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            height: 0px;
         }
     """
 
     dynamic_css = f"""
-        QCheckBox::indicator:checked {{ 
-            background-color: #1f6aa5; 
-            border: 2px solid #1f6aa5; 
-            image: url("{check_white}");
+        QCheckBox::indicator:checked {{
+            background-color: #1f6aa5;
+            border: 2px solid #1f6aa5;
+            image: url("{checkmark}");
         }}
-        QCheckBox::indicator:checked:hover {{ 
-            background-color: #2980b9; 
-            border-color: #2980b9; 
-            image: url("{check_white}");
+        QCheckBox::indicator:checked:hover {{
+            background-color: #2980b9;
+            border-color: #2980b9;
+            image: url("{checkmark}");
         }}
         QCheckBox::indicator:checked:disabled {{
             background-color: #2c3e50;
             border-color: #2c3e50;
-            image: url("{check_gray}");
+            image: url("{checkmark_disabled}");
+        }}
+        QComboBox::down-arrow {{
+            image: url("{chevron}");
+            width: 12px;
+            height: 12px;
+            margin-right: 8px;
+        }}
+        QComboBox::down-arrow:disabled {{
+            image: url("{chevron_disabled}");
+            width: 12px;
+            height: 12px;
+            margin-right: 8px;
         }}
     """
 
@@ -1216,8 +1257,11 @@ def main() -> None:
     gui_queue: Queue[str] = Queue()
 
     app = RPCApplication(sys.argv, gui_queue)
-    base_dir = os.path.abspath(os.path.dirname(__file__))
-    bundle_dir = getattr(sys, '_MEIPASS', base_dir)
+    script_dir = os.path.abspath(os.path.dirname(__file__))
+    if getattr(sys, 'frozen', False):
+        bundle_dir = getattr(sys, '_MEIPASS', script_dir)
+    else:
+        bundle_dir = os.path.abspath(os.path.join(script_dir, '..', '..'))
     apply_theme(app, bundle_dir)
 
     client = QLocalSocket()
@@ -1242,9 +1286,9 @@ def main() -> None:
     ipc_server.newConnection.connect(handle_ipc)
 
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
-    png_name = 'icon_menubar.png' if sys.platform == 'darwin' else 'icon.png'
+    png_name = 'menubar.png' if sys.platform == 'darwin' else 'icon.png'
     ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
-    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, png_name))
+    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'images', 'icons', png_name))
     os.chdir(os.path.dirname(get_executable_path()))
 
     data_dir = ''

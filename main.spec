@@ -10,11 +10,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ('jellyfin_rpc.ini', '.'),
-        ('images/icon_menubar.png', '.'),
-        ('images/icon.png', '.'),
-        ('images/icon.ico', '.'),
-        ('images/check_white.svg', '.'),
-        ('images/check_gray.svg', '.'),
+        ('images/assets', 'images/assets'),
+        ('images/icons', 'images/icons'),
         *collect_data_files('certifi'),
         *collect_data_files('language_data'),
     ],
@@ -47,7 +44,7 @@ exe = EXE(
     target_arch=os.getenv('MACOS_ARCH'),
     codesign_identity=None,
     entitlements_file=None,
-    icon=['images/icon.ico'],
+    icon=['images/icons/icon.ico'],
 )
 
 if platform.system() == 'Darwin':
@@ -61,6 +58,6 @@ if platform.system() == 'Darwin':
     app = BUNDLE(
         coll,
         name='Jellyfin RPC.app',
-        icon='images/icon.icns',
+        icon='images/icons/icon.icns',
         bundle_identifier=None,
     )

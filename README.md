@@ -10,8 +10,8 @@
 Jellyfin RPC updates your Discord status with what you're watching or listening to on your Jellyfin server. Make sure your desktop client for Discord is running and your [Activity Sharing](https://support.discord.com/hc/en-us/articles/7931156448919-Activity-Sharing-on-Discord-FAQ) settings are enabled.
 
 <p align="center">
-  <img src="images/jellyfin_rpc_series.png" alt="Discord Episode Activity" width="300" />
-  <img src="images/jellyfin_rpc_music.png" alt="Discord Music Activity" width="300" />
+  <img src="images/docs/jellyfin_rpc_series.png" alt="Discord Episode Activity" width="300" />
+  <img src="images/docs/jellyfin_rpc_music.png" alt="Discord Music Activity" width="300" />
 </p>
 
 ## Installation
@@ -45,7 +45,7 @@ Jellyfin host can be either a public or local URL for your server. However, post
 After entering your Jellyfin host, click **Connect** and use [Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) to authenticate with a user access token. To generate an API key instead, go to the server dashboard and select **API Keys** under **Advanced**.
 
 <p align="center">
-  <img src="images/jellyfin_rpc_gui.png" alt="Jellyfin RPC GUI" />
+  <img src="images/docs/jellyfin_rpc_gui.png" alt="Jellyfin RPC GUI" />
 </p>
 
 If running in headless/CLI mode, configuration is loaded from an INI file. If you encounter any issues, set the log level to `DEBUG` (via the GUI or INI file) and include the log output when opening a [GitHub issue](https://github.com/kennethsible/jellyfin-rpc/issues).

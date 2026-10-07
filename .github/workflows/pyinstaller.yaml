@@ -64,15 +64,15 @@ jobs:
 
           mkdir -p dist/AppDir/usr/bin
           mkdir -p dist/AppDir/usr/lib
-          cp images/icon.png dist/AppDir/jellyfin-rpc.png
+          cp images/icons/icon.png dist/AppDir/jellyfin-rpc.png
           mv "dist/Jellyfin RPC" dist/AppDir/usr/bin/jellyfin-rpc
 
           cp -P /usr/lib/x86_64-linux-gnu/libxcb-cursor.so* dist/AppDir/usr/lib/
 
           mkdir -p dist/AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p dist/AppDir/usr/share/icons/hicolor/512x512/apps
-          cp images/icon_256x256.png dist/AppDir/usr/share/icons/hicolor/256x256/apps/jellyfin-rpc.png
-          cp images/icon_512x512.png dist/AppDir/usr/share/icons/hicolor/512x512/apps/jellyfin-rpc.png
+          cp images/docs/icon_256x256.png dist/AppDir/usr/share/icons/hicolor/256x256/apps/jellyfin-rpc.png
+          cp images/docs/icon_512x512.png dist/AppDir/usr/share/icons/hicolor/512x512/apps/jellyfin-rpc.png
 
           cat << 'EOF' > dist/AppDir/jellyfin-rpc.desktop
           [Desktop Entry]
