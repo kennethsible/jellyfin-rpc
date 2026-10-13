@@ -943,7 +943,7 @@ class RPCWindow(QWidget):
     def poll_log_queue(self) -> None:
         color_map = {
             'DEBUG': '#95A5A6',
-            'VERBOSE': '#7DC2E7',
+            'VERBOSE': '#9B59B6',
             'INFO': '#3DAEE9',
             'WARNING': '#F67400',
             'ERROR': '#DA4453',

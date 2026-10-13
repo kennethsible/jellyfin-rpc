@@ -1293,13 +1293,13 @@ async def activity_loop(
             if media_changed or seek_detected or playstate_changed:
                 rpc_state.has_pending_update = True
                 if media_changed:
-                    rpc_state.pending_payload = ('media_changed', activity_str)
+                    rpc_state.pending_payload = None
                 elif seek_detected:
                     delta_str = f'+{seek_delta}s' if seek_delta > 0 else f'{seek_delta}s'
-                    rpc_state.pending_payload = ('seek_detected', delta_str)
+                    rpc_state.pending_payload = ('seek_detected', f'Seek Detected ({delta_str})')
                 elif playstate_changed:
                     playstate = 'Paused' if session_paused else 'Resumed'
-                    rpc_state.pending_payload = ('playstate_changed', playstate)
+                    rpc_state.pending_payload = ('playstate_changed', f'PlayState {playstate}')
 
             if (
                 rpc_state.has_pending_update
@@ -1314,17 +1314,11 @@ async def activity_loop(
                     'media_paused' if session_paused else 'small_image' if show_jf_logo else None
                 )
 
+                if rpc_state.last_activity_str != activity_str:
+                    logger.info(f'"{activity_str}"')
                 if rpc_state.pending_payload:
-                    update_type, payload = rpc_state.pending_payload
-                    match update_type:
-                        case 'media_changed':
-                            logger.info(f'"{payload}"')
-                        case 'seek_detected':
-                            logger.log(15, f'Seek Detected ({payload})')
-                        case 'playstate_changed':
-                            logger.log(15, f'PlayState {payload}')
-                        case _:
-                            pass
+                    _, payload = rpc_state.pending_payload
+                    logger.log(15, payload)
                     rpc_state.pending_payload = None
 
                 try:
