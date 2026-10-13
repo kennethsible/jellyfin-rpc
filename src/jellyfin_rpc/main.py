@@ -270,10 +270,10 @@ async def check_tmdb_auth(session: ClientSession, api_key: str) -> None:
         logger.info('Connected to TMDB API')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
 
 
@@ -295,13 +295,13 @@ async def get_imdb_episode_id(
             return data.get('imdb_id')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return None
 
@@ -326,13 +326,13 @@ async def get_series_id(
                 return results[0].get('id')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return None
 
@@ -357,13 +357,13 @@ async def get_movie_id(
                 return results[0].get('id')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return None
 
@@ -387,13 +387,14 @@ async def get_music_id_from_search(session: ClientSession, artist: str, album: s
             if release_groups := data.get('release-groups'):
                 return release_groups[0].get('id')
     except aiohttp.ClientResponseError as e:
-        logger.warning(f'MusicBrainz HTTP Error ({e.status}: {e.message})')
-        logger.debug(e)
+        obfuscated_url = e.request_info.real_url.with_query(None)
+        logger.error(f'MusicBrainz API HTTP Error ({e.status}: {e.message})')
+        logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'MusicBrainz API Network Error ({type(e).__name__})')
+        logger.error(f'MusicBrainz API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'MusicBrainz API Parsing Error ({type(e).__name__})')
+        logger.error(f'MusicBrainz API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return None
 
@@ -414,13 +415,14 @@ async def get_music_id_from_release(session: ClientSession, release_id: str) -> 
             if release_group := data.get('release-group'):
                 return release_group.get('id')
     except aiohttp.ClientResponseError as e:
-        logger.warning(f'MusicBrainz HTTP Error ({e.status}: {e.message})')
-        logger.debug(e)
+        obfuscated_url = e.request_info.real_url.with_query(None)
+        logger.error(f'MusicBrainz API HTTP Error ({e.status}: {e.message})')
+        logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'MusicBrainz API Network Error ({type(e).__name__})')
+        logger.error(f'MusicBrainz API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'MusicBrainz API Parsing Error ({type(e).__name__})')
+        logger.error(f'MusicBrainz API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return None
 
@@ -484,13 +486,13 @@ async def get_series_poster(
                 logger.warning('No Poster Available on TMDB')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return 'large_image'
 
@@ -504,7 +506,6 @@ async def get_season_poster(
 ) -> str:
     if season is None:
         return await get_series_poster(session, api_key, tmdb_id, languages)
-
     try:
         if languages:
             images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images'
@@ -514,7 +515,7 @@ async def get_season_poster(
                     return await get_series_poster(session, api_key, tmdb_id, languages)
                 if response.status == 429:
                     logger.warning('TMDB API Rate Limit Exceeded (HTTP 429)')
-                    return await get_series_poster(session, api_key, tmdb_id, languages)
+                    return 'large_image'
                 response.raise_for_status()
                 data = await response.json()
                 if poster := select_poster(data['posters'], languages):
@@ -528,7 +529,7 @@ async def get_season_poster(
                     return await get_series_poster(session, api_key, tmdb_id, languages)
                 if response.status == 429:
                     logger.warning('TMDB API Rate Limit Exceeded (HTTP 429)')
-                    return await get_series_poster(session, api_key, tmdb_id, languages)
+                    return 'large_image'
                 response.raise_for_status()
                 data = await response.json()
                 if poster_path := data.get('poster_path'):
@@ -536,11 +537,16 @@ async def get_season_poster(
                 logger.warning('No Poster Available on TMDB')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
-    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError) as e:
+        return 'large_image'
+    except (aiohttp.ClientError, TimeoutError) as e:
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
-
+        return 'large_image'
+    except (ValueError, KeyError, IndexError) as e:
+        logger.debug(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.debug(e)
     return await get_series_poster(session, api_key, tmdb_id, languages)
 
 
@@ -578,13 +584,13 @@ async def get_movie_poster(
                 logger.warning('No Poster Available on TMDB')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
-        logger.warning(f'TMDB API HTTP Error ({e.status}: {e.message})')
+        logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'TMDB API Network Error ({type(e).__name__})')
+        logger.error(f'TMDB API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return 'large_image'
 
@@ -596,7 +602,7 @@ async def get_release_group_cover(session: ClientSession, group_id: str) -> str:
                 logger.debug(f'Release Group {group_id} Not Found on Cover Art Archive')
                 return 'large_image'
             if response.status == 429:
-                logger.warning('Cover Art Archive Rate Limit Exceeded (HTTP 429)')
+                logger.warning('Cover Art Archive API Rate Limit Exceeded (HTTP 429)')
                 return 'large_image'
             response.raise_for_status()
             data = await response.json()
@@ -605,13 +611,14 @@ async def get_release_group_cover(session: ClientSession, group_id: str) -> str:
                 return images[0]['image']
             logger.warning('No Cover Art Available on Cover Art Archive')
     except aiohttp.ClientResponseError as e:
-        logger.warning(f'Cover Art Archive HTTP Error ({e.status}: {e.message})')
-        logger.debug(e)
+        obfuscated_url = e.request_info.real_url.with_query(None)
+        logger.error(f'Cover Art Archive API HTTP Error ({e.status}: {e.message})')
+        logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'Cover Art Archive API Network Error ({type(e).__name__})')
+        logger.error(f'Cover Art Archive API Network Error ({type(e).__name__})')
         logger.debug(e)
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f'Cover Art Archive API Parsing Error ({type(e).__name__})')
+        logger.error(f'Cover Art Archive API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return 'large_image'
 
@@ -627,20 +634,24 @@ async def get_release_cover(
                 logger.debug(f'Release {release_id} Not Found on Cover Art Archive')
                 return await get_release_group_cover(session, group_id)
             if response.status == 429:
-                logger.warning('Cover Art Archive Rate Limit Exceeded (HTTP 429)')
-                return await get_release_group_cover(session, group_id)
+                logger.warning('Cover Art Archive API Rate Limit Exceeded (HTTP 429)')
+                return 'large_image'
             response.raise_for_status()
             data = await response.json()
             images = data.get('images', [])
             if images and 'image' in images[0]:
                 return images[0]['image']
     except aiohttp.ClientResponseError as e:
-        logger.warning(f'Cover Art Archive HTTP Error ({e.status}: {e.message})')
-        logger.debug(e)
+        obfuscated_url = e.request_info.real_url.with_query(None)
+        logger.error(f'Cover Art Archive API HTTP Error ({e.status}: {e.message})')
+        logger.debug(f'HTTP {e.status} at {obfuscated_url}')
+        return 'large_image'
     except (aiohttp.ClientError, TimeoutError) as e:
-        logger.warning(f'Cover Art Archive Network Error ({type(e).__name__})')
+        logger.error(f'Cover Art Archive API Network Error ({type(e).__name__})')
         logger.debug(e)
+        return 'large_image'
     except (ValueError, KeyError, IndexError) as e:
+        logger.debug(f'Cover Art Archive API Parsing Error ({type(e).__name__})')
         logger.debug(e)
     return await get_release_group_cover(session, group_id)
 
@@ -779,7 +790,7 @@ async def websocket_listener(
             break
         except (aiohttp.ClientError, TimeoutError, ValueError) as e:
             if initial_attempt:
-                logger.warning(f'Jellyfin WebSocket Error ({type(e).__name__}). Retrying...')
+                logger.error(f'Jellyfin WebSocket Error ({type(e).__name__}). Retrying...')
                 logger.debug(e)
                 initial_attempt = False
         finally:
