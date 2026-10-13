@@ -427,6 +427,7 @@ class RPCWindow(QWidget):
         gui_queue: Queue[str],
         log_queue: Queue[LogRecord],
         png_bundle_path: str,
+        png_active_path: str,
     ) -> None:
         super().__init__()
         self.ipc_server: QLocalServer | None = None
@@ -441,6 +442,13 @@ class RPCWindow(QWidget):
         self.gui_queue = gui_queue
         self.log_queue = log_queue
         self.png_bundle_path = png_bundle_path
+        self.png_active_path = png_active_path
+
+        self.icon_bundle = QIcon(self.png_bundle_path)
+        self.icon_active = QIcon(self.png_active_path)
+        if sys.platform == 'darwin':
+            self.icon_bundle.setIsMask(True)
+            self.icon_active.setIsMask(True)
 
         self.rpc_worker = RPCWorker(
             functools.partial(start_discord_rpc, ini_path, log_path), log_queue
@@ -483,7 +491,8 @@ class RPCWindow(QWidget):
 
     def create_window(self):
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
-        self.setWindowIcon(QIcon(self.png_bundle_path))
+        if sys.platform != 'darwin':
+            self.setWindowIcon(self.icon_bundle)
         self.setMinimumSize(860, 560)
 
         main_layout = QVBoxLayout(self)
@@ -562,9 +571,9 @@ class RPCWindow(QWidget):
 
         col3.addWidget(self.create_header('Activity Settings'))
         self.create_checkbox(col3, 'SHOW_WHEN_PAUSED', 'Show Activity While Paused')
-        self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Jellyfin Logo (Small Image)')
+        self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Small Jellyfin Logo')
         self.create_checkbox(col3, 'SHOW_SERVER_NAME', 'Show Jellyfin Server Name')
-        self.create_checkbox(col3, 'IMDB_EXTERNAL_LINKS', 'Prefer External IMDb Links')
+        self.create_checkbox(col3, 'IMDB_EXTERNAL_LINKS', 'Prefer IMDb External Links')
 
         col3.addWidget(self.create_header('System Settings'))
         checkbox_startup = QCheckBox('Open Jellyfin RPC on Startup')
@@ -861,7 +870,7 @@ class RPCWindow(QWidget):
             self.button_connect.setText('Disconnect')
             if self.tray_icon is not None and self.action_connect is not None:
                 self.action_connect.setText('Disconnect')
-                self.tray_icon.setToolTip('Jellyfin RPC\nConnected')
+                self.tray_icon.setIcon(self.icon_active)
             self.is_connected = True
         else:
             self.rpc_worker.stop()
@@ -873,21 +882,22 @@ class RPCWindow(QWidget):
             self.button_connect.setText('Connect')
             if self.tray_icon is not None and self.action_connect is not None:
                 self.action_connect.setText('Connect')
-                self.tray_icon.setToolTip('Jellyfin RPC\nDisconnected')
+                self.tray_icon.setIcon(self.icon_bundle)
             self.is_connected = False
 
     def setup_tray(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
 
-        icon = QIcon(self.png_bundle_path)
-        if icon.isNull():
-            icon = self.style().standardIcon(self.style().StandardPixmap.SP_TitleBarMenuButton)
+        tray_icon = self.icon_active if self.is_connected else self.icon_bundle
+        if tray_icon.isNull():
+            tray_icon = self.style().standardIcon(self.style().StandardPixmap.SP_TitleBarMenuButton)
+            if sys.platform == 'darwin':
+                tray_icon.setIsMask(True)
 
         self.tray_menu = QMenu(self)
-        self.tray_icon = QSystemTrayIcon(icon, self)
-        rpc_state = 'Connected' if self.is_connected else 'Disconnected'
-        self.tray_icon.setToolTip(f'Jellyfin RPC\n{rpc_state}')
+        self.tray_icon = QSystemTrayIcon(tray_icon, self)
+        self.tray_icon.setToolTip('Jellyfin RPC')
 
         action_text = 'Disconnect' if self.is_connected else 'Connect'
         self.action_connect = self.tray_menu.addAction(action_text)
@@ -1286,9 +1296,11 @@ def main() -> None:
     ipc_server.newConnection.connect(handle_ipc)
 
     ini_name, log_name = 'jellyfin_rpc.ini', 'jellyfin_rpc.log'
-    png_name = 'menubar.png' if sys.platform == 'darwin' else 'icon.png'
+    png_bundle_name = 'menubar_dimmed.png' if sys.platform == 'darwin' else 'icon.png'
+    png_active_name = 'menubar_active.png' if sys.platform == 'darwin' else 'tray_active.png'
     ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
-    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'images', 'icons', png_name))
+    png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'images', 'icons', png_bundle_name))
+    png_active_path = os.path.abspath(os.path.join(bundle_dir, 'images', 'icons', png_active_name))
     os.chdir(os.path.dirname(get_executable_path()))
 
     data_dir = ''
@@ -1321,7 +1333,9 @@ def main() -> None:
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
     log_queue = setup_logging(log_level, log_path)
 
-    rpc_window = RPCWindow(ini_path, log_path, config, gui_queue, log_queue, png_bundle_path)
+    rpc_window = RPCWindow(
+        ini_path, log_path, config, gui_queue, log_queue, png_bundle_path, png_active_path
+    )
     rpc_window.ipc_server = ipc_server
 
     def signal_handler(signum: int, frame: FrameType | None) -> None:
