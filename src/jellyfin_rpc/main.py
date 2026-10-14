@@ -825,6 +825,7 @@ async def activity_loop(
     ini_path: str,
     polling_rate: int,
     seek_threshold: int,
+    session_timeout: int,
     stale_grace_period: int,
     ws_state: dict[str, Any],
     wake_event: asyncio.Event,
@@ -1340,11 +1341,14 @@ async def activity_loop(
                     continue
 
         elif rpc_state.last_activity_str:
-            if not await clear_activity(discord_rpc, polling_rate):
-                continue
-            rpc_state.reset()
-            cached_item_id = None
-            cached_kwargs.clear()
+            if rpc_state.last_timestamp is None or time.time() >= (
+                rpc_state.last_timestamp + session_timeout
+            ):
+                if not await clear_activity(discord_rpc, polling_rate):
+                    continue
+                rpc_state.reset()
+                cached_item_id = None
+                cached_kwargs.clear()
 
         if not ws_state.get('ws_connected'):
             await asyncio.sleep(polling_rate)
@@ -1355,6 +1359,7 @@ async def monitor_activity(
     ini_path: str,
     polling_rate: int,
     seek_threshold: int,
+    session_timeout: int,
     stale_grace_period: int,
 ) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
@@ -1395,6 +1400,7 @@ async def monitor_activity(
                     ini_path,
                     polling_rate,
                     seek_threshold,
+                    session_timeout,
                     stale_grace_period,
                     ws_state,
                     wake_event,
@@ -1419,6 +1425,7 @@ def start_discord_rpc(
     config = load_config(ini_path)
     polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
+    session_timeout = max(1, config.getint('SESSION_TIMEOUT', 1))
     stale_grace_period = max(1, config.getint('STALE_GRACE_PERIOD', 5))
 
     logger.setLevel(logging.DEBUG)
@@ -1449,7 +1456,9 @@ def start_discord_rpc(
 
     async def runner() -> None:
         main_task = asyncio.create_task(
-            monitor_activity(config, ini_path, polling_rate, seek_threshold, stale_grace_period)
+            monitor_activity(
+                config, ini_path, polling_rate, seek_threshold, session_timeout, stale_grace_period
+            )
         )
         watcher_task = None
         if stop_event is not None:
