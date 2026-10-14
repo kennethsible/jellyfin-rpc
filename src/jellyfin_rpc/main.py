@@ -86,6 +86,15 @@ def get_valid_level(level_str: str, default: int) -> int:
     return level_mapping.get(level_str.upper().strip(), default)
 
 
+def sanitize_discord_str(presence_var: str | None) -> str | None:
+    if presence_var is None:
+        return None
+    presence_var = presence_var.strip()
+    if len(presence_var) == 1:
+        return f'{presence_var} '
+    return presence_var[:128]
+
+
 def get_lang_code(lang_str: str) -> str | None:
     lang_str = lang_str.strip()
     try:
@@ -871,16 +880,16 @@ async def activity_loop(
     selected_libraries = parse_delimited_list(config, 'SELECTED_LIBRARIES')
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
-    jf_media_types: set[str] = set()
-    if 'Shows' in media_types:
-        jf_media_types.add('Episode')
-    if 'Movies' in media_types:
-        jf_media_types.add('Movie')
-    if 'Music' in media_types:
-        jf_media_types.add('Audio')
+    type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio'}
+    media_priority = {
+        type_mapping[media_type]: len(media_types) - i
+        for i, media_type in enumerate(media_types)
+        if media_type in type_mapping
+    }
 
     activity_str = ''
     rpc_state = PresenceState()
+    active_session_id: str | None = None
     last_unsupported_warning = False
     last_missing_key_warning = False
 
@@ -923,16 +932,34 @@ async def activity_loop(
                 await asyncio.sleep(polling_rate)
                 continue
 
-        session_data: dict[str, Any] = {}
+        filtered_sessions: list[dict[str, Any]] = []
         for session in sessions:
             if session.get('UserName') != jf_username:
                 continue
-            if not (item := session.get('NowPlayingItem')):
+            item = session.get('NowPlayingItem')
+            if not item or item.get('Type') not in media_priority:
                 continue
-            media_type = item.get('Type')
-            if media_type in jf_media_types:
-                session_data = session
-                break
+            filtered_sessions.append(session)
+
+        session_data: dict[str, Any] = {}
+        if filtered_sessions:
+
+            def session_sort_key(
+                session: dict[str, Any], current_id: str | None = active_session_id
+            ) -> tuple[Any, ...]:
+                playstate = session.get('PlayState', {})
+                is_active = not playstate.get('IsPaused', False)
+                item_type = session.get('NowPlayingItem', {}).get('Type', '')
+                item_priority = media_priority.get(item_type, 0)
+                is_current = 1 if session.get('Id') == current_id else 0
+                activity_date = session.get('LastActivityDate', '')
+                return (is_active, item_priority, is_current, activity_date)
+
+            filtered_sessions.sort(key=session_sort_key, reverse=True)
+            session_data = filtered_sessions[0]
+            active_session_id = session_data.get('Id')
+        else:
+            active_session_id = None
 
         if session_data:
             media_dict = session_data['NowPlayingItem']
@@ -1074,9 +1101,6 @@ async def activity_loop(
                                     continue
                                 rpc_state.reset()
                             continue
-
-                    if len(details_str) < 2:
-                        details_str += ' '
 
                     poster_url = 'large_image'
                     details_url = state_url = None
@@ -1273,9 +1297,9 @@ async def activity_loop(
                         'activity_type': activity_type,
                         'status_display_type': StatusDisplayType.DETAILS,
                         'name': display_name,
-                        'details': details_str[:128] if details_str else None,
+                        'details': sanitize_discord_str(details_str),
                         'details_url': details_url,
-                        'state': state_str[:128] if state_str else None,
+                        'state': sanitize_discord_str(state_str),
                         'state_url': state_url,
                         'large_image': poster_url,
                     }
@@ -1414,6 +1438,7 @@ async def monitor_activity(
     finally:
         with suppress(PyPresenceException, OSError, RuntimeError):
             discord_rpc.close()
+        await asyncio.sleep(0.25)
 
 
 def start_discord_rpc(
@@ -1425,7 +1450,7 @@ def start_discord_rpc(
     config = load_config(ini_path)
     polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
-    session_timeout = max(1, config.getint('SESSION_TIMEOUT', 1))
+    session_timeout = max(1, config.getint('SESSION_TIMEOUT', 2))
     stale_grace_period = max(1, config.getint('STALE_GRACE_PERIOD', 5))
 
     logger.setLevel(logging.DEBUG)
@@ -1477,6 +1502,8 @@ def start_discord_rpc(
         finally:
             if watcher_task is not None:
                 watcher_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await watcher_task
 
     asyncio.run(runner())
 

@@ -56,32 +56,31 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | Key | Default | Description |
 | :--- | :--- | :--- |
 | `JELLYFIN_HOST` | — | Jellyfin server URL (e.g., `https://jellyfin.example.com` or `http://localhost:8096`). |
-| `JELLYFIN_API_KEY` | — | Jellyfin API key (generated automatically when authenticating with Quick Connect). |
-| `JELLYFIN_USERNAME` | — | Jellyfin username to display media activity for in Discord. |
-| `TMDB_API_KEY` | — | Optional API key from TMDB (required for posters if your Jellyfin server is local). |
-| `MEDIA_TYPES` | `Shows, Movies, Music` | Comma-separated list of media types to display activities for (`Shows`, `Movies`, `Music`). |
-| `SHOW_WHEN_PAUSED` | `true` | Shows the activity with a paused indicator instead of a progress bar. If disabled, the activity stops displaying when paused. |
-| `SHOW_SERVER_NAME` | `false` | Shows your server name as the activity name instead of saying "Jellyfin". |
+| `JELLYFIN_API_KEY` | — | Jellyfin API key. Generated automatically when authenticating with Quick Connect. |
+| `JELLYFIN_USERNAME` | — | Jellyfin username whose playback sessions are displayed in Discord. |
+| `TMDB_API_KEY` | — | TMDB API key. Required for posters if your Jellyfin server is hosted locally. |
+| `MEDIA_TYPES` | `Movies, Shows, Music` | Comma-separated list of enabled media types. Ordered from highest to lowest display priority (`Movies`, `Shows`, `Music`). |
+| `SHOW_WHEN_PAUSED` | `true` | Shows paused activities with a small icon in the bottom right of the poster or album cover instead of a progress bar. Pausing clears the activity when disabled. |
+| `SHOW_SERVER_NAME` | `false` | Shows your Jellyfin server name as the activity name instead of "Jellyfin". |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
-| `IMDB_EXTERNAL_LINKS` | `false` | Controls whether IMDb is prioritized over other providers for external links. |
-| `POSTER_LANGUAGES` | — | Comma-separated list of languages (preferably two-letter [ISO 639-1](https://en.wikipedia.org/wiki/ISO_639-1) language codes) for TMDB. Uses TMDB's default image order if unset. |
-| `TEXTLESS_POSTERS` | `false` | Controls whether textless TMDB posters are prioritized over language posters. |
-| `ALWAYS_USE_TMDB` | `false` | Controls whether TMDB is the default source for posters or a fallback provider for local artwork from Jellyfin. |
-| `SEASON_OVER_SERIES` | `false` | Controls whether season posters are preferred over series posters for shows. |
-| `ALWAYS_USE_MUSICBRAINZ` | `false` | Controls whether MusicBrainz (via the Cover Art Archive) is the default source for album covers or a fallback provider for local artwork from Jellyfin. |
-| `RELEASE_OVER_GROUP` | `false` | Controls whether [release](https://musicbrainz.org/doc/Release) artwork is preferred over [release group](https://musicbrainz.org/doc/Release_Group) artwork on MusicBrainz. |
-| `LIBRARY_FILTER_TYPE` | `Denylist` | Controls whether the library filter uses a whitelist (allowed) or blacklist (blocked). |
-| `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs (the `topParentId` in the web client URL) to either whitelist or blacklist. |
-| `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions (or the minimum delay/fallback interval between WebSocket events). |
+| `IMDB_EXTERNAL_LINKS` | `false` | Prioritizes IMDb for external links over other metadata providers. |
+| `POSTER_LANGUAGES` | — | Comma-separated list of languages or [two-letter codes](https://en.wikipedia.org/wiki/ISO_639-1) for TMDB posters. Uses TMDB's default image order when unset. |
+| `TEXTLESS_POSTERS` | `false` | Prioritizes textless TMDB posters over language-specific posters. |
+| `ALWAYS_USE_TMDB` | `false` | Uses TMDB as the primary source for posters. Serves as a fallback for missing artwork in Jellyfin when disabled. |
+| `SEASON_OVER_SERIES` | `false` | Prioritizes season posters over series posters for TV shows. |
+| `ALWAYS_USE_MUSICBRAINZ` | `false` | Uses the Cover Art Archive (MusicBrainz) as the primary source for album covers. Serves as a fallback for missing artwork in Jellyfin when disabled. |
+| `RELEASE_OVER_GROUP` | `false` | Prioritizes [release](https://musicbrainz.org/doc/Release) artwork over [release group](https://musicbrainz.org/doc/Release_Group) artwork for music. |
+| `LIBRARY_FILTER_TYPE` | `Denylist` | Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked (`Allowlist` or `Denylist`). |
+| `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs to allow or block. Found as the `topParentId` parameter in the web client URL. |
+| `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events (if your Jellyfin server and reverse proxy support WebSockets). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
-| `SESSION_TIMEOUT` | `1` | Delay in seconds before clearing the activity, smoothing transitions between media. |
+| `SESSION_TIMEOUT` | `2` | Delay in seconds before clearing the activity. Smooths transitions between media items. |
 | `STALE_GRACE_PERIOD` | `5` | Buffer in seconds to wait after media finishes before clearing a stale session. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
-| `LOG_LEVEL_FILE` | `DEBUG` | Logging verbosity for the log file (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
-| `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one (default is 5 MB). |
+| `LOG_LEVEL_FILE` | `DEBUG` | Logging verbosity for the log file. Accepts the same levels as `LOG_LEVEL`. |
+| `LOG_MAX_BYTES` | `5242880` | Maximum size in bytes of a log file before rotating to a new one. |
 | `LOG_MAX_FILES` | `3` | Maximum number of log files to keep before deleting the oldest. |
-| `DISCORD_CLIENT_ID` | — | Optional custom Discord application client ID. Uses the provided application if unset. |
-| `SINGLETON_PORT` | `57634` | Local TCP port used to prevent multiple instances and focus the active window on launch. |
+| `DISCORD_CLIENT_ID` | — | Custom Discord application client ID. Uses the built-in application when unset. |
 
 ## CLI Usage (Headless)
 
