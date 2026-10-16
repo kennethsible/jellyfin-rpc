@@ -71,6 +71,7 @@ if platform.system() == 'Darwin':
         bundle_identifier='com.kennethsible.jellyfin-rpc',
         info_plist={
             'CFBundleName': 'Jellyfin RPC',
-            'CFBundleDisplayName': 'Jellyfin RPC'
+            'CFBundleDisplayName': 'Jellyfin RPC',
+            'NSAppleEventsUsageDescription': 'Jellyfin RPC requires permission for "System Events" to run at startup.',
         },
     )

@@ -100,12 +100,11 @@ jobs:
           brew install create-dmg
           create-dmg \
             --volname "Jellyfin RPC v$VERSION" \
-            --window-pos 200 120 \
-            --window-size 540 340 \
-            --icon-size 110 \
-            --icon "Jellyfin RPC.app" 140 150 \
+            --window-size 440 270 \
+            --icon-size 100 \
+            --icon "Jellyfin RPC.app" 100 100 \
             --hide-extension "Jellyfin RPC.app" \
-            --app-drop-link 400 150 \
+            --app-drop-link 300 100 \
             --no-internet-enable \
             "dist/Jellyfin RPC v$VERSION.dmg" \
             "dist/Jellyfin RPC.app"

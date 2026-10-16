@@ -77,12 +77,16 @@ class LabeledEntry:
 
 def get_executable_path() -> str:
     if getattr(sys, 'frozen', False):
-        return os.path.abspath(sys.executable)
+        exe = os.path.abspath(sys.executable)
+        if sys.platform == 'darwin' and '.app/Contents/MacOS' in exe:
+            return exe.split('.app/Contents/MacOS')[0] + '.app'
+        return exe
     return os.path.abspath(__file__)
 
 
 def set_startup_status(enabled: bool) -> None:
     exe_path = get_executable_path()
+    app_name = 'Jellyfin RPC'
 
     if sys.platform == 'win32':
         import winreg
@@ -94,33 +98,36 @@ def set_startup_status(enabled: bool) -> None:
             winreg.KEY_SET_VALUE,
         ) as key:
             if enabled:
-                winreg.SetValueEx(key, 'Jellyfin RPC', 0, winreg.REG_SZ, f'"{exe_path}"')
+                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, f'"{exe_path}"')
             else:
                 try:
-                    winreg.DeleteValue(key, 'Jellyfin RPC')
+                    winreg.DeleteValue(key, app_name)
                 except FileNotFoundError:
                     pass
 
     elif sys.platform == 'darwin':
-        import plistlib
-
-        macos_label = 'com.kennethsible.jellyfin-rpc'
-        launch_agents_dir = os.path.expanduser('~/Library/LaunchAgents')
-        plist_path = os.path.join(launch_agents_dir, f'{macos_label}.plist')
         if enabled:
-            os.makedirs(launch_agents_dir, exist_ok=True)
-            plist_data = {
-                'Label': macos_label,
-                'ProgramArguments': [exe_path],
-                'RunAtLoad': True,
-                'ProcessType': 'Background',
-                'AssociatedBundleIdentifiers': [macos_label],
-            }
-            with open(plist_path, 'wb') as f:
-                plistlib.dump(plist_data, f)
+            applescript = f'''
+            tell application "System Events"
+                set itemProperties to {{name:"{app_name}", path:"{exe_path}", hidden:false}}
+                if exists login item "{app_name}" then
+                    delete login item "{app_name}"
+                end if
+                make new login item at end with properties itemProperties
+            end tell
+            '''
         else:
-            if os.path.exists(plist_path):
-                os.remove(plist_path)
+            applescript = f'''
+            tell application "System Events"
+                if exists login item "{app_name}" then
+                    delete login item "{app_name}"
+                end if
+            end tell
+            '''
+        try:
+            subprocess.run(['osascript', '-e', applescript], capture_output=True, check=True)
+        except subprocess.SubprocessError:
+            pass
 
     elif sys.platform == 'linux':
         config_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
@@ -136,7 +143,7 @@ def set_startup_status(enabled: bool) -> None:
             desktop_entry = (
                 '[Desktop Entry]\n'
                 'Type=Application\n'
-                'Name=Jellyfin RPC\n'
+                f'Name={app_name}\n'
                 'Comment=Discord Rich Presence for Jellyfin\n'
                 f'Exec="{target_exec}"\n'
                 f'Icon={icon_path}\n'
@@ -152,6 +159,7 @@ def set_startup_status(enabled: bool) -> None:
 
 def get_startup_status() -> bool:
     exe_path = get_executable_path()
+    app_name = 'Jellyfin RPC'
 
     if sys.platform == 'win32':
         import winreg
@@ -163,7 +171,7 @@ def get_startup_status() -> bool:
                 0,
                 winreg.KEY_READ,
             ) as key:
-                stored_path, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
+                stored_path, _ = winreg.QueryValueEx(key, app_name)
             if os.path.normcase(exe_path) != os.path.normcase(stored_path.strip('"')):
                 set_startup_status(True)
             return True
@@ -171,23 +179,24 @@ def get_startup_status() -> bool:
             return False
 
     elif sys.platform == 'darwin':
-        import plistlib
-
-        macos_label = 'com.kennethsible.jellyfin-rpc'
-        plist_path = os.path.expanduser(f'~/Library/LaunchAgents/{macos_label}.plist')
-        if not os.path.exists(plist_path):
-            return False
+        applescript = f'''
+            tell application "System Events"
+                if exists login item "{app_name}" then
+                    return path of login item "{app_name}"
+                end if
+            end tell
+        '''
         try:
-            with open(plist_path, 'rb') as f:
-                plist_data = plistlib.load(f)
-            if (
-                plist_data.get('ProgramArguments') != [exe_path]
-                or plist_data.get('AssociatedBundleIdentifiers') != [macos_label]
-                or plist_data.get('ProcessType') != 'Background'
-            ):
+            result = subprocess.run(
+                ['osascript', '-e', applescript], capture_output=True, check=True, text=True
+            )
+            stored_path = result.stdout.strip()
+            if not stored_path:
+                return False
+            if stored_path != exe_path:
                 set_startup_status(True)
             return True
-        except (plistlib.InvalidFileException, OSError):
+        except subprocess.SubprocessError:
             return False
 
     elif sys.platform == 'linux':
