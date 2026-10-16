@@ -4,6 +4,14 @@ import platform
 
 from PyInstaller.utils.hooks import collect_data_files
 
+match platform.system():
+    case 'Windows':
+        exe_name, coll_name = 'Jellyfin RPC', 'Jellyfin RPC'
+    case 'Darwin':
+        exe_name, coll_name = 'jellyfin-rpc', 'jellyfin-rpc'
+    case _:
+        exe_name, coll_name = 'jellyfin-rpc', 'Jellyfin RPC'
+
 a = Analysis(
     ['src/jellyfin_rpc/__main__.py'],
     pathex=['src'],
@@ -28,16 +36,14 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
-    name='Jellyfin RPC',
+    exclude_binaries=True,
+    name=exe_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -47,14 +53,17 @@ exe = EXE(
     icon=['images/icons/icon.ico'],
 )
 
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name=coll_name,
+)
+
 if platform.system() == 'Darwin':
-    coll = COLLECT(
-        exe,
-        strip=False,
-        upx=True,
-        upx_exclude=[],
-        name='Jellyfin_RPC',
-    )
     app = BUNDLE(
         coll,
         name='Jellyfin RPC.app',
