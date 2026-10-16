@@ -8,6 +8,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
+PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible arm64
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes

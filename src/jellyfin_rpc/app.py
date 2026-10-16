@@ -77,16 +77,11 @@ class LabeledEntry:
 
 def get_executable_path() -> str:
     if getattr(sys, 'frozen', False):
-        exe = os.path.abspath(sys.executable)
-        if sys.platform == 'darwin' and '.app/Contents/MacOS' in exe:
-            return exe.split('.app/Contents/MacOS')[0] + '.app'
-        return exe
-    else:
-        return os.path.abspath(__file__)
+        return os.path.abspath(sys.executable)
+    return os.path.abspath(__file__)
 
 
 def set_startup_status(enabled: bool) -> None:
-    app_name = 'Jellyfin RPC'
     exe_path = get_executable_path()
 
     if sys.platform == 'win32':
@@ -107,44 +102,42 @@ def set_startup_status(enabled: bool) -> None:
                     pass
 
     elif sys.platform == 'darwin':
+        import plistlib
+
+        macos_label = 'com.kennethsible.jellyfin-rpc'
+        launch_agents_dir = os.path.expanduser('~/Library/LaunchAgents')
+        plist_path = os.path.join(launch_agents_dir, f'{macos_label}.plist')
         if enabled:
-            applescript = f'''
-            tell application "System Events"
-                set itemRecord to {{name:"{app_name}", path:"{exe_path}", hidden:false}}
-                if not (exists login item "{app_name}") then
-                    make new login item at end with properties itemRecord
-                end if
-            end tell
-            '''
+            os.makedirs(launch_agents_dir, exist_ok=True)
+            plist_data = {
+                'Label': macos_label,
+                'ProgramArguments': [exe_path],
+                'RunAtLoad': True,
+                'ProcessType': 'Interactive',
+            }
+            with open(plist_path, 'wb') as f:
+                plistlib.dump(plist_data, f)
         else:
-            applescript = f'''
-            tell application "System Events"
-                if exists login item "{app_name}" then
-                    delete login item "{app_name}"
-                end if
-            end tell
-            '''
-        try:
-            subprocess.run(['osascript', '-e', applescript], capture_output=True, check=True)
-        except subprocess.SubprocessError:
-            pass
+            if os.path.exists(plist_path):
+                os.remove(plist_path)
 
     elif sys.platform == 'linux':
-        autostart_dir = os.path.expanduser('~/.config/autostart')
+        config_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+        autostart_dir = os.path.join(config_dir, 'autostart')
         desktop_file = os.path.join(autostart_dir, 'jellyfin-rpc.desktop')
         if enabled:
             os.makedirs(autostart_dir, exist_ok=True)
-            exe_dir = os.path.dirname(exe_path)
+            target_exec = os.getenv('APPIMAGE') or exe_path
+            exe_dir = os.path.dirname(target_exec)
             icon_path = os.path.join(exe_dir, 'jellyfin-rpc.png')
             if not os.path.exists(icon_path):
                 icon_path = 'jellyfin-rpc'
             desktop_entry = (
                 '[Desktop Entry]\n'
                 'Type=Application\n'
-                f'Version={__version__}\n'
-                'Name=Jellyfin RPC\n'
+                f'Name=Jellyfin RPC\n'
                 'Comment=Discord Rich Presence for Jellyfin\n'
-                f'Exec="{exe_path}"\n'
+                f'Exec="{target_exec}"\n'
                 f'Icon={icon_path}\n'
                 'Terminal=false\n'
                 'StartupNotify=false\n'
@@ -157,6 +150,8 @@ def set_startup_status(enabled: bool) -> None:
 
 
 def get_startup_status() -> bool:
+    exe_path = get_executable_path()
+
     if sys.platform == 'win32':
         import winreg
 
@@ -167,28 +162,44 @@ def get_startup_status() -> bool:
                 0,
                 winreg.KEY_READ,
             ) as key:
-                value, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
-            exe_path, stored_path = get_executable_path(), value.strip('"')
-            if os.path.normcase(exe_path) != os.path.normcase(stored_path):
+                stored_path, _ = winreg.QueryValueEx(key, 'Jellyfin RPC')
+            if os.path.normcase(exe_path) != os.path.normcase(stored_path.strip('"')):
                 set_startup_status(True)
             return True
         except FileNotFoundError:
             return False
 
     elif sys.platform == 'darwin':
-        applescript = 'tell application "System Events" to get name of every login item'
+        import plistlib
+
+        macos_label = 'com.kennethsible.jellyfin-rpc'
+        plist_path = os.path.expanduser(f'~/Library/LaunchAgents/{macos_label}.plist')
+        if not os.path.exists(plist_path):
+            return False
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript], capture_output=True, check=True, text=True
-            )
-            login_items = [item.strip() for item in result.stdout.split(',')]
-            return 'Jellyfin RPC' in login_items
-        except subprocess.SubprocessError:
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+            args = plist_data.get('ProgramArguments', [])
+            if not args or args[0] != exe_path:
+                set_startup_status(True)
+            return True
+        except (plistlib.InvalidFileException, OSError):
             return False
 
     elif sys.platform == 'linux':
-        desktop_file = os.path.expanduser('~/.config/autostart/jellyfin-rpc.desktop')
-        return os.path.exists(desktop_file)
+        config_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+        desktop_file = os.path.join(config_dir, 'autostart', 'jellyfin-rpc.desktop')
+        if not os.path.exists(desktop_file):
+            return False
+        target_exec = os.getenv('APPIMAGE') or exe_path
+        try:
+            with open(desktop_file, encoding='utf-8') as f:
+                content = f.read()
+            if f'Exec="{target_exec}"' not in content:
+                set_startup_status(True)
+            return True
+        except OSError:
+            return False
 
     return False
 
@@ -1315,7 +1326,6 @@ def main() -> None:
     ini_bundle_path = os.path.abspath(os.path.join(bundle_dir, ini_name))
     png_bundle_path = os.path.abspath(os.path.join(bundle_dir, 'images', 'icons', png_bundle_name))
     png_active_path = os.path.abspath(os.path.join(bundle_dir, 'images', 'icons', png_active_name))
-    os.chdir(os.path.dirname(get_executable_path()))
 
     data_dir = ''
     if sys.platform == 'win32':
@@ -1336,12 +1346,7 @@ def main() -> None:
         ini_path, log_path = ini_name, log_name
 
     if not os.path.isfile(ini_path):
-        if data_dir and os.path.isfile(ini_name):
-            gui_logger.info(f'Migrating INI to {ini_path}')
-            shutil.copyfile(ini_name, ini_path)
-        else:
-            gui_logger.info(f'Extracting INI to {ini_path}')
-            shutil.copyfile(ini_bundle_path, ini_path)
+        shutil.copyfile(ini_bundle_path, ini_path)
 
     config = load_config(ini_path)
     log_level = config.get('LOG_LEVEL', 'INFO').upper()
