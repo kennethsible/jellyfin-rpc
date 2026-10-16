@@ -68,5 +68,9 @@ if platform.system() == 'Darwin':
         coll,
         name='Jellyfin RPC.app',
         icon='images/icons/icon.icns',
-        bundle_identifier=None,
+        bundle_identifier='com.kennethsible.jellyfin-rpc',
+        info_plist={
+            'CFBundleName': 'Jellyfin RPC',
+            'CFBundleDisplayName': 'Jellyfin RPC'
+        },
     )

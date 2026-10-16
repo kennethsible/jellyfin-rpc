@@ -113,7 +113,8 @@ def set_startup_status(enabled: bool) -> None:
                 'Label': macos_label,
                 'ProgramArguments': [exe_path],
                 'RunAtLoad': True,
-                'ProcessType': 'Interactive',
+                'ProcessType': 'Background',
+                'AssociatedBundleIdentifiers': [macos_label],
             }
             with open(plist_path, 'wb') as f:
                 plistlib.dump(plist_data, f)
@@ -135,7 +136,7 @@ def set_startup_status(enabled: bool) -> None:
             desktop_entry = (
                 '[Desktop Entry]\n'
                 'Type=Application\n'
-                f'Name=Jellyfin RPC\n'
+                'Name=Jellyfin RPC\n'
                 'Comment=Discord Rich Presence for Jellyfin\n'
                 f'Exec="{target_exec}"\n'
                 f'Icon={icon_path}\n'
@@ -179,8 +180,11 @@ def get_startup_status() -> bool:
         try:
             with open(plist_path, 'rb') as f:
                 plist_data = plistlib.load(f)
-            args = plist_data.get('ProgramArguments', [])
-            if not args or args[0] != exe_path:
+            if (
+                plist_data.get('ProgramArguments') != [exe_path]
+                or plist_data.get('AssociatedBundleIdentifiers') != [macos_label]
+                or plist_data.get('ProcessType') != 'Background'
+            ):
                 set_startup_status(True)
             return True
         except (plistlib.InvalidFileException, OSError):
