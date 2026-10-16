@@ -92,27 +92,38 @@ jobs:
           export ARCH=x86_64
           ./appimagetool.AppDir/AppRun dist/AppDir "dist/Jellyfin RPC.AppImage"
           rm -rf dist/AppDir appimagetool.AppDir appimagetool-x86_64.AppImage
-      - name: Package App Bundle (macOS Only)
+      - name: Build Disk Image (macOS Only)
         if: startsWith(matrix.os, 'macos')
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent "dist/Jellyfin RPC.app" "dist/Jellyfin RPC.zip"
-      - name: Isolate Windows Bundle (Windows Only)
-        if: startsWith(matrix.os, 'windows')
         shell: bash
         run: |
-          mkdir -p dist/windows_bundle
-          mv "dist/Jellyfin RPC" dist/windows_bundle/
+          VERSION=$(uv version --short)
+          mkdir -p dist/staging
+          cp -R "dist/Jellyfin RPC.app" dist/staging/
+          ln -s /Applications dist/staging/Applications
+          hdiutil create \
+            -volname "Jellyfin RPC" \
+            -srcfolder dist/staging \
+            -ov \
+            -format UDZO \
+            "dist/Jellyfin RPC $VERSION.dmg"
+          rm -rf dist/staging
+      - name: Build Inno Setup (Windows Only)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          $VERSION = uv version --short
+          iscc "/DMyAppVersion=$VERSION" jellyfin-rpc.iss
       - name: Prepare Artifact Name
         shell: bash
         run: |
           VERSION=$(uv version --short)
           echo "ARTIFACT_NAME=jellyfin-rpc-$VERSION-${{ matrix.platform }}" >> $GITHUB_ENV
           if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
-            echo "ARTIFACT_PATH=dist/Jellyfin RPC.AppImage" >> $GITHUB_ENV
+            echo 'ARTIFACT_PATH=dist/*.AppImage' >> $GITHUB_ENV
           elif [[ "${{ matrix.os }}" == windows* ]]; then
-            echo "ARTIFACT_PATH=dist/windows_bundle/*" >> $GITHUB_ENV
+            echo 'ARTIFACT_PATH=dist/installer/*.exe' >> $GITHUB_ENV
           else
-            echo "ARTIFACT_PATH=dist/Jellyfin RPC.zip" >> $GITHUB_ENV
+            echo 'ARTIFACT_PATH=dist/*.dmg' >> $GITHUB_ENV
           fi
       - name: Upload Artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
