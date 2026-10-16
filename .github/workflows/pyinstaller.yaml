@@ -44,7 +44,7 @@ jobs:
             export MACOS_ARCH="x86_64"
           fi
           uv run pyinstaller main.spec --noconfirm
-      - name: Generate AppImage (Linux Only)
+      - name: Build AppImage (Linux Only)
         if: matrix.os == 'ubuntu-22.04'
         shell: bash
         run: |
@@ -97,16 +97,18 @@ jobs:
         shell: bash
         run: |
           VERSION=$(uv version --short)
-          mkdir -p dist/staging
-          cp -R "dist/Jellyfin RPC.app" dist/staging/
-          ln -s /Applications dist/staging/Applications
-          hdiutil create \
-            -volname "Jellyfin RPC" \
-            -srcfolder dist/staging \
-            -ov \
-            -format UDZO \
-            "dist/Jellyfin RPC $VERSION.dmg"
-          rm -rf dist/staging
+          brew install create-dmg
+          create-dmg \
+            --volname "Jellyfin RPC v$VERSION" \
+            --window-pos 200 120 \
+            --window-size 540 340 \
+            --icon-size 110 \
+            --icon "Jellyfin RPC.app" 140 150 \
+            --hide-extension "Jellyfin RPC.app" \
+            --app-drop-link 400 150 \
+            --no-internet-enable \
+            "dist/Jellyfin RPC v$VERSION.dmg" \
+            "dist/Jellyfin RPC.app"
       - name: Build Inno Setup (Windows Only)
         if: startsWith(matrix.os, 'windows')
         shell: pwsh
