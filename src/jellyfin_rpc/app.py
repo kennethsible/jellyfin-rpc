@@ -920,7 +920,7 @@ class RPCWindow(QWidget):
             if sys.platform == 'darwin':
                 tray_icon.setIsMask(True)
 
-        self.tray_menu = QMenu(self)
+        self.tray_menu = QMenu()
         self.tray_icon = QSystemTrayIcon(tray_icon, self)
         self.tray_icon.setToolTip('Jellyfin RPC')
 
@@ -1292,6 +1292,7 @@ def main() -> None:
     gui_queue: Queue[str] = Queue()
 
     app = RPCApplication(sys.argv, gui_queue)
+    app.setQuitOnLastWindowClosed(False)
     script_dir = os.path.abspath(os.path.dirname(__file__))
     if getattr(sys, 'frozen', False):
         bundle_dir = getattr(sys, '_MEIPASS', script_dir)

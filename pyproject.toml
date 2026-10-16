@@ -11,8 +11,7 @@ dependencies = [
     "aiohttp-client-cache>=0.15.0",
     "requests>=2.34.2",
     "certifi>=2026.7.22",
-    "langcodes>=3.5.1",
-    "language_data>=1.4.0",
+    "pycountry>=26.2.16",
     "pypresence>=4.6.2",
 ]
 

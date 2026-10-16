@@ -25,13 +25,15 @@ from urllib.parse import urlparse
 
 import aiohttp
 import certifi
+import pycountry
 from aiohttp import ClientSession, WSMsgType
 from aiohttp_client_cache import CacheBackend
 from aiohttp_client_cache.session import CachedSession
-from langcodes import Language
 from pypresence.exceptions import PyPresenceException
 from pypresence.presence import AioPresence
 from pypresence.types import ActivityType, StatusDisplayType
+
+_pycountry: Any = pycountry
 
 CLIENT_ID = '1238889120672120853'
 logger = logging.getLogger('RPC')
@@ -108,18 +110,19 @@ def sanitize_broadcast_title(title_str: str | None) -> str | None:
 
 
 def get_lang_code(lang_str: str) -> str | None:
-    lang_str = lang_str.strip()
-    try:
-        lang = Language.get(lang_str)
-        if lang.language:
-            return lang.language
-    except (ImportError, LookupError, ValueError):
-        pass
-    try:
-        return Language.find(lang_str).language
-    except (ImportError, LookupError, ValueError) as e:
-        logger.debug(e)
+    if not (lang_str := lang_str.strip()):
         return None
+    if len(lang_str) == 2 and lang_str.isalpha():
+        lang = _pycountry.languages.get(alpha_2=lang_str.lower())
+        if lang and hasattr(lang, 'alpha_2'):
+            return lang.alpha_2
+    try:
+        match = _pycountry.languages.lookup(lang_str)
+        if hasattr(match, 'alpha_2'):
+            return match.alpha_2
+    except LookupError:
+        pass
+    return None
 
 
 def get_device_id(config: SectionProxy) -> str:
