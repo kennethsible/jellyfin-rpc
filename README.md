@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD033 MD041 -->
 <div align="center">
-  <img alt="Jellyfin RPC Banner" src="https://raw.githubusercontent.com/kennethsible/jellyfin-rpc/refs/heads/main/images/jellyfin_rpc_banner.svg" width="600">
+  <img alt="Jellyfin RPC Banner" src="https://raw.githubusercontent.com/kennethsible/jellyfin-rpc/refs/heads/main/images/docs/jellyfin_rpc_banner.svg" width="600">
 </div>
 <p align="center">
 <img src="https://github.com/kennethsible/jellyfin-rpc/actions/workflows/pyinstaller.yaml/badge.svg" alt="PyInstaller Release" />
