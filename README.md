@@ -59,7 +59,7 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `JELLYFIN_API_KEY` | — | Jellyfin API key. Generated automatically when authenticating with Quick Connect. |
 | `JELLYFIN_USERNAME` | — | Jellyfin username whose playback sessions are displayed in Discord. |
 | `TMDB_API_KEY` | — | TMDB API key. Required for posters if your Jellyfin server is hosted locally. |
-| `MEDIA_TYPES` | `Movies, Shows, Music, Live TV` | Comma-separated list of enabled media types. Ordered from highest to lowest display priority (`Movies`, `Shows`, `Music`, `Live TV`). |
+| `MEDIA_TYPES` | `Movies, Shows, Music, LiveTV` | Comma-separated list of enabled media types. Ordered from highest to lowest display priority (`Movies`, `Shows`, `Music`, `LiveTV`). |
 | `SHOW_WHEN_PAUSED` | `true` | Shows paused activities with a small icon in the bottom right of the poster or album cover instead of a progress bar. Pausing clears the activity when disabled. |
 | `SHOW_SERVER_NAME` | `false` | Shows your Jellyfin server name as the activity name instead of "Jellyfin". |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
@@ -68,7 +68,8 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `TEXTLESS_POSTERS` | `false` | Prioritizes textless TMDB posters over language-specific posters. |
 | `ALWAYS_USE_TMDB` | `false` | Uses TMDB as the primary source for posters. Serves as a fallback for missing artwork in Jellyfin when disabled. |
 | `SEASON_OVER_SERIES` | `false` | Prioritizes season posters over series posters for TV shows. |
-| `ALWAYS_USE_MUSICBRAINZ` | `false` | Uses the Cover Art Archive (MusicBrainz) as the primary source for album covers. Serves as a fallback for missing artwork in Jellyfin when disabled. |
+| `SEARCH_MUSICBRAINZ` | `true` | Searches MusicBrainz by artist and album title when IDs are missing in Jellyfin. |
+| `ALWAYS_USE_COVERART` | `false` | Uses the Cover Art Archive as the primary source for album covers. Serves as a fallback for missing artwork in Jellyfin when disabled. |
 | `RELEASE_OVER_GROUP` | `false` | Prioritizes [release](https://musicbrainz.org/doc/Release) artwork over [release group](https://musicbrainz.org/doc/Release_Group) artwork for music. |
 | `LIBRARY_FILTER_TYPE` | `Denylist` | Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked (`Allowlist` or `Denylist`). |
 | `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs to allow or block. Found as the `topParentId` parameter in the web client URL. |

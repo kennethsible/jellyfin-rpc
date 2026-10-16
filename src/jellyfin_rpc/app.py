@@ -560,17 +560,26 @@ class RPCWindow(QWidget):
         self.create_checkbox(col2, 'TEXTLESS_POSTERS', 'Prefer Textless TMDB Posters')
 
         col2.addWidget(self.create_header('Album Cover Settings'))
-        self.create_checkbox(col2, 'ALWAYS_USE_MUSICBRAINZ', 'Always Use The Cover Art Archive')
+        self.create_checkbox(col2, 'SEARCH_MUSICBRAINZ', 'Search MusicBrainz for Missing IDs')
+        self.create_checkbox(col2, 'ALWAYS_USE_COVERART', 'Always Use The Cover Art Archive')
         self.create_checkbox(col2, 'RELEASE_OVER_GROUP', 'Prefer Release Cover Over Group')
 
-        col2.addWidget(self.create_header('Media Settings'))
-        self.create_checkbox(col2, 'MOVIES', 'Show Activity for Watching Movies')
-        self.create_checkbox(col2, 'SHOWS', 'Show Activity for Watching Shows')
-        self.create_checkbox(col2, 'MUSIC', 'Show Activity for Listening to Music')
-        self.create_checkbox(col2, 'LIVE TV', 'Show Activity for Watching Live TV')
+        col2.addWidget(self.create_header('Media Type Settings'))
+        media_layout = QGridLayout()
+        media_layout.setContentsMargins(0, 0, 0, 0)
+        media_layout.setVerticalSpacing(8)
+        media_layout.setColumnStretch(0, 1)
+        media_layout.setColumnStretch(1, 1)
+
+        media_layout.addWidget(self.create_checkbox(None, 'MOVIES', 'Display Movies'), 0, 0)
+        media_layout.addWidget(self.create_checkbox(None, 'SHOWS', 'Display Shows'), 0, 1)
+        media_layout.addWidget(self.create_checkbox(None, 'MUSIC', 'Display Music'), 1, 0)
+        media_layout.addWidget(self.create_checkbox(None, 'LIVETV', 'Display Live TV'), 1, 1)
+
+        col2.addLayout(media_layout)
         col2.addStretch()
 
-        col3.addWidget(self.create_header('Activity Settings'))
+        col3.addWidget(self.create_header('Discord Settings'))
         self.create_checkbox(col3, 'SHOW_WHEN_PAUSED', 'Show Activity While Paused')
         self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Small Jellyfin Logo')
         self.create_checkbox(col3, 'SHOW_SERVER_NAME', 'Show Jellyfin Server Name')
@@ -690,11 +699,12 @@ class RPCWindow(QWidget):
         layout.addLayout(container)
         return LabeledEntry(entry, obfuscate)
 
-    def create_checkbox(self, layout: QVBoxLayout, key: str, text: str) -> QCheckBox:
+    def create_checkbox(self, layout: QVBoxLayout | None, key: str, text: str) -> QCheckBox:
         checkbox = QCheckBox(text)
         checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         checkbox.clicked.connect(self.on_setting_changed)
-        layout.addWidget(checkbox)
+        if layout is not None:
+            layout.addWidget(checkbox)
         self.checkboxes[key] = checkbox
         return checkbox
 
@@ -748,7 +758,7 @@ class RPCWindow(QWidget):
         self.checkboxes['MOVIES'].setChecked('Movies' in media_types)
         self.checkboxes['SHOWS'].setChecked('Shows' in media_types)
         self.checkboxes['MUSIC'].setChecked('Music' in media_types)
-        self.checkboxes['LIVE TV'].setChecked('Live TV' in media_types)
+        self.checkboxes['LIVETV'].setChecked('LiveTV' in media_types)
 
         checkbox_vars = [
             ('SHOW_WHEN_PAUSED', True),
@@ -758,7 +768,8 @@ class RPCWindow(QWidget):
             ('ALWAYS_USE_TMDB', False),
             ('TEXTLESS_POSTERS', False),
             ('SEASON_OVER_SERIES', False),
-            ('ALWAYS_USE_MUSICBRAINZ', False),
+            ('SEARCH_MUSICBRAINZ', True),
+            ('ALWAYS_USE_COVERART', False),
             ('RELEASE_OVER_GROUP', False),
             ('START_MINIMIZED', True),
             ('MINIMIZE_ON_CLOSE', True),
@@ -805,21 +816,16 @@ class RPCWindow(QWidget):
         )
         config_parser.set('DEFAULT', 'LOG_LEVEL', self.checkbox_log_level.currentText())
 
-        type_mapping = {
-            'MOVIES': 'Movies',
-            'SHOWS': 'Shows',
-            'MUSIC': 'Music',
-            'LIVE TV': 'Live TV',
-        }
+        type_mapping = {'MOVIES': 'Movies', 'SHOWS': 'Shows', 'MUSIC': 'Music', 'LIVETV': 'LiveTV'}
         media_types = [
             type_mapping[key]
-            for key in ['MOVIES', 'SHOWS', 'MUSIC', 'LIVE TV']
+            for key in ['MOVIES', 'SHOWS', 'MUSIC', 'LIVETV']
             if self.checkboxes[key].isChecked()
         ]
         config_parser.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
         for key in self.checkboxes:
-            if key not in ('MOVIES', 'SHOWS', 'MUSIC', 'LIVE TV'):
+            if key not in ('MOVIES', 'SHOWS', 'MUSIC', 'LIVETV'):
                 config_parser.set('DEFAULT', key, str(self.checkboxes[key].isChecked()).lower())
 
         with open(self.ini_path, 'w', encoding='utf-8') as f:

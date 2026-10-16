@@ -61,6 +61,7 @@ def load_config(ini_path: str) -> SectionProxy:
     migrate_key('USERNAME', 'JELLYFIN_USERNAME')
     migrate_key('FILTER_MODE', 'LIBRARY_FILTER_TYPE')
     migrate_key('FILTER_LIBRARIES', 'SELECTED_LIBRARIES')
+    migrate_key('ALWAYS_USE_MUSICBRAINZ', 'ALWAYS_USE_COVERART')
     migrate_key('IMDB_EXTERNAL_URLS', 'IMDB_EXTERNAL_LINKS')
     migrate_key('REFRESH_RATE', 'POLLING_RATE')
     migrate_key('FILE_HDLR_LEVEL', 'LOG_LEVEL_FILE')
@@ -884,14 +885,15 @@ async def activity_loop(
         logger.warning('Missing TMDB API Key')
     season_over_series = config.getboolean('SEASON_OVER_SERIES', False)
 
-    always_use_musicbrainz = config.getboolean('ALWAYS_USE_MUSICBRAINZ', False)
+    musicbrainz_search = config.getboolean('MUSICBRAINZ_SEARCH', True)
+    always_use_coverart = config.getboolean('ALWAYS_USE_COVERART', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
     library_filter_type = config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').upper()
     selected_libraries = parse_delimited_list(config, 'SELECTED_LIBRARIES')
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
-    type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio', 'Live TV': 'TvChannel'}
+    type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio', 'LiveTV': 'TvChannel'}
 
     media_priority: dict[str, int] = {}
     for i, media_type in enumerate(media_types):
@@ -1339,14 +1341,14 @@ async def activity_loop(
 
                         if not group_id and release_id:
                             group_id = await get_music_id_from_release(cache_session, release_id)
-                        if not group_id:
+                        if not group_id and musicbrainz_search:
                             logger.warning('No MusicBrainz ID Found. Searching...')
                             if 'AlbumArtist' in media_dict and 'Album' in media_dict:
                                 group_id = await get_music_id_from_search(
                                     cache_session, media_dict['AlbumArtist'], media_dict['Album']
                                 )
 
-                        if not always_use_musicbrainz and album_id and is_https:
+                        if not always_use_coverart and album_id and is_https:
                             poster_url = f'{jf_host}/Items/{album_id}/Images/Primary/0'
                         elif group_id:
                             cover_release_id = release_id if release_over_group else None
@@ -1374,27 +1376,26 @@ async def activity_loop(
                         is_movie = program.get('IsMovie')
                         is_series_match, series_tmdb_id = False, None
 
-                        if tmdb_api_key:
-                            if tmdb_id:
-                                if not is_movie:
-                                    series_tmdb_id = tmdb_id
+                        if tmdb_api_key and tmdb_id:
+                            if not is_movie:
+                                series_tmdb_id = tmdb_id
+                                is_series_match = True
+                        elif tmdb_api_key and series_name:
+                            logger.warning('No TMDB ID Found. Searching...')
+                            if is_movie:
+                                tmdb_id = await get_movie_id(
+                                    cache_session, tmdb_api_key, series_name
+                                )
+                            else:
+                                series_tmdb_id = await get_series_id(
+                                    cache_session, tmdb_api_key, series_name
+                                )
+                                if series_tmdb_id:
                                     is_series_match = True
-                            elif series_name:
-                                logger.warning('No TMDB ID Found. Searching...')
-                                if is_movie:
+                                else:
                                     tmdb_id = await get_movie_id(
                                         cache_session, tmdb_api_key, series_name
                                     )
-                                else:
-                                    series_tmdb_id = await get_series_id(
-                                        cache_session, tmdb_api_key, series_name
-                                    )
-                                    if series_tmdb_id:
-                                        is_series_match = True
-                                    else:
-                                        tmdb_id = await get_movie_id(
-                                            cache_session, tmdb_api_key, series_name
-                                        )
 
                         if not always_use_tmdb and is_https:
                             program_id = program.get('Id')
