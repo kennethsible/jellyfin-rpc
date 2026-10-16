@@ -15,6 +15,7 @@ import uuid
 from configparser import ConfigParser, SectionProxy
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from email.utils import parseaddr
 from importlib.metadata import metadata
 from json.decoder import JSONDecodeError
@@ -93,6 +94,16 @@ def sanitize_discord_str(presence_var: str | None) -> str | None:
     if len(presence_var) == 1:
         return f'{presence_var} '
     return presence_var[:128]
+
+
+def sanitize_broadcast_title(title_str: str | None) -> str | None:
+    if title_str is None:
+        return None
+    clean_str = re.sub(r'[\(\[\{].*?[\)\]\}]', '', title_str)
+    pattern = r'\b(1080p|1080i|720p|4k|uhd|fhd|hd|sd|fps|60fps|30fps|hevc|h264|x264)\b'
+    clean_str = re.sub(pattern, '', clean_str, flags=re.IGNORECASE)
+    clean_str = re.sub(r'\s+', ' ', clean_str).strip(' -:|')
+    return clean_str or title_str
 
 
 def get_lang_code(lang_str: str) -> str | None:
@@ -880,12 +891,14 @@ async def activity_loop(
     selected_libraries = parse_delimited_list(config, 'SELECTED_LIBRARIES')
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
-    type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio'}
-    media_priority = {
-        type_mapping[media_type]: len(media_types) - i
-        for i, media_type in enumerate(media_types)
-        if media_type in type_mapping
-    }
+    type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio', 'Live TV': 'TvChannel'}
+
+    media_priority: dict[str, int] = {}
+    for i, media_type in enumerate(media_types):
+        if media_type in type_mapping:
+            priority_score = len(media_types) - i
+            jf_type = type_mapping[media_type]
+            media_priority[jf_type] = priority_score
 
     activity_str = ''
     rpc_state = PresenceState()
@@ -895,6 +908,7 @@ async def activity_loop(
 
     cached_item_id = None
     cached_kwargs: dict[str, Any] = {}
+    cached_program: dict[str, Any] = {}
 
     while True:
         if ws_state.get('ws_connected'):
@@ -964,7 +978,16 @@ async def activity_loop(
         if session_data:
             media_dict = session_data['NowPlayingItem']
             item_id = media_dict.get('Id')
+            media_type = media_dict.get('Type')
             media_changed = item_id != cached_item_id
+
+            if not media_changed and media_type == 'TvChannel' and cached_program.get('EndDate'):
+                try:
+                    program_end = datetime.fromisoformat(cached_program['EndDate']).timestamp()
+                    if time.time() >= program_end:
+                        media_changed = True
+                except (ValueError, TypeError):
+                    pass
 
             try:
                 session_paused = session_data['PlayState']['IsPaused']
@@ -980,17 +1003,48 @@ async def activity_loop(
                     rpc_state.reset()
                 continue
 
+            if media_type == 'TvChannel':
+                if media_changed:
+                    cached_program.clear()
+                    if item_id and jf_session:
+                        try:
+                            async with jf_session.get(
+                                f'{jf_host}/Items/{item_id}',
+                                headers=jf_headers,
+                                params={'userId': user_id},
+                            ) as response:
+                                response.raise_for_status()
+                                channel = await response.json()
+                                cached_program = channel.get('CurrentProgram', {})
+                        except (aiohttp.ClientError, TimeoutError) as e:
+                            logger.error(f'Program Retrieval Network Error ({type(e).__name__})')
+                            logger.debug(e)
+                        except (ValueError, KeyError) as e:
+                            logger.error(f'Program Retrieval Parsing Error ({type(e).__name__})')
+                            logger.debug(e)
+                if cached_program:
+                    media_dict['CurrentProgram'] = cached_program
+            else:
+                cached_program.clear()
+
             current_playback = None
             current_start = current_end = None
             try:
-                position_ticks = int(session_data['PlayState']['PositionTicks'])
-                current_playback = position_ticks / 10_000_000
-                last_packet_time = ws_state.get('last_packet', time.time())
-                adjusted_playback = current_playback + (time.time() - last_packet_time)
-                current_start = int(time.time() - adjusted_playback)
-                runtime_ticks = int(media_dict['RunTimeTicks'])
-                if not session_paused:
-                    current_end = int(current_start + runtime_ticks / 10_000_000)
+                if media_type == 'TvChannel':
+                    current_program = media_dict.get('CurrentProgram', {})
+                    if start_date := current_program.get('StartDate'):
+                        current_start = int(datetime.fromisoformat(start_date).timestamp())
+                    if (end_date := current_program.get('EndDate')) and not session_paused:
+                        current_end = int(datetime.fromisoformat(end_date).timestamp())
+                else:
+                    position_ticks = int(session_data['PlayState']['PositionTicks'])
+                    current_playback = position_ticks / 10_000_000
+                    last_packet_time = ws_state.get('last_packet', time.time())
+                    adjusted_playback = current_playback + (time.time() - last_packet_time)
+                    current_start = int(time.time() - adjusted_playback)
+                    runtime_ticks = int(media_dict['RunTimeTicks'])
+                    if not session_paused:
+                        current_end = int(current_start + runtime_ticks / 10_000_000)
             except (ValueError, KeyError, TypeError) as e:
                 logger.debug(e)
 
@@ -1062,7 +1116,7 @@ async def activity_loop(
                         continue
 
                     state_str = details_str = None
-                    match media_type := media_dict['Type']:
+                    match media_type:
                         case 'Episode':
                             activity_type = ActivityType.WATCHING
                             season = media_dict['ParentIndexNumber']
@@ -1089,6 +1143,28 @@ async def activity_loop(
                             activity_str = details_str
                             if state_str:
                                 activity_str += f' \u2022 {state_str.split(" \u2022 ")[0]}'
+                        case 'TvChannel':
+                            activity_type = ActivityType.WATCHING
+                            program = media_dict.get('CurrentProgram', {})
+                            channel_name = (
+                                sanitize_broadcast_title(
+                                    media_dict.get('ChannelName') or media_dict.get('Name')
+                                )
+                                or 'Live TV'
+                            )
+                            program_name = sanitize_broadcast_title(program.get('Name'))
+                            season = program.get('ParentIndexNumber')
+                            episode = program.get('IndexNumber')
+                            details_str = program_name or channel_name
+                            if season is not None and episode is not None:
+                                state_str = f'S{season}:E{episode} ({channel_name})'
+                                activity_str = f'{details_str} S{season}:E{episode}'
+                            elif program_name:
+                                state_str = f'{channel_name}'
+                                activity_str = f'{details_str} ({channel_name})'
+                            else:
+                                state_str = 'Live Broadcast'
+                                activity_str = details_str
                         case _:
                             if not last_unsupported_warning:
                                 logger.warning(f'Unsupported Media Type "{media_type}"')
@@ -1284,6 +1360,77 @@ async def activity_loop(
                             state_url = f'https://musicbrainz.org/release/{release_id}'
                         elif group_id:
                             state_url = f'https://musicbrainz.org/release-group/{group_id}'
+
+                    elif media_type == 'TvChannel':
+                        program = media_dict.get('CurrentProgram', {})
+                        season = program.get('ParentIndexNumber')
+                        episode = program.get('IndexNumber')
+                        series_name = sanitize_broadcast_title(
+                            program.get('SeriesName') or program.get('Name')
+                        )
+
+                        program_ids = program.get('ProviderIds', {})
+                        tmdb_id = program_ids.get('Tmdb') or program_ids.get('TheMovieDb')
+                        is_movie = program.get('IsMovie')
+                        is_series_match, series_tmdb_id = False, None
+
+                        if tmdb_api_key:
+                            if tmdb_id:
+                                if not is_movie:
+                                    series_tmdb_id = tmdb_id
+                                    is_series_match = True
+                            elif series_name:
+                                logger.warning('No TMDB ID Found. Searching...')
+                                if is_movie:
+                                    tmdb_id = await get_movie_id(
+                                        cache_session, tmdb_api_key, series_name
+                                    )
+                                else:
+                                    series_tmdb_id = await get_series_id(
+                                        cache_session, tmdb_api_key, series_name
+                                    )
+                                    if series_tmdb_id:
+                                        is_series_match = True
+                                    else:
+                                        tmdb_id = await get_movie_id(
+                                            cache_session, tmdb_api_key, series_name
+                                        )
+
+                        if not always_use_tmdb and is_https:
+                            program_id = program.get('Id')
+                            if program_id and program.get('ImageTags', {}).get('Primary'):
+                                poster_url = f'{jf_host}/Items/{program_id}/Images/Primary/0'
+                            elif item_id:
+                                poster_url = f'{jf_host}/Items/{item_id}/Images/Primary/0'
+
+                        if poster_url == 'large_image' and tmdb_api_key:
+                            if is_series_match and series_tmdb_id:
+                                if season_over_series and season is not None:
+                                    poster_url = await get_season_poster(
+                                        cache_session,
+                                        tmdb_api_key,
+                                        series_tmdb_id,
+                                        languages,
+                                        season,
+                                    )
+                                else:
+                                    poster_url = await get_series_poster(
+                                        cache_session, tmdb_api_key, series_tmdb_id, languages
+                                    )
+                            elif tmdb_id:
+                                poster_url = await get_movie_poster(
+                                    cache_session, tmdb_api_key, tmdb_id, languages
+                                )
+
+                        if is_series_match and series_tmdb_id:
+                            details_url = f'https://www.themoviedb.org/tv/{series_tmdb_id}'
+                            if season is not None:
+                                if episode is not None:
+                                    state_url = f'{details_url}/season/{season}/episode/{episode}'
+                                else:
+                                    state_url = f'{details_url}/season/{season}'
+                        elif tmdb_id:
+                            details_url = f'https://www.themoviedb.org/movie/{tmdb_id}'
 
                     display_name = server_name
                     if (

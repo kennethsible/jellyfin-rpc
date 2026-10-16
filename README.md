@@ -59,7 +59,7 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `JELLYFIN_API_KEY` | — | Jellyfin API key. Generated automatically when authenticating with Quick Connect. |
 | `JELLYFIN_USERNAME` | — | Jellyfin username whose playback sessions are displayed in Discord. |
 | `TMDB_API_KEY` | — | TMDB API key. Required for posters if your Jellyfin server is hosted locally. |
-| `MEDIA_TYPES` | `Movies, Shows, Music` | Comma-separated list of enabled media types. Ordered from highest to lowest display priority (`Movies`, `Shows`, `Music`). |
+| `MEDIA_TYPES` | `Movies, Shows, Music, Live TV` | Comma-separated list of enabled media types. Ordered from highest to lowest display priority (`Movies`, `Shows`, `Music`, `Live TV`). |
 | `SHOW_WHEN_PAUSED` | `true` | Shows paused activities with a small icon in the bottom right of the poster or album cover instead of a progress bar. Pausing clears the activity when disabled. |
 | `SHOW_SERVER_NAME` | `false` | Shows your Jellyfin server name as the activity name instead of "Jellyfin". |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |

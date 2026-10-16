@@ -564,9 +564,10 @@ class RPCWindow(QWidget):
         self.create_checkbox(col2, 'RELEASE_OVER_GROUP', 'Prefer Release Cover Over Group')
 
         col2.addWidget(self.create_header('Media Settings'))
-        self.create_checkbox(col2, 'MOVIES', 'Show Watching Activity for Movies')
-        self.create_checkbox(col2, 'SHOWS', 'Show Watching Activity for Shows')
-        self.create_checkbox(col2, 'MUSIC', 'Show Listening Activity for Music')
+        self.create_checkbox(col2, 'MOVIES', 'Show Activity for Watching Movies')
+        self.create_checkbox(col2, 'SHOWS', 'Show Activity for Watching Shows')
+        self.create_checkbox(col2, 'MUSIC', 'Show Activity for Listening to Music')
+        self.create_checkbox(col2, 'LIVE TV', 'Show Activity for Watching Live TV')
         col2.addStretch()
 
         col3.addWidget(self.create_header('Activity Settings'))
@@ -747,6 +748,7 @@ class RPCWindow(QWidget):
         self.checkboxes['MOVIES'].setChecked('Movies' in media_types)
         self.checkboxes['SHOWS'].setChecked('Shows' in media_types)
         self.checkboxes['MUSIC'].setChecked('Music' in media_types)
+        self.checkboxes['LIVE TV'].setChecked('Live TV' in media_types)
 
         checkbox_vars = [
             ('SHOW_WHEN_PAUSED', True),
@@ -803,15 +805,21 @@ class RPCWindow(QWidget):
         )
         config_parser.set('DEFAULT', 'LOG_LEVEL', self.checkbox_log_level.currentText())
 
+        type_mapping = {
+            'MOVIES': 'Movies',
+            'SHOWS': 'Shows',
+            'MUSIC': 'Music',
+            'LIVE TV': 'Live TV',
+        }
         media_types = [
-            key.capitalize()
-            for key in ['MOVIES', 'SHOWS', 'MUSIC']
+            type_mapping[key]
+            for key in ['MOVIES', 'SHOWS', 'MUSIC', 'LIVE TV']
             if self.checkboxes[key].isChecked()
         ]
         config_parser.set('DEFAULT', 'MEDIA_TYPES', ','.join(media_types))
 
         for key in self.checkboxes:
-            if key not in ('MOVIES', 'SHOWS', 'MUSIC'):
+            if key not in ('MOVIES', 'SHOWS', 'MUSIC', 'LIVE TV'):
                 config_parser.set('DEFAULT', key, str(self.checkboxes[key].isChecked()).lower())
 
         with open(self.ini_path, 'w', encoding='utf-8') as f:

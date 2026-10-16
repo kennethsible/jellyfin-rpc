@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.12.1"
+version = "1.13.0"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -20,7 +20,7 @@ dependencies = [
 gui = ["PySide6>=6.12.0", "pyinstaller>=6.22.3"]
 
 [dependency-groups]
-dev = ["ruff>=0.17.0", "mypy>=2.4.0", "types-requests"]
+dev = ["ruff>=0.17.1", "mypy>=2.4.0", "types-requests"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"
