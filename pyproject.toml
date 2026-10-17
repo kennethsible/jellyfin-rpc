@@ -42,6 +42,11 @@ ignore_missing_imports = true
 untyped_calls_exclude = ["pypresence"]
 files = ["src"]
 
+[tool.bandit]
+skips = ["B404", "B603"]
+exclude_dirs = [".venv"]
+targets = ["src"]
+
 [tool.hatch.metadata]
 allow-direct-references = true
 

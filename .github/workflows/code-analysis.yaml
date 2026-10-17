@@ -59,7 +59,7 @@ jobs:
       - name: Scan Dependencies (pip-audit)
         run: uv run --with pip-audit pip-audit --skip-editable
       - name: Static Security Analysis (Bandit)
-        run: uv run --with "bandit[sarif]" bandit -r src/ -f sarif -o bandit-results.sarif
+        run: uv run --with "bandit[sarif,toml]" bandit -c pyproject.toml -r src/ -f sarif -o bandit-results.sarif
         continue-on-error: true
       - name: Upload Results to GitHub Security
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
