@@ -431,7 +431,7 @@ class LibrarySelectorWindow(QDialog):
             gui_logger.error(f'Failed to Retrieve Libraries: {e}')
             self.scroll_layout.addWidget(QLabel('Error Retrieving Libraries'))
 
-    def save_selection(self):
+    def save_selection(self) -> None:
         self.selected_libraries = ','.join(
             [
                 library_id
@@ -513,7 +513,7 @@ class RPCWindow(QWidget):
 
         self.setup_tray()
 
-    def create_window(self):
+    def create_window(self) -> None:
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
         if sys.platform != 'darwin':
             self.setWindowIcon(self.icon_bundle)
@@ -879,7 +879,7 @@ class RPCWindow(QWidget):
             self.selected_libraries = selector.selected_libraries
             self.on_setting_changed()
 
-    def on_setting_changed(self):
+    def on_setting_changed(self) -> None:
         if self.sender() in (
             self.checkboxes['START_MINIMIZED'],
             self.checkboxes.get('MINIMIZE_ON_CLOSE'),
@@ -1325,7 +1325,7 @@ def main() -> None:
     ipc_server = QLocalServer()
     ipc_server.listen(ipc_server_name)
 
-    def handle_ipc():
+    def handle_ipc() -> None:
         conn = ipc_server.nextPendingConnection()
         if conn.waitForReadyRead(500) and conn.readAll().data() == b'FOCUS':
             gui_queue.put('FOCUS')

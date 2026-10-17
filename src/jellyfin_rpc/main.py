@@ -20,14 +20,14 @@ from email.utils import parseaddr
 from importlib.metadata import metadata
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import aiohttp
 import certifi
 import pycountry
 from aiohttp import ClientSession, WSMsgType
-from aiohttp_client_cache import CacheBackend
+from aiohttp_client_cache.backends.base import CacheBackend
 from aiohttp_client_cache.session import CachedSession
 from pypresence.exceptions import PyPresenceException
 from pypresence.presence import AioPresence
@@ -115,11 +115,11 @@ def get_lang_code(lang_str: str) -> str | None:
     if len(lang_str) == 2 and lang_str.isalpha():
         lang = _pycountry.languages.get(alpha_2=lang_str.lower())
         if lang and hasattr(lang, 'alpha_2'):
-            return lang.alpha_2
+            return str(lang.alpha_2)
     try:
         match = _pycountry.languages.lookup(lang_str)
         if hasattr(match, 'alpha_2'):
-            return match.alpha_2
+            return str(match.alpha_2)
     except LookupError:
         pass
     return None
@@ -316,7 +316,7 @@ async def get_imdb_episode_id(
                 return None
             response.raise_for_status()
             data = await response.json()
-            return data.get('imdb_id')
+            return cast(str | None, data.get('imdb_id'))
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
@@ -347,7 +347,7 @@ async def get_series_id(
             response.raise_for_status()
             data = await response.json()
             if results := data.get('results'):
-                return results[0].get('id')
+                return cast(str | None, results[0].get('id'))
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
@@ -378,7 +378,7 @@ async def get_movie_id(
             response.raise_for_status()
             data = await response.json()
             if results := data.get('results'):
-                return results[0].get('id')
+                return cast(str | None, results[0].get('id'))
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
@@ -409,7 +409,7 @@ async def get_music_id_from_search(session: ClientSession, artist: str, album: s
             response.raise_for_status()
             data = await response.json()
             if release_groups := data.get('release-groups'):
-                return release_groups[0].get('id')
+                return cast(str | None, release_groups[0].get('id'))
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'MusicBrainz API HTTP Error ({e.status}: {e.message})')
@@ -437,7 +437,7 @@ async def get_music_id_from_release(session: ClientSession, release_id: str) -> 
             response.raise_for_status()
             data = await response.json()
             if release_group := data.get('release-group'):
-                return release_group.get('id')
+                return cast(str | None, release_group.get('id'))
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'MusicBrainz API HTTP Error ({e.status}: {e.message})')
@@ -492,7 +492,7 @@ async def get_series_poster(
                 response.raise_for_status()
                 data = await response.json()
                 if poster := select_poster(data['posters'], languages):
-                    return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+                    return f'https://image.tmdb.org/t/p/w185/{poster["file_path"]}'
                 logger.warning('No Poster Available on TMDB')
         else:
             series_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}'
@@ -506,7 +506,7 @@ async def get_series_poster(
                 response.raise_for_status()
                 data = await response.json()
                 if poster_path := data.get('poster_path'):
-                    return 'https://image.tmdb.org/t/p/w185/' + poster_path
+                    return f'https://image.tmdb.org/t/p/w185/{poster_path}'
                 logger.warning('No Poster Available on TMDB')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
@@ -543,7 +543,7 @@ async def get_season_poster(
                 response.raise_for_status()
                 data = await response.json()
                 if poster := select_poster(data['posters'], languages):
-                    return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+                    return f'https://image.tmdb.org/t/p/w185/{poster["file_path"]}'
                 logger.warning('No Poster Available on TMDB')
         else:
             season_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}'
@@ -557,7 +557,7 @@ async def get_season_poster(
                 response.raise_for_status()
                 data = await response.json()
                 if poster_path := data.get('poster_path'):
-                    return 'https://image.tmdb.org/t/p/w185/' + poster_path
+                    return f'https://image.tmdb.org/t/p/w185/{poster_path}'
                 logger.warning('No Poster Available on TMDB')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
@@ -590,7 +590,7 @@ async def get_movie_poster(
                 response.raise_for_status()
                 data = await response.json()
                 if poster := select_poster(data['posters'], languages):
-                    return 'https://image.tmdb.org/t/p/w185/' + poster['file_path']
+                    return f'https://image.tmdb.org/t/p/w185/{poster["file_path"]}'
                 logger.warning('No Poster Available on TMDB')
         else:
             movie_url = f'https://api.themoviedb.org/3/movie/{tmdb_id}'
@@ -604,7 +604,7 @@ async def get_movie_poster(
                 response.raise_for_status()
                 data = await response.json()
                 if poster_path := data.get('poster_path'):
-                    return 'https://image.tmdb.org/t/p/w185/' + poster_path
+                    return f'https://image.tmdb.org/t/p/w185/{poster_path}'
                 logger.warning('No Poster Available on TMDB')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
@@ -632,7 +632,7 @@ async def get_release_group_cover(session: ClientSession, group_id: str) -> str:
             data = await response.json()
             images = data.get('images', [])
             if images and 'image' in images[0]:
-                return images[0]['image']
+                return str(images[0]['image'])
             logger.warning('No Cover Art Available on Cover Art Archive')
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
@@ -664,7 +664,7 @@ async def get_release_cover(
             data = await response.json()
             images = data.get('images', [])
             if images and 'image' in images[0]:
-                return images[0]['image']
+                return str(images[0]['image'])
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'Cover Art Archive API HTTP Error ({e.status}: {e.message})')
@@ -1498,7 +1498,7 @@ async def activity_loop(
                     rpc_state.pending_payload = None
 
                 try:
-                    await discord_rpc.update(  # type: ignore
+                    await discord_rpc.update(
                         **cached_kwargs,
                         start=current_start,
                         end=current_end,

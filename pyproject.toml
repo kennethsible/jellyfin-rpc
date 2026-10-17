@@ -40,6 +40,7 @@ quote-style = "single"
 strict = true
 ignore_missing_imports = true
 untyped_calls_exclude = ["pypresence"]
+files = ["src"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
