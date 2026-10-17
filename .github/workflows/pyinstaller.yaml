@@ -4,14 +4,13 @@ on:
   push:
     tags:
       - 'v*.*.*'
-    branches:
-      - develop
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:

@@ -1,0 +1,68 @@
+name: Code Analysis
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Package Manager
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - name: Install Dependencies
+        run: |
+          uv sync --all-extras --frozen
+          echo "UV_FROZEN=true" >> "$GITHUB_ENV"
+          echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
+      - name: Ruff Linter Check
+        run: uv run ruff check src/
+      - name: Ruff Formatter Check
+        run: uv run ruff format --check src/
+      - name: Mypy Strict Type Check
+        run: uv run mypy src/
+
+  security:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Package Manager
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          python-version: "3.14"
+      - name: Install Dependencies
+        run: |
+          uv sync --all-extras --no-dev --frozen
+          echo "UV_FROZEN=true" >> "$GITHUB_ENV"
+          echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
+      - name: Scan Dependencies (pip-audit)
+        run: uv run --with pip-audit pip-audit --skip-editable
+      - name: Static Security Analysis (Bandit)
+        run: uv run --with "bandit[sarif]" bandit -r src/ -f sarif -o bandit-results.sarif
+        continue-on-error: true
+      - name: Upload Results to GitHub Security
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: bandit-results.sarif
