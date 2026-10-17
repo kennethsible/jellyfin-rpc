@@ -10,6 +10,7 @@ on:
 
 jobs:
   bump-cask:
+    permissions: {}
     runs-on: ubuntu-latest
     container:
       image: homebrew/brew
