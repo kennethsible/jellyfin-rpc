@@ -110,14 +110,15 @@ If not specified, configuration and log files default to the following directori
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 
-2. Create a Python environment.
+2. Clone the GitHub repository.
 
     ```bash
-    uv venv .venv --python 3.12
+    git clone https://github.com/kennethsible/jellyfin-rpc.git
+    cd jellyfin-rpc
     ```
 
 3. Build the standalone executable.
 
     ```bash
-    uv run --extra gui pyinstaller main.spec
+    uv run --all-extras pyinstaller main.spec
     ```

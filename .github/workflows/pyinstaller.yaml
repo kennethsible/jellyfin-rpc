@@ -19,6 +19,8 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
           - os: windows-latest
             platform: windows-amd64
           - os: windows-11-arm
@@ -36,8 +38,8 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.14"
-      - name: Install Dependencies
-        run: uv sync --all-extras --no-dev
+      - name: Install Python Dependencies
+        run: uv sync --locked --all-extras --no-dev
       - name: Build PyInstaller Executable
         shell: bash
         run: |
@@ -46,9 +48,9 @@ jobs:
           elif [ "${{ matrix.platform }}" = "macos-amd64" ]; then
             export MACOS_ARCH="x86_64"
           fi
-          uv run pyinstaller main.spec --noconfirm
+          uv run --no-sync pyinstaller main.spec --noconfirm
       - name: Build AppImage (Linux Only)
-        if: matrix.os == 'ubuntu-22.04'
+        if: startsWith(matrix.os, 'ubuntu')
         shell: bash
         run: |
           sudo apt-get update
@@ -60,7 +62,8 @@ jobs:
           mv "dist/Jellyfin RPC" dist/AppDir/usr/lib/jellyfin-rpc
           ln -s ../lib/jellyfin-rpc/jellyfin-rpc dist/AppDir/usr/bin/jellyfin-rpc
 
-          cp -P /usr/lib/x86_64-linux-gnu/libxcb-cursor.so* dist/AppDir/usr/lib/
+          ARCH_NAME=$(uname -m)
+          cp -P /usr/lib/${ARCH_NAME}-linux-gnu/libxcb-cursor.so* dist/AppDir/usr/lib/
 
           mkdir -p dist/AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p dist/AppDir/usr/share/icons/hicolor/512x512/apps
@@ -87,14 +90,14 @@ jobs:
           EOF
           chmod +x dist/AppDir/AppRun
 
-          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x appimagetool-x86_64.AppImage
-          ./appimagetool-x86_64.AppImage --appimage-extract
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH_NAME}.AppImage"
+          chmod +x "appimagetool-${ARCH_NAME}.AppImage"
+          "./appimagetool-${ARCH_NAME}.AppImage" --appimage-extract
           mv squashfs-root appimagetool.AppDir
 
-          export ARCH=x86_64
+          export ARCH="${ARCH_NAME}"
           ./appimagetool.AppDir/AppRun dist/AppDir "dist/Jellyfin RPC.AppImage"
-          rm -rf dist/AppDir appimagetool.AppDir appimagetool-x86_64.AppImage
+          rm -rf dist/AppDir appimagetool.AppDir "appimagetool-${ARCH_NAME}.AppImage"
       - name: Build Disk Image (macOS Only)
         if: startsWith(matrix.os, 'macos')
         shell: bash
@@ -122,7 +125,7 @@ jobs:
         run: |
           VERSION=$(uv version --short)
           echo "ARTIFACT_NAME=jellyfin-rpc-$VERSION-${{ matrix.platform }}" >> $GITHUB_ENV
-          if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+          if [[ "${{ matrix.os }}" == ubuntu* ]]; then
             echo 'ARTIFACT_PATH=dist/*.AppImage' >> $GITHUB_ENV
           elif [[ "${{ matrix.os }}" == windows* ]]; then
             echo 'ARTIFACT_PATH=dist/installer/*.exe' >> $GITHUB_ENV
