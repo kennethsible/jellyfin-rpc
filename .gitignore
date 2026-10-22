@@ -1,11 +1,10 @@
 .DS_Store
 __pycache__/
+.ruff_cache/
 .mypy_cache/
+.pytest_cache/
 .vscode/
 .venv/
 *.pyc
 build/
 dist/
-src/jellyfin_rpc/*.ico
-src/jellyfin_rpc/*.png
-src/jellyfin_rpc/*.svg

@@ -125,7 +125,7 @@ def set_startup_status(enabled: bool) -> None:
             end tell
             '''
         try:
-            subprocess.run(['osascript', '-e', applescript], capture_output=True, check=True)  # nosec B607
+            subprocess.run(['osascript', '-e', applescript], capture_output=True, check=True)
         except subprocess.SubprocessError:
             pass
 
@@ -189,7 +189,7 @@ def get_startup_status() -> bool:
         try:
             result = subprocess.run(
                 ['osascript', '-e', applescript], capture_output=True, check=True, text=True
-            )  # nosec B607
+            )
             stored_path = result.stdout.strip()
             if not stored_path:
                 return False
@@ -219,7 +219,7 @@ def get_startup_status() -> bool:
 
 def open_file(filepath: str) -> None:
     if sys.platform == 'win32':
-        os.startfile(filepath)  # nosec B606
+        os.startfile(filepath)  # noqa: S606
     elif sys.platform == 'darwin':
         subprocess.call(('open', filepath))
     elif sys.platform == 'linux':

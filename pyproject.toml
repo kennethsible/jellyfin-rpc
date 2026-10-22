@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.13.0"
+version = "1.13.1"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -10,7 +10,7 @@ dependencies = [
     "aiohttp>=3.14.5",
     "aiohttp-client-cache>=0.15.0",
     "requests>=2.34.2",
-    "certifi>=2026.7.22",
+    "certifi>=2026.10.19",
     "pycountry>=26.2.16",
     "pypresence>=4.6.2",
 ]
@@ -29,23 +29,22 @@ jellyfin-rpc = "jellyfin_rpc.main:main"
 
 [tool.ruff]
 line-length = 100
+src = ["src"]
 
 [tool.ruff.lint]
-extend-select = ["I"]
+extend-select = ["I", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/**/*.py" = ["S404", "S603", "S607"]
 
 [tool.ruff.format]
 quote-style = "single"
 
 [tool.mypy]
+files = ["src"]
 strict = true
 ignore_missing_imports = true
 untyped_calls_exclude = ["pypresence"]
-files = ["src"]
-
-[tool.bandit]
-skips = ["B404", "B603"]
-exclude_dirs = [".venv"]
-targets = ["src"]
 
 [tool.hatch.metadata]
 allow-direct-references = true

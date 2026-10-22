@@ -21,24 +21,21 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Package Manager
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: true
           python-version: "3.14"
-      - name: Install Dependencies
-        run: |
-          uv sync --all-extras --frozen
-          echo "UV_FROZEN=true" >> "$GITHUB_ENV"
-          echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
+      - name: Install Python Dependencies
+        run: uv sync --locked --all-extras
       - name: Ruff Linter Check
-        run: uv run ruff check src/
+        run: uv run --no-sync ruff check src/
       - name: Ruff Formatter Check
-        run: uv run ruff format --check src/
+        run: uv run --no-sync ruff format --check src/
       - name: Mypy Strict Type Check
-        run: uv run mypy src/
+        run: uv run --no-sync mypy src/
 
   security:
-    name: Vulnerability Scan
+    name: Security Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -47,22 +44,24 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Package Manager
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
         with:
           enable-cache: true
           python-version: "3.14"
-      - name: Install Dependencies
-        run: |
-          uv sync --all-extras --no-dev --frozen
-          echo "UV_FROZEN=true" >> "$GITHUB_ENV"
-          echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
-      - name: Scan Dependencies (pip-audit)
-        run: uv run --with pip-audit pip-audit --skip-editable
-      - name: Static Security Analysis (Bandit)
-        run: uv run --with "bandit[sarif,toml]" bandit -c pyproject.toml -r src/ -f sarif -o bandit-results.sarif
+      - name: Install Python Dependencies
+        run: uv sync --locked --all-extras --no-dev
+      - name: Static Security Scan (flake8-bandit)
+        run: >-
+          uvx ruff check src/
+          --config "lint.extend-select=[]"
+          --select S
+          --output-format sarif
+          --output-file ruff.sarif
         continue-on-error: true
       - name: Upload Results to GitHub Security
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          sarif_file: bandit-results.sarif
+          sarif_file: ruff.sarif
+      - name: Python Dependency Audit (pip-audit)
+        run: uv run --no-sync --with pip-audit pip-audit --skip-editable
