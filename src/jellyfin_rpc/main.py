@@ -190,7 +190,7 @@ async def initiate_quick_connect(
         sys.exit(1)
 
 
-async def resolve_jf_host(jf_host: str, session: aiohttp.ClientSession) -> str:
+async def resolve_jf_host(session: ClientSession, jf_host: str) -> str:
     for protocol in ('https://', 'http://'):
         candidate_url = f'{protocol}{jf_host}'
         try:
@@ -247,7 +247,7 @@ async def get_jf_user_and_server(
 
             user_id = None
             for user in users_data:
-                if jf_username == user.get('Name', ''):
+                if jf_username == user.get('Name'):
                     user_id = user.get('Id')
             if user_id is None:
                 logger.error(f'Jellyfin User Not Found: {jf_username}')
@@ -747,11 +747,14 @@ async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
 
 
 async def clear_activity(
-    discord_rpc: AioPresence, polling_rate: int, reason: str | None = None
+    discord_rpc: AioPresence, polling_rate: int, stale_session: bool = False
 ) -> bool:
     try:
         await discord_rpc.clear()
-        logger.info('Activity Cleared' + (f' ({reason})' if reason else ''))
+        if stale_session:
+            logger.info('Activity Cleared (Stale Session)')
+        else:
+            logger.info('Activity Cleared')
         return True
     except (PyPresenceException, OSError, KeyError) as e:
         logger.error(f'Failed to Clear Activity: {type(e).__name__}')
@@ -775,8 +778,7 @@ async def websocket_listener(
 
     initial_attempt = True
     while True:
-        jf_api_key = config.get('JELLYFIN_API_KEY', '')
-        if not jf_api_key:
+        if not (jf_api_key := config.get('JELLYFIN_API_KEY')):
             await asyncio.sleep(1)
             continue
 
@@ -825,19 +827,19 @@ async def websocket_listener(
 @dataclass
 class PresenceState:
     last_activity_str: str = ''
-    last_playstate: bool = False
-    last_playback: float | None = None  # Playback Time of Last Media Position
-    last_timestamp: float | None = None  # System Time of Last Media Position
-    last_rpc_update: float = 0.0  # System Time of Last RPC Activity Update
+    last_paused_state: bool = False
+    last_playback_position: float | None = None
+    last_packet_time: float | None = None
+    last_update_time: float = 0.0
     has_pending_update: bool = False
     pending_payload: tuple[str, Any] | None = None
 
     def reset(self) -> None:
         self.last_activity_str = ''
-        self.last_playstate = False
-        self.last_playback = None
-        self.last_timestamp = None
-        self.last_rpc_update = time.time()
+        self.last_paused_state = False
+        self.last_playback_position = None
+        self.last_packet_time = None
+        self.last_update_time = time.time()
         self.has_pending_update = False
 
 
@@ -898,28 +900,27 @@ async def activity_loop(
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio', 'LiveTV': 'TvChannel'}
 
-    media_priority: dict[str, int] = {}
+    jf_media_types: dict[str, int] = {}
     for i, media_type in enumerate(media_types):
         if media_type in type_mapping:
-            priority_score = len(media_types) - i
-            jf_type = type_mapping[media_type]
-            media_priority[jf_type] = priority_score
+            priority_level = len(media_types) - i
+            jf_media_type = type_mapping[media_type]
+            jf_media_types[jf_media_type] = priority_level
 
     activity_str = ''
     rpc_state = PresenceState()
-    active_session_id: str | None = None
-    last_unsupported_warning = False
+    current_session_id: str | None = None
     last_missing_key_warning = False
 
-    cached_item_id = None
+    cached_media_id = None
     cached_kwargs: dict[str, Any] = {}
-    cached_program: dict[str, Any] = {}
+    cached_program_dict: dict[str, Any] = {}
 
     while True:
         if ws_state.get('ws_connected'):
             try:
                 if rpc_state.has_pending_update:
-                    remaining_cooldown = polling_rate - (time.time() - rpc_state.last_rpc_update)
+                    remaining_cooldown = polling_rate - (time.time() - rpc_state.last_update_time)
                     wait_timeout = max(0.05, remaining_cooldown)
                 else:
                     wait_timeout = polling_rate
@@ -955,51 +956,59 @@ async def activity_loop(
         for session in sessions:
             if session.get('UserName') != jf_username:
                 continue
-            item = session.get('NowPlayingItem')
-            if not item or item.get('Type') not in media_priority:
+            media_dict = session.get('NowPlayingItem', {})
+            media_type = media_dict.get('Type')
+            if media_type not in jf_media_types:
                 continue
             filtered_sessions.append(session)
 
-        session_data: dict[str, Any] = {}
+        session_dict: dict[str, Any] = {}
         if filtered_sessions:
 
             def session_sort_key(
-                session: dict[str, Any], current_id: str | None = active_session_id
+                session: dict[str, Any], session_id: str | None = current_session_id
             ) -> tuple[Any, ...]:
                 playstate = session.get('PlayState', {})
-                is_active = not playstate.get('IsPaused', False)
-                item_type = session.get('NowPlayingItem', {}).get('Type', '')
-                item_priority = media_priority.get(item_type, 0)
-                is_current = 1 if session.get('Id') == current_id else 0
+                media_dict = session.get('NowPlayingItem', {})
+                media_type = media_dict.get('Type', '')
+
+                is_playing = not playstate.get('IsPaused', False)
+                priority_level = jf_media_types.get(media_type, 0)
+                is_current = 1 if session.get('Id') == session_id else 0
                 activity_date = session.get('LastActivityDate', '')
-                return (is_active, item_priority, is_current, activity_date)
+
+                return (is_playing, priority_level, is_current, activity_date)
 
             filtered_sessions.sort(key=session_sort_key, reverse=True)
-            session_data = filtered_sessions[0]
-            active_session_id = session_data.get('Id')
+            session_dict = filtered_sessions[0]
+            current_session_id = session_dict.get('Id')
         else:
-            active_session_id = None
+            current_session_id = None
 
-        if session_data:
-            media_dict = session_data['NowPlayingItem']
-            item_id = media_dict.get('Id')
+        if session_dict:
+            media_dict = session_dict.get('NowPlayingItem', {})
             media_type = media_dict.get('Type')
-            media_changed = item_id != cached_item_id
+            media_id = media_dict.get('Id')
+            media_changed = media_id != cached_media_id
 
-            if not media_changed and media_type == 'TvChannel' and cached_program.get('EndDate'):
+            if (
+                not media_changed
+                and media_type == 'TvChannel'
+                and cached_program_dict.get('EndDate')
+            ):
                 try:
-                    program_end = datetime.fromisoformat(cached_program['EndDate']).timestamp()
+                    program_end = datetime.fromisoformat(cached_program_dict['EndDate']).timestamp()
                     if time.time() >= program_end:
                         media_changed = True
                 except (ValueError, TypeError):
                     pass
 
             try:
-                session_paused = session_data['PlayState']['IsPaused']
+                session_paused = session_dict['PlayState']['IsPaused']
             except KeyError as e:
                 logger.warning(f'Missing Key in Session Data: {e}')
                 session_paused = False
-            playstate_changed = rpc_state.last_playstate != session_paused
+            playstate_changed = rpc_state.last_paused_state != session_paused
 
             if session_paused and not show_when_paused:
                 if rpc_state.last_activity_str:
@@ -1010,39 +1019,36 @@ async def activity_loop(
 
             if media_type == 'TvChannel':
                 if media_changed:
-                    cached_program.clear()
-                    if item_id and jf_session:
+                    cached_program_dict.clear()
+                    if media_id:
                         try:
                             async with jf_session.get(
-                                f'{jf_host}/Items/{item_id}',
+                                f'{jf_host}/Items/{media_id}',
                                 headers=jf_headers,
                                 params={'userId': user_id},
                             ) as response:
                                 response.raise_for_status()
                                 channel = await response.json()
-                                cached_program = channel.get('CurrentProgram', {})
+                                cached_program_dict = channel.get('CurrentProgram', {})
                         except (aiohttp.ClientError, TimeoutError) as e:
                             logger.error(f'Program Retrieval Network Error ({type(e).__name__})')
                             logger.debug(e)
                         except (ValueError, KeyError) as e:
                             logger.error(f'Program Retrieval Parsing Error ({type(e).__name__})')
                             logger.debug(e)
-                if cached_program:
-                    media_dict['CurrentProgram'] = cached_program
             else:
-                cached_program.clear()
+                cached_program_dict.clear()
 
             current_playback = None
             current_start = current_end = None
             try:
                 if media_type == 'TvChannel':
-                    current_program = media_dict.get('CurrentProgram', {})
-                    if start_date := current_program.get('StartDate'):
+                    if start_date := cached_program_dict.get('StartDate'):
                         current_start = int(datetime.fromisoformat(start_date).timestamp())
-                    if (end_date := current_program.get('EndDate')) and not session_paused:
+                    if (end_date := cached_program_dict.get('EndDate')) and not session_paused:
                         current_end = int(datetime.fromisoformat(end_date).timestamp())
                 else:
-                    position_ticks = int(session_data['PlayState']['PositionTicks'])
+                    position_ticks = int(session_dict['PlayState']['PositionTicks'])
                     current_playback = position_ticks / 10_000_000
                     last_packet_time = ws_state.get('last_packet', time.time())
                     adjusted_playback = current_playback + (time.time() - last_packet_time)
@@ -1055,7 +1061,7 @@ async def activity_loop(
 
             if current_end and time.time() >= (current_end + stale_grace_period):
                 if rpc_state.last_activity_str:
-                    if not await clear_activity(discord_rpc, polling_rate, 'Stale Session'):
+                    if not await clear_activity(discord_rpc, polling_rate, stale_session=True):
                         continue
                     rpc_state.reset()
                 continue
@@ -1065,27 +1071,26 @@ async def activity_loop(
             if (
                 not media_changed
                 and not session_paused
-                and not rpc_state.last_playstate
+                and not rpc_state.last_paused_state
                 and current_playback is not None
-                and rpc_state.last_playback is not None
-                and rpc_state.last_timestamp is not None
+                and rpc_state.last_playback_position is not None
+                and rpc_state.last_packet_time is not None
             ):
-                timestamp_elapsed = packet_timestamp - rpc_state.last_timestamp
-                expected_playback = rpc_state.last_playback + timestamp_elapsed
+                timestamp_elapsed = packet_timestamp - rpc_state.last_packet_time
+                expected_playback = rpc_state.last_playback_position + timestamp_elapsed
                 playback_delta = current_playback - expected_playback
                 if abs(playback_delta) >= (seek_threshold - 0.5):
                     seek_detected, seek_delta = True, round(playback_delta)
 
-            rpc_state.last_playback = current_playback
-            rpc_state.last_timestamp = packet_timestamp
+            rpc_state.last_playback_position = current_playback
+            rpc_state.last_packet_time = packet_timestamp
 
             if media_changed:
-                cached_item_id = item_id
                 try:
                     library_id = None
-                    if item_id:
+                    if selected_libraries and media_id:
                         try:
-                            ancestors_url = f'{jf_host}/Items/{item_id}/Ancestors'
+                            ancestors_url = f'{jf_host}/Items/{media_id}/Ancestors'
                             async with jf_session.get(
                                 ancestors_url, headers=jf_headers, params={'userId': user_id}
                             ) as response:
@@ -1102,23 +1107,22 @@ async def activity_loop(
                             logger.error(f'Library Retrieval Parsing Error ({type(e).__name__})')
                             logger.debug(e)
 
-                    match library_filter_type:
-                        case 'ALLOWLIST' | 'WHITELIST':
-                            is_allowed = bool(library_id and library_id in selected_libraries)
-                        case 'DENYLIST' | 'BLACKLIST':
-                            is_allowed = not (library_id and library_id in selected_libraries)
-                        case _:
-                            is_allowed = True
+                        match library_filter_type:
+                            case 'ALLOWLIST' | 'WHITELIST':
+                                is_allowed = bool(library_id and library_id in selected_libraries)
+                            case 'DENYLIST' | 'BLACKLIST':
+                                is_allowed = not (library_id and library_id in selected_libraries)
+                            case _:
+                                is_allowed = True
 
-                    if not is_allowed:
-                        cached_kwargs.clear()
-                        if rpc_state.last_activity_str:
-                            if not await clear_activity(
-                                discord_rpc, polling_rate, 'Library Blocked'
-                            ):
-                                continue
-                            rpc_state.reset()
-                        continue
+                        if not is_allowed:
+                            cached_kwargs.clear()
+                            if rpc_state.last_activity_str:
+                                if not await clear_activity(discord_rpc, polling_rate):
+                                    continue
+                                rpc_state.reset()
+                            cached_media_id = media_id
+                            continue
 
                     state_str = details_str = None
                     match media_type:
@@ -1150,16 +1154,16 @@ async def activity_loop(
                                 activity_str += f' \u2022 {state_str.split(" \u2022 ")[0]}'
                         case 'TvChannel':
                             activity_type = ActivityType.WATCHING
-                            program = media_dict.get('CurrentProgram', {})
                             channel_name = (
                                 sanitize_broadcast_title(
                                     media_dict.get('ChannelName') or media_dict.get('Name')
                                 )
                                 or 'Live TV'
                             )
-                            program_name = sanitize_broadcast_title(program.get('Name'))
-                            season = program.get('ParentIndexNumber')
-                            episode = program.get('IndexNumber')
+                            program_dict = cached_program_dict
+                            program_name = sanitize_broadcast_title(program_dict.get('Name'))
+                            season = program_dict.get('ParentIndexNumber')
+                            episode = program_dict.get('IndexNumber')
                             details_str = program_name or channel_name
                             if season is not None and episode is not None:
                                 state_str = f'S{season}:E{episode} ({channel_name})'
@@ -1170,18 +1174,6 @@ async def activity_loop(
                             else:
                                 state_str = 'Live Broadcast'
                                 activity_str = details_str
-                        case _:
-                            if not last_unsupported_warning:
-                                logger.warning(f'Unsupported Media Type "{media_type}"')
-                                last_unsupported_warning = True
-                            if rpc_state.last_activity_str:
-                                cached_kwargs.clear()
-                                if not await clear_activity(
-                                    discord_rpc, polling_rate, 'Unsupported Media'
-                                ):
-                                    continue
-                                rpc_state.reset()
-                            continue
 
                     poster_url = 'large_image'
                     details_url = state_url = None
@@ -1202,27 +1194,27 @@ async def activity_loop(
                                     params={'userId': user_id},
                                 ) as response:
                                     response.raise_for_status()
-                                    series_item = await response.json()
-                                    series_year = series_item.get('ProductionYear')
-                                    series_ids = series_item.get('ProviderIds', {})
-                                    series_external_urls = series_item.get('ExternalUrls', [])
+                                    series_dict = await response.json()
+                                    series_year = series_dict.get('ProductionYear')
+                                    series_ids = series_dict.get('ProviderIds', {})
+                                    series_external_urls = series_dict.get('ExternalUrls', [])
                                     tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
                             except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
                                 logger.debug(f'Failed to Fetch Series Details ({series_id}): {e}')
 
                         episode_external_urls: list[dict[str, str]] = []
-                        if item_id:
+                        if media_id:
                             try:
                                 async with jf_session.get(
-                                    f'{jf_host}/Items/{item_id}',
+                                    f'{jf_host}/Items/{media_id}',
                                     headers=jf_headers,
                                     params={'userId': user_id},
                                 ) as response:
                                     response.raise_for_status()
-                                    episode_item = await response.json()
-                                    episode_external_urls = episode_item.get('ExternalUrls', [])
+                                    episode_dict = await response.json()
+                                    episode_external_urls = episode_dict.get('ExternalUrls', [])
                             except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
-                                logger.debug(f'Failed to Fetch Episode Details ({item_id}): {e}')
+                                logger.debug(f'Failed to Fetch Episode Details ({media_id}): {e}')
 
                         if not tmdb_id and tmdb_api_key:
                             logger.warning('No TMDB ID Found. Searching...')
@@ -1303,8 +1295,8 @@ async def activity_loop(
                                     cache_session, tmdb_api_key, media_dict['Name'], movie_year
                                 )
 
-                        if not always_use_tmdb and item_id and is_https:
-                            poster_url = f'{jf_host}/Items/{item_id}/Images/Primary/0'
+                        if not always_use_tmdb and media_id and is_https:
+                            poster_url = f'{jf_host}/Items/{media_id}/Images/Primary/0'
                         elif tmdb_api_key and tmdb_id:
                             poster_url = await get_movie_poster(
                                 cache_session, tmdb_api_key, tmdb_id, languages
@@ -1333,8 +1325,8 @@ async def activity_loop(
                                     params={'userId': user_id},
                                 ) as response:
                                     response.raise_for_status()
-                                    album_item = await response.json()
-                                    album_music_ids = album_item.get('ProviderIds', {})
+                                    album_dict = await response.json()
+                                    album_music_ids = album_dict.get('ProviderIds', {})
                                     if not group_id:
                                         group_id = album_music_ids.get('MusicBrainzReleaseGroup')
                                     if release_over_group and not release_id:
@@ -1367,16 +1359,16 @@ async def activity_loop(
                             state_url = f'https://musicbrainz.org/release-group/{group_id}'
 
                     elif media_type == 'TvChannel':
-                        program = media_dict.get('CurrentProgram', {})
-                        season = program.get('ParentIndexNumber')
-                        episode = program.get('IndexNumber')
+                        program_dict = cached_program_dict
+                        season = program_dict.get('ParentIndexNumber')
+                        episode = program_dict.get('IndexNumber')
                         series_name = sanitize_broadcast_title(
-                            program.get('SeriesName') or program.get('Name')
+                            program_dict.get('SeriesName') or program_dict.get('Name')
                         )
 
-                        program_ids = program.get('ProviderIds', {})
+                        program_ids = program_dict.get('ProviderIds', {})
                         tmdb_id = program_ids.get('Tmdb') or program_ids.get('TheMovieDb')
-                        is_movie = program.get('IsMovie')
+                        is_movie = program_dict.get('IsMovie')
                         is_series_match, series_tmdb_id = False, None
 
                         if tmdb_api_key and tmdb_id:
@@ -1401,11 +1393,11 @@ async def activity_loop(
                                     )
 
                         if not always_use_tmdb and is_https:
-                            program_id = program.get('Id')
-                            if program_id and program.get('ImageTags', {}).get('Primary'):
+                            program_id = program_dict.get('Id')
+                            if program_id and program_dict.get('ImageTags', {}).get('Primary'):
                                 poster_url = f'{jf_host}/Items/{program_id}/Images/Primary/0'
-                            elif item_id:
-                                poster_url = f'{jf_host}/Items/{item_id}/Images/Primary/0'
+                            elif media_id:
+                                poster_url = f'{jf_host}/Items/{media_id}/Images/Primary/0'
 
                         if poster_url == 'large_image' and tmdb_api_key:
                             if is_series_match and series_tmdb_id:
@@ -1444,6 +1436,7 @@ async def activity_loop(
                     ):
                         display_name = f'on {server_name}'
 
+                    cached_media_id = media_id
                     cached_kwargs = {
                         'activity_type': activity_type,
                         'status_display_type': StatusDisplayType.DETAILS,
@@ -1459,11 +1452,8 @@ async def activity_loop(
                     if not last_missing_key_warning:
                         logger.warning(f'Missing Key in Session Data: {e}')
                         last_missing_key_warning = True
-                    cached_item_id = None
                     await asyncio.sleep(polling_rate)
                     continue
-
-                last_unsupported_warning = False
                 last_missing_key_warning = False
 
             if media_changed or seek_detected or playstate_changed:
@@ -1477,10 +1467,8 @@ async def activity_loop(
                     playstate = 'Paused' if session_paused else 'Resumed'
                     rpc_state.pending_payload = ('playstate_changed', f'PlayState {playstate}')
 
-            if (
-                rpc_state.has_pending_update
-                and (time.time() - rpc_state.last_rpc_update) >= polling_rate
-            ):
+            remaining_cooldown = polling_rate - (time.time() - rpc_state.last_update_time)
+            if rpc_state.has_pending_update and remaining_cooldown <= 0:
                 if not cached_kwargs:
                     rpc_state.has_pending_update = False
                     rpc_state.pending_payload = None
@@ -1504,9 +1492,9 @@ async def activity_loop(
                         end=current_end,
                         small_image=small_image,
                     )
-                    rpc_state.last_rpc_update = time.time()
+                    rpc_state.last_update_time = time.time()
                     rpc_state.last_activity_str = activity_str
-                    rpc_state.last_playstate = session_paused
+                    rpc_state.last_paused_state = session_paused
                     rpc_state.has_pending_update = False
                 except (PyPresenceException, OSError, KeyError) as e:
                     logger.error(f'RPC Update Error: {type(e).__name__}')
@@ -1516,13 +1504,13 @@ async def activity_loop(
                     continue
 
         elif rpc_state.last_activity_str:
-            if rpc_state.last_timestamp is None or time.time() >= (
-                rpc_state.last_timestamp + session_timeout
+            if rpc_state.last_packet_time is None or time.time() >= (
+                rpc_state.last_packet_time + session_timeout
             ):
                 if not await clear_activity(discord_rpc, polling_rate):
                     continue
                 rpc_state.reset()
-                cached_item_id = None
+                cached_media_id = None
                 cached_kwargs.clear()
 
         if not ws_state.get('ws_connected'):
@@ -1558,7 +1546,7 @@ async def monitor_activity(
         ):
             jf_host = config['JELLYFIN_HOST'].rstrip('/')
             if urlparse(jf_host).scheme not in ('http', 'https'):
-                jf_host = await resolve_jf_host(jf_host, jf_session)
+                jf_host = await resolve_jf_host(jf_session, jf_host)
                 config['JELLYFIN_HOST'] = jf_host
                 logger.warning(f'Missing URL Protocol: {jf_host}')
 
