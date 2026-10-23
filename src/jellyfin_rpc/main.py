@@ -834,9 +834,9 @@ class PresenceState:
     has_pending_update: bool = False
     pending_payload: tuple[str, Any] | None = None
 
-    def reset(self) -> None:
+    def reset(self, paused_state: bool = False) -> None:
         self.last_activity_str = ''
-        self.last_paused_state = False
+        self.last_paused_state = paused_state
         self.last_playback_position = None
         self.last_packet_time = None
         self.last_update_time = time.time()
@@ -919,9 +919,21 @@ async def activity_loop(
     while True:
         if ws_state.get('ws_connected'):
             try:
-                if rpc_state.has_pending_update:
-                    remaining_cooldown = polling_rate - (time.time() - rpc_state.last_update_time)
-                    wait_timeout = max(0.05, remaining_cooldown)
+                current_time = time.time()
+                elapsed_since_update = current_time - rpc_state.last_update_time
+                if rpc_state.has_pending_update or (
+                    rpc_state.last_activity_str and elapsed_since_update < polling_rate
+                ):
+                    wait_timeout = max(0.05, polling_rate - elapsed_since_update)
+                elif (
+                    current_session_id is None
+                    and rpc_state.last_activity_str
+                    and rpc_state.last_packet_time is not None
+                ):
+                    remaining_timeout = (
+                        rpc_state.last_packet_time + session_timeout
+                    ) - current_time
+                    wait_timeout = max(0.05, min(polling_rate, remaining_timeout))
                 else:
                     wait_timeout = polling_rate
                 await asyncio.wait_for(wake_event.wait(), timeout=wait_timeout)
@@ -1012,9 +1024,11 @@ async def activity_loop(
 
             if session_paused and not show_when_paused:
                 if rpc_state.last_activity_str:
+                    if (time.time() - rpc_state.last_update_time) < polling_rate:
+                        continue
                     if not await clear_activity(discord_rpc, polling_rate):
                         continue
-                    rpc_state.reset()
+                    rpc_state.reset(paused_state=True)
                 continue
 
             if media_type == 'TvChannel':
@@ -1061,9 +1075,13 @@ async def activity_loop(
 
             if current_end and time.time() >= (current_end + stale_grace_period):
                 if rpc_state.last_activity_str:
+                    if (time.time() - rpc_state.last_update_time) < polling_rate:
+                        continue
                     if not await clear_activity(discord_rpc, polling_rate, stale_session=True):
                         continue
                     rpc_state.reset()
+                    cached_media_id = None
+                    cached_kwargs.clear()
                 continue
 
             seek_detected, seek_delta = False, 0.0
@@ -1118,6 +1136,8 @@ async def activity_loop(
                         if not is_allowed:
                             cached_kwargs.clear()
                             if rpc_state.last_activity_str:
+                                if (time.time() - rpc_state.last_update_time) < polling_rate:
+                                    continue
                                 if not await clear_activity(discord_rpc, polling_rate):
                                     continue
                                 rpc_state.reset()
@@ -1507,6 +1527,8 @@ async def activity_loop(
             if rpc_state.last_packet_time is None or time.time() >= (
                 rpc_state.last_packet_time + session_timeout
             ):
+                if (time.time() - rpc_state.last_update_time) < polling_rate:
+                    continue
                 if not await clear_activity(discord_rpc, polling_rate):
                     continue
                 rpc_state.reset()
