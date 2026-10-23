@@ -730,6 +730,14 @@ def resolve_movie_provider_urls(
     return None, None
 
 
+def check_connection(discord_rpc: AioPresence) -> bool:
+    reader = getattr(discord_rpc, 'sock_reader', None)
+    writer = getattr(discord_rpc, 'sock_writer', None)
+    if reader is None or writer is None:
+        return False
+    return not (writer.is_closing() or reader.at_eof() or reader.exception() is not None)
+
+
 async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
     initial_attempt = True
     while True:
@@ -996,6 +1004,13 @@ async def activity_loop(
             current_session_id = session_dict.get('Id')
         else:
             current_session_id = None
+
+        if not check_connection(discord_rpc):
+            await await_connection(discord_rpc, polling_rate)
+            rpc_state.last_activity_str = ''
+            rpc_state.last_update_time = 0.0
+            if cached_kwargs:
+                rpc_state.has_pending_update = True
 
         if session_dict:
             media_dict = session_dict.get('NowPlayingItem', {})
