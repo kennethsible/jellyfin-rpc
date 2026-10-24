@@ -158,7 +158,8 @@ async def initiate_quick_connect(
             logger.info(f'Quick Connect Code: {code}')
             logger.info(f'{jf_host.rstrip("/")}/web/#/quickconnect')
     except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError) as e:
-        logger.error(f'Failed to Initiate Quick Connect: {e}')
+        logger.error(f'Failed to Initiate Quick Connect ({type(e).__name__})')
+        logger.debug(type(e).__name__, exc_info=True)
         sys.exit(1)
 
     while True:
@@ -186,11 +187,12 @@ async def initiate_quick_connect(
             logger.info(f'Successfully Authenticated via Quick Connect ({username})')
             return token, username
     except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError) as e:
-        logger.error(f'Failed to Retrieve User Access Token: {e}')
+        logger.error(f'Failed to Retrieve User Access Token ({type(e).__name__})')
+        logger.debug(type(e).__name__, exc_info=True)
         sys.exit(1)
 
 
-async def resolve_jf_host(session: ClientSession, jf_host: str) -> str:
+async def resolve_host_url(session: ClientSession, jf_host: str) -> str:
     for protocol in ('https://', 'http://'):
         candidate_url = f'{protocol}{jf_host}'
         try:
@@ -204,7 +206,7 @@ async def resolve_jf_host(session: ClientSession, jf_host: str) -> str:
     return f'http://{jf_host}'
 
 
-async def get_jf_user_and_server(
+async def await_jellyfin_connect(
     session: ClientSession,
     config: SectionProxy,
     ini_path: str,
@@ -217,6 +219,7 @@ async def get_jf_user_and_server(
         jf_api_key = config['JELLYFIN_API_KEY']
     except KeyError as e:
         logger.error(f'Missing Key in INI Config: {e}')
+        logger.debug(type(e).__name__, exc_info=True)
         sys.exit(1)
 
     device_id = get_device_id(config)
@@ -266,14 +269,14 @@ async def get_jf_user_and_server(
         except (aiohttp.ClientError, TimeoutError) as e:
             if initial_attempt:
                 logger.error(f'Jellyfin API Network Error ({type(e).__name__}). Retrying...')
-                logger.debug(e)
+                logger.debug(type(e).__name__, exc_info=True)
             initial_attempt = False
             await asyncio.sleep(polling_rate)
             continue
         except (ValueError, KeyError) as e:
             if initial_attempt:
                 logger.error(f'Jellyfin API Parsing Error ({type(e).__name__}). Retrying...')
-                logger.debug(e)
+                logger.debug(type(e).__name__, exc_info=True)
             initial_attempt = False
             await asyncio.sleep(polling_rate)
             continue
@@ -298,7 +301,7 @@ async def check_tmdb_auth(session: ClientSession, api_key: str) -> None:
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
 
 
 async def get_imdb_episode_id(
@@ -323,10 +326,10 @@ async def get_imdb_episode_id(
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return None
 
 
@@ -354,10 +357,10 @@ async def get_series_id(
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return None
 
 
@@ -385,10 +388,10 @@ async def get_movie_id(
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return None
 
 
@@ -416,10 +419,10 @@ async def get_music_id_from_search(session: ClientSession, artist: str, album: s
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'MusicBrainz API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'MusicBrainz API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return None
 
 
@@ -444,10 +447,10 @@ async def get_music_id_from_release(session: ClientSession, release_id: str) -> 
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'MusicBrainz API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'MusicBrainz API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return None
 
 
@@ -514,10 +517,10 @@ async def get_series_poster(
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return 'large_image'
 
 
@@ -566,11 +569,11 @@ async def get_season_poster(
         return 'large_image'
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
         return 'large_image'
     except (ValueError, KeyError, IndexError) as e:
-        logger.debug(f'TMDB API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
+        logger.debug(type(e).__name__, exc_info=True)
     return await get_series_poster(session, api_key, tmdb_id, languages)
 
 
@@ -612,10 +615,10 @@ async def get_movie_poster(
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'TMDB API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'TMDB API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return 'large_image'
 
 
@@ -640,10 +643,10 @@ async def get_release_group_cover(session: ClientSession, group_id: str) -> str:
         logger.debug(f'HTTP {e.status} at {obfuscated_url}')
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'Cover Art Archive API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     except (ValueError, KeyError, IndexError) as e:
         logger.error(f'Cover Art Archive API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
     return 'large_image'
 
 
@@ -672,11 +675,11 @@ async def get_release_cover(
         return 'large_image'
     except (aiohttp.ClientError, TimeoutError) as e:
         logger.error(f'Cover Art Archive API Network Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.debug(type(e).__name__, exc_info=True)
         return 'large_image'
     except (ValueError, KeyError, IndexError) as e:
-        logger.debug(f'Cover Art Archive API Parsing Error ({type(e).__name__})')
-        logger.debug(e)
+        logger.error(f'Cover Art Archive API Parsing Error ({type(e).__name__})')
+        logger.debug(type(e).__name__, exc_info=True)
     return await get_release_group_cover(session, group_id)
 
 
@@ -730,7 +733,7 @@ def resolve_movie_provider_urls(
     return None, None
 
 
-def check_connection(discord_rpc: AioPresence) -> bool:
+def check_discord_connect(discord_rpc: AioPresence) -> bool:
     reader = getattr(discord_rpc, 'sock_reader', None)
     writer = getattr(discord_rpc, 'sock_writer', None)
     if reader is None or writer is None:
@@ -738,7 +741,7 @@ def check_connection(discord_rpc: AioPresence) -> bool:
     return not (writer.is_closing() or reader.at_eof() or reader.exception() is not None)
 
 
-async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
+async def await_discord_connect(discord_rpc: AioPresence, polling_rate: int) -> None:
     initial_attempt = True
     while True:
         try:
@@ -747,7 +750,7 @@ async def await_connection(discord_rpc: AioPresence, polling_rate: int) -> None:
         except (PyPresenceException, OSError) as e:
             if initial_attempt:
                 logger.error(f'Discord Client Connection Failed ({type(e).__name__}). Retrying...')
-                logger.debug(e)
+                logger.debug(type(e).__name__, exc_info=True)
             initial_attempt = False
             await asyncio.sleep(polling_rate)
             continue
@@ -765,9 +768,9 @@ async def clear_activity(
             logger.info('Activity Cleared')
         return True
     except (PyPresenceException, OSError, KeyError) as e:
-        logger.error(f'Failed to Clear Activity: {type(e).__name__}')
-        logger.debug(e)
-        await await_connection(discord_rpc, polling_rate)
+        logger.error(f'RPC Clear Error: {type(e).__name__}: {e}')
+        logger.debug(type(e).__name__, exc_info=True)
+        await await_discord_connect(discord_rpc, polling_rate)
         await asyncio.sleep(polling_rate)
         return False
 
@@ -825,7 +828,7 @@ async def websocket_listener(
         except (aiohttp.ClientError, TimeoutError, ValueError) as e:
             if initial_attempt:
                 logger.error(f'Jellyfin WebSocket Error ({type(e).__name__}). Retrying...')
-                logger.debug(e)
+                logger.debug(type(e).__name__, exc_info=True)
                 initial_attempt = False
         finally:
             ws_state['ws_connected'] = False
@@ -870,7 +873,7 @@ async def activity_loop(
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
     imdb_external_urls = config.getboolean('IMDB_EXTERNAL_LINKS', False)
 
-    user_id, server_name = await get_jf_user_and_server(
+    user_id, server_name = await await_jellyfin_connect(
         jf_session, config, ini_path, show_server_name, polling_rate
     )
     jf_username = config['JELLYFIN_USERNAME']
@@ -918,7 +921,7 @@ async def activity_loop(
     activity_str = ''
     rpc_state = PresenceState()
     current_session_id: str | None = None
-    last_missing_key_warning = False
+    missing_session_keys: set[str] = set()
 
     cached_media_id = None
     cached_kwargs: dict[str, Any] = {}
@@ -957,8 +960,8 @@ async def activity_loop(
                     ws_state['last_packet'] = time.time()
             except (aiohttp.ClientError, TimeoutError) as e:
                 logger.error(f'Session Polling Error: {type(e).__name__}')
-                logger.debug(e)
-                user_id, server_name = await get_jf_user_and_server(
+                logger.debug(type(e).__name__, exc_info=True)
+                user_id, server_name = await await_jellyfin_connect(
                     jf_session, config, ini_path, show_server_name, polling_rate
                 )
                 jf_username = config['JELLYFIN_USERNAME']
@@ -968,7 +971,7 @@ async def activity_loop(
                 continue
             except ValueError as e:
                 logger.error(f'Session Parsing Error: {type(e).__name__}')
-                logger.debug(e)
+                logger.debug(type(e).__name__, exc_info=True)
                 await asyncio.sleep(polling_rate)
                 continue
 
@@ -1005,8 +1008,8 @@ async def activity_loop(
         else:
             current_session_id = None
 
-        if not check_connection(discord_rpc):
-            await await_connection(discord_rpc, polling_rate)
+        if not check_discord_connect(discord_rpc):
+            await await_discord_connect(discord_rpc, polling_rate)
             rpc_state.last_activity_str = ''
             rpc_state.last_update_time = 0.0
             if cached_kwargs:
@@ -1033,8 +1036,8 @@ async def activity_loop(
             try:
                 session_paused = session_dict['PlayState']['IsPaused']
             except KeyError as e:
-                logger.warning(f'Missing Key in Session Data: {e}')
-                session_paused = False
+                logger.debug(type(e).__name__, exc_info=True)
+
             playstate_changed = rpc_state.last_paused_state != session_paused
 
             if session_paused and not show_when_paused:
@@ -1062,10 +1065,10 @@ async def activity_loop(
                                 cached_program_dict = channel.get('CurrentProgram', {})
                         except (aiohttp.ClientError, TimeoutError) as e:
                             logger.error(f'Program Retrieval Network Error ({type(e).__name__})')
-                            logger.debug(e)
+                            logger.debug(type(e).__name__, exc_info=True)
                         except (ValueError, KeyError) as e:
                             logger.error(f'Program Retrieval Parsing Error ({type(e).__name__})')
-                            logger.debug(e)
+                            logger.debug(type(e).__name__, exc_info=True)
             else:
                 cached_program_dict.clear()
 
@@ -1087,7 +1090,7 @@ async def activity_loop(
                     if not session_paused:
                         current_end = int(current_start + runtime_ticks / 10_000_000)
             except (ValueError, KeyError, TypeError) as e:
-                logger.debug(e)
+                logger.debug(type(e).__name__, exc_info=True)
 
             if current_end and time.time() >= (current_end + stale_grace_period):
                 if rpc_state.last_activity_str:
@@ -1142,10 +1145,10 @@ async def activity_loop(
                                     break
                         except (aiohttp.ClientError, TimeoutError) as e:
                             logger.error(f'Library Retrieval Network Error ({type(e).__name__})')
-                            logger.debug(e)
+                            logger.debug(type(e).__name__, exc_info=True)
                         except (ValueError, KeyError) as e:
                             logger.error(f'Library Retrieval Parsing Error ({type(e).__name__})')
-                            logger.debug(e)
+                            logger.debug(type(e).__name__, exc_info=True)
 
                         match library_filter_type:
                             case 'ALLOWLIST' | 'WHITELIST':
@@ -1241,8 +1244,10 @@ async def activity_loop(
                                     series_ids = series_dict.get('ProviderIds', {})
                                     series_external_urls = series_dict.get('ExternalUrls', [])
                                     tmdb_id = series_ids.get('Tmdb') or series_ids.get('TheMovieDb')
-                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
-                                logger.debug(f'Failed to Fetch Series Details ({series_id}): {e}')
+                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
+                                logger.debug(
+                                    f'Failed to Fetch Series Details ({series_id})', exc_info=True
+                                )
 
                         episode_external_urls: list[dict[str, str]] = []
                         if media_id:
@@ -1255,8 +1260,10 @@ async def activity_loop(
                                     response.raise_for_status()
                                     episode_dict = await response.json()
                                     episode_external_urls = episode_dict.get('ExternalUrls', [])
-                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
-                                logger.debug(f'Failed to Fetch Episode Details ({media_id}): {e}')
+                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
+                                logger.debug(
+                                    f'Failed to Fetch Episode Details ({media_id})', exc_info=True
+                                )
 
                         if not tmdb_id and tmdb_api_key:
                             logger.warning('No TMDB ID Found. Searching...')
@@ -1373,8 +1380,10 @@ async def activity_loop(
                                         group_id = album_music_ids.get('MusicBrainzReleaseGroup')
                                     if release_over_group and not release_id:
                                         release_id = album_music_ids.get('MusicBrainzAlbum')
-                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError) as e:
-                                logger.debug(f'Failed to Fetch Album Details ({album_id}): {e}')
+                            except (aiohttp.ClientError, TimeoutError, ValueError, KeyError):
+                                logger.debug(
+                                    f'Failed to Fetch Album Details ({album_id})', exc_info=True
+                                )
 
                         if not group_id and release_id:
                             group_id = await get_music_id_from_release(cache_session, release_id)
@@ -1491,12 +1500,15 @@ async def activity_loop(
                     }
 
                 except KeyError as e:
-                    if not last_missing_key_warning:
+                    missing_key = str(e).strip('\'"')
+                    if missing_key not in missing_session_keys:
                         logger.warning(f'Missing Key in Session Data: {e}')
-                        last_missing_key_warning = True
+                        logger.debug(type(e).__name__, exc_info=True)
+                        missing_session_keys.add(missing_key)
                     await asyncio.sleep(polling_rate)
                     continue
-                last_missing_key_warning = False
+                else:
+                    missing_session_keys = set()
 
             if media_changed or position_acquired or seek_detected or playstate_changed:
                 rpc_state.has_pending_update = True
@@ -1540,8 +1552,8 @@ async def activity_loop(
                     rpc_state.has_pending_update = False
                 except (PyPresenceException, OSError, KeyError) as e:
                     logger.error(f'RPC Update Error: {type(e).__name__}')
-                    logger.debug(e)
-                    await await_connection(discord_rpc, polling_rate)
+                    logger.debug(type(e).__name__, exc_info=True)
+                    await await_discord_connect(discord_rpc, polling_rate)
                     await asyncio.sleep(polling_rate)
                     continue
 
@@ -1571,7 +1583,7 @@ async def monitor_activity(
 ) -> None:
     client_id = config.get('DISCORD_CLIENT_ID', CLIENT_ID)
     discord_rpc = AioPresence(client_id)
-    await await_connection(discord_rpc, polling_rate)
+    await await_discord_connect(discord_rpc, polling_rate)
 
     timeout = aiohttp.ClientTimeout(5.0)
     ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -1590,7 +1602,7 @@ async def monitor_activity(
         ):
             jf_host = config['JELLYFIN_HOST'].rstrip('/')
             if urlparse(jf_host).scheme not in ('http', 'https'):
-                jf_host = await resolve_jf_host(jf_session, jf_host)
+                jf_host = await resolve_host_url(jf_session, jf_host)
                 config['JELLYFIN_HOST'] = jf_host
                 logger.warning(f'Missing URL Protocol: {jf_host}')
 
