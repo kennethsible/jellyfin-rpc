@@ -1043,6 +1043,7 @@ async def activity_loop(
                         continue
                     if not await clear_activity(discord_rpc, polling_rate):
                         continue
+                    logger.log(15, 'PlayState Paused')
                     rpc_state.reset(paused_state=True)
                 continue
 
@@ -1112,9 +1113,15 @@ async def activity_loop(
                 timestamp_elapsed = packet_timestamp - rpc_state.last_packet_time
                 expected_playback = rpc_state.last_playback_position + timestamp_elapsed
                 playback_delta = current_playback - expected_playback
-                if abs(playback_delta) >= (seek_threshold - 0.5):
+                position_delta = current_playback - rpc_state.last_playback_position
+                if abs(playback_delta) >= (seek_threshold - 0.5) or position_delta <= -0.5:
                     seek_detected, seek_delta = True, round(playback_delta)
 
+            position_acquired = (
+                rpc_state.last_playback_position is None
+                and current_playback is not None
+                and not session_paused
+            )
             rpc_state.last_playback_position = current_playback
             rpc_state.last_packet_time = packet_timestamp
 
@@ -1491,9 +1498,9 @@ async def activity_loop(
                     continue
                 last_missing_key_warning = False
 
-            if media_changed or seek_detected or playstate_changed:
+            if media_changed or position_acquired or seek_detected or playstate_changed:
                 rpc_state.has_pending_update = True
-                if media_changed:
+                if media_changed or position_acquired:
                     rpc_state.pending_payload = None
                 elif seek_detected:
                     delta_str = f'+{seek_delta}s' if seek_delta > 0 else f'{seek_delta}s'
