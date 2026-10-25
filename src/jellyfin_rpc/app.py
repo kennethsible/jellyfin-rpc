@@ -350,7 +350,7 @@ class LibrarySelectorWindow(QDialog):
         jf_host: str,
         jf_api_key: str,
         jf_username: str,
-        library_filter_type: str,
+        library_filter_mode: str,
         selected_libraries: str,
     ) -> None:
         super().__init__(parent)
@@ -365,7 +365,7 @@ class LibrarySelectorWindow(QDialog):
         self.checkbox_map: dict[str, QCheckBox] = {}
 
         layout = QVBoxLayout(self)
-        title = QLabel(library_filter_type)
+        title = QLabel(library_filter_mode)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet('font-weight: bold; font-size: 14px; margin-bottom: 8px;')
         layout.addWidget(title)
@@ -555,9 +555,9 @@ class RPCWindow(QWidget):
         library_layout = QVBoxLayout()
         library_layout.setSpacing(6)
 
-        self.segmented_filter_type = SegmentedButton(['Denylist', 'Allowlist'])
-        self.segmented_filter_type.button_group.buttonClicked.connect(self.on_setting_changed)
-        library_layout.addWidget(self.segmented_filter_type)
+        self.segmented_filter_mode = SegmentedButton(['Denylist', 'Allowlist'])
+        self.segmented_filter_mode.button_group.buttonClicked.connect(self.on_setting_changed)
+        library_layout.addWidget(self.segmented_filter_mode)
 
         button_select_libraries = QPushButton('Select Libraries')
         button_select_libraries.setFixedHeight(28)
@@ -771,11 +771,11 @@ class RPCWindow(QWidget):
         self.entries['TMDB_API_KEY'].widget.setText(self.config.get('TMDB_API_KEY', ''))
         self.entries['POSTER_LANGUAGES'].widget.setText(self.config.get('POSTER_LANGUAGES', ''))
 
-        library_filter_type = self.config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').capitalize()
-        library_filter_type = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}.get(
-            library_filter_type, library_filter_type
+        library_filter_mode = self.config.get('LIBRARY_FILTER_MODE', 'DENYLIST').capitalize()
+        library_filter_mode = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}.get(
+            library_filter_mode, library_filter_mode
         )
-        self.segmented_filter_type.set_value(str(library_filter_type))
+        self.segmented_filter_mode.set_value(str(library_filter_mode))
         self.selected_libraries = self.config.get('SELECTED_LIBRARIES', '')
 
         media_types = parse_delimited_list(self.config, 'MEDIA_TYPES')
@@ -830,7 +830,7 @@ class RPCWindow(QWidget):
         ]:
             config_parser.set('DEFAULT', key, self.entries[key].widget.text())
 
-        config_parser.set('DEFAULT', 'LIBRARY_FILTER_TYPE', self.segmented_filter_type.get_value())
+        config_parser.set('DEFAULT', 'LIBRARY_FILTER_MODE', self.segmented_filter_mode.get_value())
         config_parser.set('DEFAULT', 'SELECTED_LIBRARIES', self.selected_libraries)
         config_parser.set(
             'DEFAULT', 'POLLING_RATE', self.advanced_vars['POLLING_RATE'].text().rstrip('s')
@@ -872,7 +872,7 @@ class RPCWindow(QWidget):
             jf_host,
             jf_api,
             self.entries['JELLYFIN_USERNAME'].widget.text(),
-            self.segmented_filter_type.get_value(),
+            self.segmented_filter_mode.get_value(),
             self.selected_libraries,
         )
         if selector.exec():

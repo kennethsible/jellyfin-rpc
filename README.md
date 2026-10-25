@@ -71,8 +71,10 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `SEARCH_MUSICBRAINZ` | `true` | Searches MusicBrainz by artist and album title when IDs are missing in Jellyfin. |
 | `ALWAYS_USE_COVERART` | `false` | Uses the Cover Art Archive as the primary source for album covers. Serves as a fallback for missing artwork in Jellyfin when disabled. |
 | `RELEASE_OVER_GROUP` | `false` | Prioritizes [release](https://musicbrainz.org/doc/Release) artwork over [release group](https://musicbrainz.org/doc/Release_Group) artwork for music. |
-| `LIBRARY_FILTER_TYPE` | `Denylist` | Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked (`Allowlist` or `Denylist`). |
+| `LIBRARY_FILTER_MODE` | `Denylist` | Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked (`Allowlist` or `Denylist`). |
 | `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs to allow or block. Found as the `topParentId` parameter in the web client URL. |
+| `TAG_FILTER_MODE` | `Denylist` | Filter behavior for selected tags. Controls whether these tags are allowed or blocked (`Allowlist` or `Denylist`). |
+| `SELECTED_TAGS` | — | Comma-separated list of Jellyfin tags to allow or block. Matches tags on the playing media along with any parent items (such as seasons, series, or collections). |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events (if your Jellyfin server and reverse proxy support WebSockets). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
 | `SESSION_TIMEOUT` | `2` | Delay in seconds before clearing the activity. Smooths transitions between media items. |

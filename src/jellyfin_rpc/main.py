@@ -61,7 +61,8 @@ def load_config(ini_path: str) -> SectionProxy:
 
     migrate_key('API_TOKEN', 'JELLYFIN_API_KEY')
     migrate_key('USERNAME', 'JELLYFIN_USERNAME')
-    migrate_key('FILTER_MODE', 'LIBRARY_FILTER_TYPE')
+    migrate_key('FILTER_MODE', 'LIBRARY_FILTER_MODE')
+    migrate_key('LIBRARY_FILTER_TYPE', 'LIBRARY_FILTER_MODE')
     migrate_key('FILTER_LIBRARIES', 'SELECTED_LIBRARIES')
     migrate_key('ALWAYS_USE_MUSICBRAINZ', 'ALWAYS_USE_COVERART')
     migrate_key('IMDB_EXTERNAL_URLS', 'IMDB_EXTERNAL_LINKS')
@@ -916,8 +917,11 @@ async def sync_presence(
     always_use_coverart = config.getboolean('ALWAYS_USE_COVERART', False)
     release_over_group = config.getboolean('RELEASE_OVER_GROUP', False)
 
-    library_filter_type = config.get('LIBRARY_FILTER_TYPE', 'DENYLIST').upper()
+    library_filter_mode = config.get('LIBRARY_FILTER_MODE', 'DENYLIST').upper()
     selected_libraries = parse_delimited_list(config, 'SELECTED_LIBRARIES')
+
+    tag_filter_mode = config.get('TAG_FILTER_MODE', 'DENYLIST').upper()
+    selected_tags = {tag.lower() for tag in parse_delimited_list(config, 'SELECTED_TAGS')}
 
     media_types = parse_delimited_list(config, 'MEDIA_TYPES')
     type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio', 'LiveTV': 'TvChannel'}
@@ -1134,8 +1138,9 @@ async def sync_presence(
             rpc_state.last_playback_position = current_playback
             rpc_state.last_packet_time = packet_timestamp
 
-            if media_changed and selected_libraries and media_id:
+            if media_changed and (selected_libraries or selected_tags) and media_id:
                 library_id = None
+                media_tags = {tag.lower() for tag in media_dict.get('Tags', [])}
                 try:
                     ancestors_url = f'{jf_host}/Items/{media_id}/Ancestors'
                     async with jf_session.get(
@@ -1149,11 +1154,13 @@ async def sync_presence(
                                 'AggregateFolder',
                             ):
                                 library_id = ancestor['Id']
+                            for tag in ancestor.get('Tags', []):
+                                media_tags.add(tag.lower())
                 except (aiohttp.ClientError, TimeoutError) as e:
-                    logger.error(f'Library Retrieval Network Error ({type(e).__name__})')
+                    logger.error(f'Ancestor Retrieval Network Error ({type(e).__name__})')
                     logger.debug(type(e).__name__, exc_info=True)
                 except (ValueError, KeyError) as e:
-                    logger.error(f'Library Retrieval Parsing Error ({type(e).__name__})')
+                    logger.error(f'Ancestor Retrieval Parsing Error ({type(e).__name__})')
                     logger.debug(type(e).__name__, exc_info=True)
 
                 is_allowed = True
@@ -1161,11 +1168,19 @@ async def sync_presence(
                     has_matching_library = (
                         library_id is not None and library_id in selected_libraries
                     )
-                    match library_filter_type:
+                    match library_filter_mode:
                         case 'ALLOWLIST' | 'WHITELIST':
                             is_allowed = has_matching_library
                         case 'DENYLIST' | 'BLACKLIST':
                             is_allowed = not has_matching_library
+
+                if is_allowed and selected_tags:
+                    has_matching_tag = not selected_tags.isdisjoint(media_tags)
+                    match tag_filter_mode:
+                        case 'ALLOWLIST' | 'WHITELIST':
+                            is_allowed = has_matching_tag
+                        case 'DENYLIST' | 'BLACKLIST':
+                            is_allowed = not has_matching_tag
 
                 if not is_allowed:
                     cached_kwargs.clear()
