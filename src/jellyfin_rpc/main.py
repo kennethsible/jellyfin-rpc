@@ -250,8 +250,9 @@ async def await_jellyfin_connect(
 
             user_id = None
             for user in users_data:
-                if jf_username == user.get('Name'):
-                    user_id = user.get('Id')
+                if jf_username == user['Name']:
+                    user_id = user['Id']
+
             if user_id is None:
                 logger.error(f'Jellyfin User Not Found: {jf_username}')
                 sys.exit(1)
@@ -351,8 +352,8 @@ async def get_series_id(
                 return None
             response.raise_for_status()
             data = await response.json()
-            if results := data.get('results'):
-                return cast(str | None, results[0].get('id'))
+            if results := data['results']:
+                return str(results[0]['id'])
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
@@ -383,8 +384,8 @@ async def get_movie_id(
                 return None
             response.raise_for_status()
             data = await response.json()
-            if results := data.get('results'):
-                return cast(str | None, results[0].get('id'))
+            if results := data['results']:
+                return str(results[0]['id'])
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'TMDB API HTTP Error ({e.status}: {e.message})')
@@ -415,8 +416,8 @@ async def get_music_id_from_search(session: ClientSession, artist: str, album: s
                 return None
             response.raise_for_status()
             data = await response.json()
-            if release_groups := data.get('release-groups'):
-                return cast(str | None, release_groups[0].get('id'))
+            if release_groups := data['release-groups']:
+                return str(release_groups[0]['id'])
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'MusicBrainz API HTTP Error ({e.status}: {e.message})')
@@ -445,7 +446,7 @@ async def get_music_id_from_release(session: ClientSession, release_id: str) -> 
             response.raise_for_status()
             data = await response.json()
             if release_group := data.get('release-group'):
-                return cast(str | None, release_group.get('id'))
+                return str(release_group['id'])
     except aiohttp.ClientResponseError as e:
         obfuscated_url = e.request_info.real_url.with_query(None)
         logger.error(f'MusicBrainz API HTTP Error ({e.status}: {e.message})')
@@ -499,8 +500,9 @@ async def get_series_poster(
                     return 'large_image'
                 response.raise_for_status()
                 data = await response.json()
-                if poster := select_poster(data['posters'], languages):
-                    return f'https://image.tmdb.org/t/p/w185/{poster["file_path"]}'
+                poster = select_poster(data.get('posters', []), languages)
+                if poster and (file_path := poster.get('file_path')):
+                    return f'https://image.tmdb.org/t/p/w185/{file_path}'
                 logger.warning('No Poster Available on TMDB')
         else:
             series_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}'
@@ -550,8 +552,9 @@ async def get_season_poster(
                     return 'large_image'
                 response.raise_for_status()
                 data = await response.json()
-                if poster := select_poster(data['posters'], languages):
-                    return f'https://image.tmdb.org/t/p/w185/{poster["file_path"]}'
+                poster = select_poster(data.get('posters', []), languages)
+                if poster and (file_path := poster.get('file_path')):
+                    return f'https://image.tmdb.org/t/p/w185/{file_path}'
                 logger.warning('No Poster Available on TMDB')
         else:
             season_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}'
@@ -597,8 +600,9 @@ async def get_movie_poster(
                     return 'large_image'
                 response.raise_for_status()
                 data = await response.json()
-                if poster := select_poster(data['posters'], languages):
-                    return f'https://image.tmdb.org/t/p/w185/{poster["file_path"]}'
+                poster = select_poster(data.get('posters', []), languages)
+                if poster and (file_path := poster.get('file_path')):
+                    return f'https://image.tmdb.org/t/p/w185/{file_path}'
                 logger.warning('No Poster Available on TMDB')
         else:
             movie_url = f'https://api.themoviedb.org/3/movie/{tmdb_id}'
@@ -861,7 +865,7 @@ class PresenceState:
         self.has_pending_update = False
 
 
-async def activity_loop(
+async def sync_presence(
     jf_session: ClientSession,
     cache_session: ClientSession,
     discord_rpc: AioPresence,
@@ -925,7 +929,6 @@ async def activity_loop(
             jf_media_type = type_mapping[media_type]
             jf_media_types[jf_media_type] = priority_level
 
-    activity_str = ''
     rpc_state = PresenceState()
     current_session_id: str | None = None
     missing_session_keys: set[str] = set()
@@ -998,19 +1001,18 @@ async def activity_loop(
                 session: dict[str, Any], session_id: str | None = current_session_id
             ) -> tuple[Any, ...]:
                 playstate = session.get('PlayState', {})
-                media_dict = session.get('NowPlayingItem', {})
-                media_type = media_dict.get('Type', '')
+                media_type = session['NowPlayingItem']['Type']
 
                 is_playing = not playstate.get('IsPaused', False)
                 priority_level = jf_media_types.get(media_type, 0)
-                is_current = 1 if session.get('Id') == session_id else 0
-                activity_date = session.get('LastActivityDate', '')
+                is_current = 1 if session['Id'] == session_id else 0
+                activity_date = session['LastActivityDate']
 
                 return (is_playing, priority_level, is_current, activity_date)
 
             filtered_sessions.sort(key=session_sort_key, reverse=True)
             session_dict = filtered_sessions[0]
-            current_session_id = session_dict.get('Id')
+            current_session_id = session_dict['Id']
         else:
             current_session_id = None
 
@@ -1022,9 +1024,9 @@ async def activity_loop(
                 rpc_state.has_pending_update = True
 
         if session_dict:
-            media_dict = session_dict.get('NowPlayingItem', {})
-            media_type = media_dict.get('Type')
-            media_id = media_dict.get('Id')
+            media_dict = session_dict['NowPlayingItem']
+            media_type = media_dict['Type']
+            media_id = media_dict['Id']
             media_changed = media_id != cached_media_id
 
             if (
@@ -1039,11 +1041,8 @@ async def activity_loop(
                 except (ValueError, TypeError):
                     pass
 
-            try:
-                session_paused = session_dict['PlayState']['IsPaused']
-            except KeyError as e:
-                logger.debug(type(e).__name__, exc_info=True)
-
+            playstate = session_dict.get('PlayState', {})
+            session_paused = playstate.get('IsPaused', False)
             playstate_changed = rpc_state.last_paused_state != session_paused
 
             if session_paused and not show_when_paused:
@@ -1087,15 +1086,16 @@ async def activity_loop(
                     if (end_date := cached_program_dict.get('EndDate')) and not session_paused:
                         current_end = int(datetime.fromisoformat(end_date).timestamp())
                 else:
-                    position_ticks = int(session_dict['PlayState']['PositionTicks'])
-                    current_playback = position_ticks / 10_000_000
-                    last_packet_time = ws_state.get('last_packet', time.time())
-                    adjusted_playback = current_playback + (time.time() - last_packet_time)
-                    current_start = int(time.time() - adjusted_playback)
-                    runtime_ticks = int(media_dict['RunTimeTicks'])
-                    if not session_paused:
-                        current_end = int(current_start + runtime_ticks / 10_000_000)
-            except (ValueError, KeyError, TypeError) as e:
+                    playstate = session_dict.get('PlayState', {})
+                    if (position_ticks := playstate.get('PositionTicks')) is not None:
+                        current_playback = int(position_ticks) / 10_000_000
+                        last_packet_time = ws_state.get('last_packet', time.time())
+                        adjusted_playback = current_playback + (time.time() - last_packet_time)
+                        current_start = int(time.time() - adjusted_playback)
+                        runtime_ticks = int(media_dict.get('RunTimeTicks') or 0)
+                        if not session_paused and runtime_ticks:
+                            current_end = int(current_start + runtime_ticks / 10_000_000)
+            except (ValueError, TypeError) as e:
                 logger.debug(type(e).__name__, exc_info=True)
 
             if current_end and time.time() >= (current_end + stale_grace_period):
@@ -1134,56 +1134,69 @@ async def activity_loop(
             rpc_state.last_playback_position = current_playback
             rpc_state.last_packet_time = packet_timestamp
 
+            if media_changed and selected_libraries and media_id:
+                library_id = None
+                try:
+                    ancestors_url = f'{jf_host}/Items/{media_id}/Ancestors'
+                    async with jf_session.get(
+                        ancestors_url, headers=jf_headers, params={'userId': user_id}
+                    ) as response:
+                        response.raise_for_status()
+                        ancestors = await response.json()
+                        for ancestor in ancestors:
+                            if library_id is None and ancestor['Type'] in (
+                                'CollectionFolder',
+                                'AggregateFolder',
+                            ):
+                                library_id = ancestor['Id']
+                except (aiohttp.ClientError, TimeoutError) as e:
+                    logger.error(f'Library Retrieval Network Error ({type(e).__name__})')
+                    logger.debug(type(e).__name__, exc_info=True)
+                except (ValueError, KeyError) as e:
+                    logger.error(f'Library Retrieval Parsing Error ({type(e).__name__})')
+                    logger.debug(type(e).__name__, exc_info=True)
+
+                is_allowed = True
+                if selected_libraries:
+                    has_matching_library = (
+                        library_id is not None and library_id in selected_libraries
+                    )
+                    match library_filter_type:
+                        case 'ALLOWLIST' | 'WHITELIST':
+                            is_allowed = has_matching_library
+                        case 'DENYLIST' | 'BLACKLIST':
+                            is_allowed = not has_matching_library
+
+                if not is_allowed:
+                    cached_kwargs.clear()
+                    if rpc_state.last_activity_str:
+                        if (time.time() - rpc_state.last_update_time) < polling_rate:
+                            continue
+                        if not await clear_activity(discord_rpc, polling_rate):
+                            continue
+                        rpc_state.reset()
+                    cached_media_id = media_id
+                    continue
+
             if media_changed:
                 try:
-                    library_id = None
-                    if selected_libraries and media_id:
-                        try:
-                            ancestors_url = f'{jf_host}/Items/{media_id}/Ancestors'
-                            async with jf_session.get(
-                                ancestors_url, headers=jf_headers, params={'userId': user_id}
-                            ) as response:
-                                response.raise_for_status()
-                                ancestors = await response.json()
-                            for ancestor in ancestors:
-                                if ancestor.get('Type') in ('CollectionFolder', 'AggregateFolder'):
-                                    library_id = ancestor.get('Id')
-                                    break
-                        except (aiohttp.ClientError, TimeoutError) as e:
-                            logger.error(f'Library Retrieval Network Error ({type(e).__name__})')
-                            logger.debug(type(e).__name__, exc_info=True)
-                        except (ValueError, KeyError) as e:
-                            logger.error(f'Library Retrieval Parsing Error ({type(e).__name__})')
-                            logger.debug(type(e).__name__, exc_info=True)
-
-                        match library_filter_type:
-                            case 'ALLOWLIST' | 'WHITELIST':
-                                is_allowed = bool(library_id and library_id in selected_libraries)
-                            case 'DENYLIST' | 'BLACKLIST':
-                                is_allowed = not (library_id and library_id in selected_libraries)
-                            case _:
-                                is_allowed = True
-
-                        if not is_allowed:
-                            cached_kwargs.clear()
-                            if rpc_state.last_activity_str:
-                                if (time.time() - rpc_state.last_update_time) < polling_rate:
-                                    continue
-                                if not await clear_activity(discord_rpc, polling_rate):
-                                    continue
-                                rpc_state.reset()
-                            cached_media_id = media_id
-                            continue
-
-                    state_str = details_str = None
+                    details_str = state_str = None
+                    activity_str = ''
                     match media_type:
                         case 'Episode':
                             activity_type = ActivityType.WATCHING
-                            season = media_dict['ParentIndexNumber']
-                            episode = media_dict['IndexNumber']
+                            season = media_dict.get('ParentIndexNumber')
+                            episode = media_dict.get('IndexNumber')
                             details_str = media_dict['SeriesName']
-                            state_str = f'{f"S{season}:E{episode}"} \u2022 {media_dict["Name"]}'
-                            activity_str = f'{details_str} {state_str.split(" \u2022 ")[0]}'
+                            if season is not None and episode is not None:
+                                state_str = f'S{season}:E{episode} \u2022 {media_dict["Name"]}'
+                                activity_str = f'{details_str} S{season}:E{episode}'
+                            elif episode is not None:
+                                state_str = f'E{episode} \u2022 {media_dict["Name"]}'
+                                activity_str = f'{details_str} E{episode}'
+                            else:
+                                state_str = media_dict['Name']
+                                activity_str = f'{details_str} \u2022 {media_dict["Name"]}'
                         case 'Movie':
                             activity_type = ActivityType.WATCHING
                             details_str = media_dict['Name']
@@ -1617,7 +1630,7 @@ async def monitor_activity(
             )
 
             try:
-                await activity_loop(
+                await sync_presence(
                     jf_session,
                     cache_session,
                     discord_rpc,
