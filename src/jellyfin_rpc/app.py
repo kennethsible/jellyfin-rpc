@@ -27,6 +27,7 @@ from PySide6.QtGui import (
     QCursor,
     QHideEvent,
     QIcon,
+    QKeyEvent,
     QPalette,
     QShowEvent,
     QTextCursor,
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -355,7 +357,7 @@ class LibrarySelectorWindow(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle('Library Selector')
-        self.resize(200, 300)
+        self.resize(210, 300)
         self.setModal(True)
 
         self.jf_host = jf_host
@@ -442,6 +444,94 @@ class LibrarySelectorWindow(QDialog):
         self.accept()
 
 
+class TagSelectorWindow(QDialog):
+    def __init__(self, parent: QWidget, tag_filter_mode: str, selected_tags: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Tag Selector')
+        self.resize(210, 300)
+        self.setModal(True)
+
+        self.selected_tags = selected_tags
+        self.checkbox_map: dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+        title = QLabel(tag_filter_mode)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet('font-weight: bold; font-size: 14px; margin-bottom: 4px;')
+        layout.addWidget(title)
+
+        self.tag_input = QLineEdit()
+        self.tag_input.setFixedHeight(28)
+        self.tag_input.setPlaceholderText('Type Tag and Press Enter...')
+        self.tag_input.returnPressed.connect(self.add_entry_tag)
+        layout.addWidget(self.tag_input)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll_layout.setSpacing(4)
+        self.scroll_area.setWidget(self.scroll_content)
+        layout.addWidget(self.scroll_area)
+
+        self.button_save = QPushButton('Save Selection')
+        self.button_save.setFixedHeight(28)
+        self.button_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button_save.setAutoDefault(False)
+        self.button_save.setDefault(False)
+        self.button_save.clicked.connect(self.save_selection)
+        layout.addWidget(self.button_save)
+
+        self.populate_existing_tags()
+
+    def populate_existing_tags(self) -> None:
+        existing_tags = [x.strip() for x in self.selected_tags.split(',') if x.strip()]
+        for tag_name in existing_tags:
+            self.create_checkbox(tag_name)
+
+    def add_entry_tag(self) -> None:
+        if not (tag_text := self.tag_input.text().strip()):
+            return
+
+        existing_tags = {name.lower(): name for name in self.checkbox_map}
+        if tag_text.lower() in existing_tags:
+            checkbox = self.checkbox_map[existing_tags[tag_text.lower()]]
+            checkbox.setChecked(True)
+            self.tag_input.clear()
+            return
+
+        self.create_checkbox(tag_text)
+        self.tag_input.clear()
+
+    def create_checkbox(self, tag_name: str) -> None:
+        checkbox = QCheckBox(tag_name)
+        checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        checkbox.setChecked(True)
+
+        def handle_toggle(is_checked: bool) -> None:
+            if not is_checked:
+                self.scroll_layout.removeWidget(checkbox)
+                checkbox.deleteLater()
+                self.checkbox_map.pop(tag_name, None)
+
+        checkbox.toggled.connect(handle_toggle)
+        self.scroll_layout.addWidget(checkbox)
+        self.checkbox_map[tag_name] = checkbox
+
+    def save_selection(self) -> None:
+        self.selected_tags = ','.join(self.checkbox_map.keys())
+        self.accept()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if self.tag_input.hasFocus():
+                self.add_entry_tag()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class RPCWindow(QWidget):
     def __init__(
         self,
@@ -517,7 +607,7 @@ class RPCWindow(QWidget):
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
         if sys.platform != 'darwin':
             self.setWindowIcon(self.icon_bundle)
-        self.setMinimumSize(860, 560)
+        self.setMinimumSize(860, 620)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(25, 10, 25, 18)
@@ -552,33 +642,55 @@ class RPCWindow(QWidget):
             col1, 'Jellyfin Username', 'Leave Blank for Quick Connect'
         )
 
-        library_layout = QVBoxLayout()
-        library_layout.setSpacing(6)
+        group_library = QFrame()
+        group_library.setObjectName('filter_group')
+        group_library_layout = QVBoxLayout(group_library)
+        group_library_layout.setContentsMargins(4, 4, 4, 4)
+        group_library_layout.setSpacing(4)
 
         self.segmented_filter_mode = SegmentedButton(['Denylist', 'Allowlist'])
         self.segmented_filter_mode.button_group.buttonClicked.connect(self.on_setting_changed)
-        library_layout.addWidget(self.segmented_filter_mode)
+        group_library_layout.addWidget(self.segmented_filter_mode)
 
         button_select_libraries = QPushButton('Select Libraries')
         button_select_libraries.setFixedHeight(28)
         button_select_libraries.setCursor(Qt.CursorShape.PointingHandCursor)
         button_select_libraries.clicked.connect(self.select_libraries)
-        library_layout.addWidget(button_select_libraries)
+        group_library_layout.addWidget(button_select_libraries)
 
-        col1.addLayout(library_layout)
+        col1.addWidget(group_library)
+
+        group_tag = QFrame()
+        group_tag.setObjectName('filter_group')
+        group_tag_layout = QVBoxLayout(group_tag)
+        group_tag_layout.setContentsMargins(6, 6, 6, 6)
+        group_tag_layout.setSpacing(6)
+
+        self.segmented_tag_filter_mode = SegmentedButton(['Denylist', 'Allowlist'])
+        self.segmented_tag_filter_mode.button_group.buttonClicked.connect(self.on_setting_changed)
+        group_tag_layout.addWidget(self.segmented_tag_filter_mode)
+
+        button_select_tags = QPushButton('Select Tags')
+        button_select_tags.setFixedHeight(28)
+        button_select_tags.setCursor(Qt.CursorShape.PointingHandCursor)
+        button_select_tags.clicked.connect(self.select_tags)
+        group_tag_layout.addWidget(button_select_tags)
+
+        col1.addWidget(group_tag)
 
         self.text_log = QTextBrowser()
         self.text_log.setOpenExternalLinks(True)
         col1.addWidget(self.text_log, stretch=1)
 
-        col2.addWidget(self.create_header('Poster Settings'))
+        col2.addWidget(self.create_header('TMDB Settings'))
         self.entries['TMDB_API_KEY'] = self.create_labeled_entry(
             col2, 'TMDB API Key', 'Leave Blank to Disable', obfuscate=True
         )
-        self.entries['POSTER_LANGUAGES'] = self.create_labeled_entry(
-            col2, 'Poster Language(s)', 'Leave Blank to Disable'
+        self.entries['TMDB_LANGUAGES'] = self.create_labeled_entry(
+            col2, 'TMDB Language(s)', 'Leave Blank to Disable'
         )
 
+        col2.addWidget(self.create_header('Poster Settings'))
         self.create_checkbox(col2, 'ALWAYS_USE_TMDB', 'Always Use The Movie Database')
         self.create_checkbox(col2, 'SEASON_OVER_SERIES', 'Prefer Season Poster Over Series')
         self.create_checkbox(col2, 'TEXTLESS_POSTERS', 'Prefer Textless TMDB Posters')
@@ -607,6 +719,8 @@ class RPCWindow(QWidget):
         self.create_checkbox(col3, 'SHOW_WHEN_PAUSED', 'Show Activity While Paused')
         self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Small Jellyfin Logo')
         self.create_checkbox(col3, 'SHOW_SERVER_NAME', 'Show Jellyfin Server Name')
+        self.create_checkbox(col3, 'HIDE_MEDIA_TITLE', 'Hide Media Title from Status')
+        self.create_checkbox(col3, 'ARTIST_IN_STATUS', 'Prefer Artist in Music Status')
         self.create_checkbox(col3, 'IMDB_EXTERNAL_LINKS', 'Prefer IMDb External Links')
 
         col3.addWidget(self.create_header('System Settings'))
@@ -769,7 +883,7 @@ class RPCWindow(QWidget):
         self.entries['JELLYFIN_API_KEY'].widget.setText(self.config.get('JELLYFIN_API_KEY', ''))
         self.entries['JELLYFIN_USERNAME'].widget.setText(self.config.get('JELLYFIN_USERNAME', ''))
         self.entries['TMDB_API_KEY'].widget.setText(self.config.get('TMDB_API_KEY', ''))
-        self.entries['POSTER_LANGUAGES'].widget.setText(self.config.get('POSTER_LANGUAGES', ''))
+        self.entries['TMDB_LANGUAGES'].widget.setText(self.config.get('TMDB_LANGUAGES', ''))
 
         library_filter_mode = self.config.get('LIBRARY_FILTER_MODE', 'DENYLIST').capitalize()
         library_filter_mode = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}.get(
@@ -777,6 +891,13 @@ class RPCWindow(QWidget):
         )
         self.segmented_filter_mode.set_value(str(library_filter_mode))
         self.selected_libraries = self.config.get('SELECTED_LIBRARIES', '')
+
+        tag_filter_mode = self.config.get('TAG_FILTER_MODE', 'DENYLIST').capitalize()
+        tag_filter_mode = {'Blacklist': 'Denylist', 'Whitelist': 'Allowlist'}.get(
+            tag_filter_mode, tag_filter_mode
+        )
+        self.segmented_tag_filter_mode.set_value(str(tag_filter_mode))
+        self.selected_tags = self.config.get('SELECTED_TAGS', '')
 
         media_types = parse_delimited_list(self.config, 'MEDIA_TYPES')
         self.checkboxes['MOVIES'].setChecked('Movies' in media_types)
@@ -788,6 +909,8 @@ class RPCWindow(QWidget):
             ('SHOW_WHEN_PAUSED', True),
             ('SHOW_SERVER_NAME', False),
             ('SHOW_JELLYFIN_LOGO', True),
+            ('HIDE_MEDIA_TITLE', False),
+            ('ARTIST_IN_STATUS', False),
             ('IMDB_EXTERNAL_LINKS', False),
             ('ALWAYS_USE_TMDB', False),
             ('TEXTLESS_POSTERS', False),
@@ -826,12 +949,14 @@ class RPCWindow(QWidget):
             'JELLYFIN_API_KEY',
             'JELLYFIN_USERNAME',
             'TMDB_API_KEY',
-            'POSTER_LANGUAGES',
+            'TMDB_LANGUAGES',
         ]:
             config_parser.set('DEFAULT', key, self.entries[key].widget.text())
 
         config_parser.set('DEFAULT', 'LIBRARY_FILTER_MODE', self.segmented_filter_mode.get_value())
         config_parser.set('DEFAULT', 'SELECTED_LIBRARIES', self.selected_libraries)
+        config_parser.set('DEFAULT', 'TAG_FILTER_MODE', self.segmented_tag_filter_mode.get_value())
+        config_parser.set('DEFAULT', 'SELECTED_TAGS', self.selected_tags)
         config_parser.set(
             'DEFAULT', 'POLLING_RATE', self.advanced_vars['POLLING_RATE'].text().rstrip('s')
         )
@@ -877,6 +1002,29 @@ class RPCWindow(QWidget):
         )
         if selector.exec():
             self.selected_libraries = selector.selected_libraries
+            self.on_setting_changed()
+
+    def select_tags(self) -> None:
+        jf_host = self.entries['JELLYFIN_HOST'].widget.text().rstrip('/')
+        if not jf_host:
+            gui_logger.error('Missing Jellyfin Host')
+            return
+
+        jf_api_key = self.entries['JELLYFIN_API_KEY'].widget.text()
+        if not jf_api_key:
+            gui_logger.error('Missing Jellyfin API Key')
+            return
+
+        jf_username = self.entries['JELLYFIN_USERNAME'].widget.text()
+        if not jf_username:
+            gui_logger.error('Missing Jellyfin Username')
+            return
+
+        selector = TagSelectorWindow(
+            self, self.segmented_tag_filter_mode.get_value(), self.selected_tags
+        )
+        if selector.exec():
+            self.selected_tags = selector.selected_tags
             self.on_setting_changed()
 
     def on_setting_changed(self) -> None:
@@ -1265,6 +1413,12 @@ def apply_theme(app: QApplication, bundle_dir: str) -> None:
         QScrollBar::add-line:vertical,
         QScrollBar::sub-line:vertical {
             height: 0px;
+        }
+        QFrame#filter_group {
+            background-color: #2b2b2b;
+            border: 1px solid #3e4244;
+            border-radius: 6px;
+            padding: 4px;
         }
     """
 

@@ -68,6 +68,7 @@ def load_config(ini_path: str) -> SectionProxy:
     migrate_key('IMDB_EXTERNAL_URLS', 'IMDB_EXTERNAL_LINKS')
     migrate_key('REFRESH_RATE', 'POLLING_RATE')
     migrate_key('FILE_HDLR_LEVEL', 'LOG_LEVEL_FILE')
+    migrate_key('POSTER_LANGUAGES', 'TMDB_LANGUAGES')
 
     if has_legacy_keys:
         with open(ini_path, 'w', encoding='utf-8') as ini_file:
@@ -883,8 +884,8 @@ async def sync_presence(
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
+    hide_media_title = config.getboolean('HIDE_MEDIA_TITLE', False)
     artist_in_status = config.getboolean('ARTIST_IN_STATUS', False)
-    hide_active_media = config.getboolean('HIDE_ACTIVE_MEDIA', False)
     imdb_external_urls = config.getboolean('IMDB_EXTERNAL_LINKS', False)
 
     user_id, server_name = await await_jellyfin_connect(
@@ -900,7 +901,7 @@ async def sync_presence(
     if tmdb_api_key := config.get('TMDB_API_KEY'):
         await check_tmdb_auth(cache_session, tmdb_api_key)
 
-    languages = parse_delimited_list(config, 'POSTER_LANGUAGES')
+    languages = parse_delimited_list(config, 'TMDB_LANGUAGES')
     for i, lang in enumerate(languages):
         lang_code = get_lang_code(lang) or lang
         if lang_code != lang:
@@ -1201,7 +1202,7 @@ async def sync_presence(
                     details_str = state_str = None
                     activity_type = ActivityType.WATCHING
                     status_display_type = (
-                        StatusDisplayType.NAME if hide_active_media else StatusDisplayType.DETAILS
+                        StatusDisplayType.NAME if hide_media_title else StatusDisplayType.DETAILS
                     )
                     match media_type:
                         case 'Episode':
