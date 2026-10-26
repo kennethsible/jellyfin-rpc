@@ -883,6 +883,8 @@ async def sync_presence(
     show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
+    artist_in_status = config.getboolean('ARTIST_IN_STATUS', False)
+    hide_active_media = config.getboolean('HIDE_ACTIVE_MEDIA', False)
     imdb_external_urls = config.getboolean('IMDB_EXTERNAL_LINKS', False)
 
     user_id, server_name = await await_jellyfin_connect(
@@ -1195,11 +1197,14 @@ async def sync_presence(
 
             if media_changed:
                 try:
-                    details_str = state_str = None
                     activity_str = ''
+                    details_str = state_str = None
+                    activity_type = ActivityType.WATCHING
+                    status_display_type = (
+                        StatusDisplayType.NAME if hide_active_media else StatusDisplayType.DETAILS
+                    )
                     match media_type:
                         case 'Episode':
-                            activity_type = ActivityType.WATCHING
                             season = media_dict.get('ParentIndexNumber')
                             episode = media_dict.get('IndexNumber')
                             details_str = media_dict['SeriesName']
@@ -1213,13 +1218,11 @@ async def sync_presence(
                                 state_str = media_dict['Name']
                                 activity_str = f'{details_str} \u2022 {media_dict["Name"]}'
                         case 'Movie':
-                            activity_type = ActivityType.WATCHING
                             details_str = media_dict['Name']
                             if genres := media_dict.get('Genres'):
                                 state_str = ' \u2022 '.join(genres[:3])
                             activity_str = details_str
                         case 'Audio':
-                            activity_type = ActivityType.LISTENING
                             if artists := media_dict.get('Artists'):
                                 state_str = ', '.join(artists)
                             if album_name := media_dict.get('Album'):
@@ -1231,8 +1234,10 @@ async def sync_presence(
                             activity_str = details_str
                             if state_str:
                                 activity_str += f' \u2022 {state_str.split(" \u2022 ")[0]}'
+                            activity_type = ActivityType.LISTENING
+                            if artist_in_status:
+                                status_display_type = StatusDisplayType.STATE
                         case 'TvChannel':
-                            activity_type = ActivityType.WATCHING
                             channel_name = (
                                 sanitize_broadcast_title(
                                     media_dict.get('ChannelName') or media_dict.get('Name')
@@ -1524,7 +1529,7 @@ async def sync_presence(
                     cached_media_id = media_id
                     cached_kwargs = {
                         'activity_type': activity_type,
-                        'status_display_type': StatusDisplayType.DETAILS,
+                        'status_display_type': status_display_type,
                         'name': display_name,
                         'details': sanitize_discord_str(details_str),
                         'details_url': details_url,

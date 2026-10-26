@@ -64,6 +64,8 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `SHOW_SERVER_NAME` | `false` | Shows your Jellyfin server name as the activity name instead of "Jellyfin". |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
 | `IMDB_EXTERNAL_LINKS` | `false` | Prioritizes IMDb for external links over other metadata providers. |
+| `ARTIST_IN_STATUS` | `false` | Shows the artist (and album) in your Discord status instead of the track name. |
+| `HIDE_ACTIVE_MEDIA` | `false` | Hides active media from your Discord status using your server name or "Jellyfin". |
 | `POSTER_LANGUAGES` | — | Comma-separated list of languages or [two-letter codes](https://en.wikipedia.org/wiki/ISO_639-1) for TMDB posters. Uses TMDB's default image order when unset. |
 | `TEXTLESS_POSTERS` | `false` | Prioritizes textless TMDB posters over language-specific posters. |
 | `ALWAYS_USE_TMDB` | `false` | Uses TMDB as the primary source for posters. Serves as a fallback for missing artwork in Jellyfin when disabled. |
@@ -74,7 +76,7 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `LIBRARY_FILTER_MODE` | `Denylist` | Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked (`Allowlist` or `Denylist`). |
 | `SELECTED_LIBRARIES` | — | Comma-separated list of Jellyfin library IDs to allow or block. Found as the `topParentId` parameter in the web client URL. |
 | `TAG_FILTER_MODE` | `Denylist` | Filter behavior for selected tags. Controls whether these tags are allowed or blocked (`Allowlist` or `Denylist`). |
-| `SELECTED_TAGS` | — | Comma-separated list of Jellyfin tags to allow or block. Matches tags on the playing media along with any parent items (such as seasons, series, or collections). |
+| `SELECTED_TAGS` | — | Comma-separated list of Jellyfin tags to allow or block. Matches tags on active media along with any parent items (such as seasons, series, or collections). |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events (if your Jellyfin server and reverse proxy support WebSockets). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
 | `SESSION_TIMEOUT` | `2` | Delay in seconds before clearing the activity. Smooths transitions between media items. |
