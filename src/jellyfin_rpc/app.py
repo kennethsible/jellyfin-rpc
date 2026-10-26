@@ -635,7 +635,9 @@ class RPCWindow(QWidget):
         self.setWindowTitle(f'Jellyfin RPC v{__version__}')
         if sys.platform != 'darwin':
             self.setWindowIcon(self.icon_bundle)
-        self.setMinimumSize(860, 620)
+        width, height = 860, 625
+        self.setMinimumSize(width, height)
+        self.resize(width, height)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(25, 10, 25, 18)
@@ -1144,7 +1146,7 @@ class RPCWindow(QWidget):
             if sys.platform == 'darwin':
                 tray_icon.setIsMask(True)
 
-        self.tray_menu = QMenu()
+        self.tray_menu = QMenu(self)
         self.tray_icon = QSystemTrayIcon(tray_icon, self)
         self.tray_icon.setToolTip('Jellyfin RPC')
 
