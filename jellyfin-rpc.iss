@@ -18,6 +18,7 @@ SetupIconFile=images\icons\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -25,8 +26,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
-; Source all PyInstaller output files from dist\Jellyfin RPC
 Source: "dist\Jellyfin RPC\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
