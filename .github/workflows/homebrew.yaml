@@ -12,9 +12,7 @@ permissions: {}
 
 jobs:
   bump-cask:
-    runs-on: ubuntu-latest
-    container:
-      image: homebrew/brew
+    runs-on: macos-latest
     steps:
       - name: Bump Cask via Homebrew CLI
         env:
@@ -23,18 +21,10 @@ jobs:
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
 
-          BASE_URL="https://github.com/kennethsible/jellyfin-rpc/releases/download/v${VERSION}"
-          ARM64_URL="${BASE_URL}/jellyfin-rpc-${VERSION}-macos-arm64.dmg"
-          INTEL_URL="${BASE_URL}/jellyfin-rpc-${VERSION}-macos-amd64.dmg"
-
-          echo "Downloading and calculating checksums..."
-          ARM64_SHA=$(curl -sL "$ARM64_URL" | sha256sum | awk '{print $1}')
-          INTEL_SHA=$(curl -sL "$INTEL_URL" | sha256sum | awk '{print $1}')
-
+          brew update
           brew tap kennethsible/tap
+          brew trust kennethsible/tap
           brew bump-cask-pr \
             --version "$VERSION" \
-            --sha256 "arm:$ARM64_SHA" \
-            --sha256 "intel:$INTEL_SHA" \
             --no-browse \
             kennethsible/tap/jellyfin-rpc
