@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import threading
 from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
@@ -69,6 +70,33 @@ from .main import (
 rpc_logger = logging.getLogger('RPC')
 gui_logger = logging.getLogger('GUI')
 logging.addLevelName(15, 'VERBOSE')
+
+
+TOOLTIPS = {
+    'JELLYFIN_HOST': 'Jellyfin server address (e.g., https://jellyfin.example.com or http://localhost:8096).',
+    'JELLYFIN_API_KEY': 'Generated automatically when authenticating with Quick Connect.',
+    'JELLYFIN_USERNAME': 'Jellyfin username whose playback sessions are displayed in Discord.',
+    'LIBRARY_FILTER_MODE': 'Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked.',
+    'TAG_FILTER_MODE': 'Filter behavior for selected tags. Controls whether these tags are allowed or blocked.',
+    'TMDB_API_KEY': 'Required for posters if your Jellyfin server is hosted locally.',
+    'TMDB_LANGUAGES': "Comma-separated list of languages for posters. Uses TMDB's default image order when unset.",
+    'ALWAYS_USE_TMDB': 'Uses TMDB as the primary source for posters over local Jellyfin artwork.',
+    'SEASON_OVER_SERIES': 'Prioritizes season posters over series posters for TV shows.',
+    'TEXTLESS_POSTERS': 'Prioritizes textless TMDB posters over language-specific posters.',
+    'SEARCH_MUSICBRAINZ': 'Searches MusicBrainz by artist and album title when IDs are missing in Jellyfin.',
+    'ALWAYS_USE_COVERART': 'Uses the Cover Art Archive as the primary source for album covers over local Jellyfin artwork.',
+    'RELEASE_OVER_GROUP': 'Prioritizes release artwork over release group artwork for music.',
+    'SHOW_WHEN_PAUSED': 'Shows paused media with a small icon in the bottom right of the poster or album cover.',
+    'SHOW_JELLYFIN_LOGO': 'Shows a small Jellyfin logo in the bottom right of the poster or album cover.',
+    'SHOW_SERVER_NAME': 'Shows your Jellyfin server name as the activity name instead of "Jellyfin".',
+    'HIDE_MEDIA_TITLE': 'Hides the media title from your Discord status using your server name or "Jellyfin".',
+    'ARTIST_IN_STATUS': 'Prioritizes the artist (and album) in your Discord status instead of the track name.',
+    'IMDB_EXTERNAL_LINKS': 'Prioritizes IMDb for external links over other metadata providers.',
+    'POLLING_RATE': 'Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events.',
+    'SEEK_THRESHOLD': "Playback jump in seconds required to resync Discord's elapsed timer when seeking.",
+}
+
+WRAPPED_TOOLTIPS = {key: '\n'.join(textwrap.wrap(desc, width=48)) for key, desc in TOOLTIPS.items()}
 
 
 @dataclass
@@ -634,12 +662,21 @@ class RPCWindow(QWidget):
         grid_layout.addLayout(col3, stretch=1)
 
         col1.addWidget(self.create_header('Jellyfin Settings'))
-        self.entries['JELLYFIN_HOST'] = self.create_labeled_entry(col1, 'Jellyfin Host')
+        self.entries['JELLYFIN_HOST'] = self.create_labeled_entry(
+            col1, 'Jellyfin Host', tooltip=WRAPPED_TOOLTIPS['JELLYFIN_HOST']
+        )
         self.entries['JELLYFIN_API_KEY'] = self.create_labeled_entry(
-            col1, 'Jellyfin API Key', 'Leave Blank for Quick Connect', obfuscate=True
+            col1,
+            'Jellyfin API Key',
+            placeholder='Leave Blank for Quick Connect',
+            tooltip=WRAPPED_TOOLTIPS['JELLYFIN_API_KEY'],
+            obfuscate=True,
         )
         self.entries['JELLYFIN_USERNAME'] = self.create_labeled_entry(
-            col1, 'Jellyfin Username', 'Leave Blank for Quick Connect'
+            col1,
+            'Jellyfin Username',
+            placeholder='Leave Blank for Quick Connect',
+            tooltip=WRAPPED_TOOLTIPS['JELLYFIN_USERNAME'],
         )
 
         group_library = QFrame()
@@ -649,6 +686,7 @@ class RPCWindow(QWidget):
         group_library_layout.setSpacing(4)
 
         self.segmented_filter_mode = SegmentedButton(['Denylist', 'Allowlist'])
+        self.segmented_filter_mode.setToolTip(WRAPPED_TOOLTIPS['LIBRARY_FILTER_MODE'])
         self.segmented_filter_mode.button_group.buttonClicked.connect(self.on_setting_changed)
         group_library_layout.addWidget(self.segmented_filter_mode)
 
@@ -667,6 +705,7 @@ class RPCWindow(QWidget):
         group_tag_layout.setSpacing(6)
 
         self.segmented_tag_filter_mode = SegmentedButton(['Denylist', 'Allowlist'])
+        self.segmented_tag_filter_mode.setToolTip(WRAPPED_TOOLTIPS['TAG_FILTER_MODE'])
         self.segmented_tag_filter_mode.button_group.buttonClicked.connect(self.on_setting_changed)
         group_tag_layout.addWidget(self.segmented_tag_filter_mode)
 
@@ -684,10 +723,17 @@ class RPCWindow(QWidget):
 
         col2.addWidget(self.create_header('TMDB Settings'))
         self.entries['TMDB_API_KEY'] = self.create_labeled_entry(
-            col2, 'TMDB API Key', 'Leave Blank to Disable', obfuscate=True
+            col2,
+            'TMDB API Key',
+            placeholder='Leave Blank to Disable',
+            tooltip=WRAPPED_TOOLTIPS['TMDB_API_KEY'],
+            obfuscate=True,
         )
         self.entries['TMDB_LANGUAGES'] = self.create_labeled_entry(
-            col2, 'TMDB Language(s)', 'Leave Blank to Disable'
+            col2,
+            'TMDB Language(s)',
+            placeholder='Leave Blank to Disable',
+            tooltip=WRAPPED_TOOLTIPS['TMDB_LANGUAGES'],
         )
 
         col2.addWidget(self.create_header('Poster Settings'))
@@ -749,9 +795,12 @@ class RPCWindow(QWidget):
         self.advanced_vars['POLLING_RATE'] = self.create_spinbox_row(
             advanced_layout, 0, 'Polling Rate'
         )
+        self.advanced_vars['POLLING_RATE'].setToolTip(WRAPPED_TOOLTIPS['POLLING_RATE'])
+
         self.advanced_vars['SEEK_THRESHOLD'] = self.create_spinbox_row(
             advanced_layout, 1, 'Seek Threshold'
         )
+        self.advanced_vars['SEEK_THRESHOLD'].setToolTip(WRAPPED_TOOLTIPS['SEEK_THRESHOLD'])
 
         label_log_level = QLabel('Console Log Level')
         label_log_level.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -820,18 +869,30 @@ class RPCWindow(QWidget):
         return label
 
     def create_labeled_entry(
-        self, layout: QVBoxLayout, label_text: str, placeholder: str = '', obfuscate: bool = False
+        self,
+        layout: QVBoxLayout,
+        label_text: str,
+        placeholder: str = '',
+        tooltip: str = '',
+        obfuscate: bool = False,
     ) -> LabeledEntry:
         container = QVBoxLayout()
         container.setSpacing(2)
         container.setContentsMargins(0, 0, 0, 0)
-        container.addWidget(QLabel(label_text))
+
+        label = QLabel(label_text)
+        label.setStyleSheet('margin-top: -4px;')
+        if tooltip:
+            label.setToolTip(tooltip)
+        container.addWidget(label)
 
         entry = QLineEdit()
         entry.setFixedHeight(28)
         entry.setPlaceholderText(placeholder)
         if obfuscate:
             entry.setEchoMode(QLineEdit.EchoMode.Password)
+        if tooltip:
+            entry.setToolTip(tooltip)
         container.addWidget(entry)
 
         layout.addLayout(container)
@@ -840,6 +901,8 @@ class RPCWindow(QWidget):
     def create_checkbox(self, layout: QVBoxLayout | None, key: str, text: str) -> QCheckBox:
         checkbox = QCheckBox(text)
         checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        if key in WRAPPED_TOOLTIPS:
+            checkbox.setToolTip(WRAPPED_TOOLTIPS[key])
         checkbox.clicked.connect(self.on_setting_changed)
         if layout is not None:
             layout.addWidget(checkbox)

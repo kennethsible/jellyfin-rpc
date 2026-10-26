@@ -55,7 +55,7 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 
 | Key | Default | Description |
 | :--- | :--- | :--- |
-| `JELLYFIN_HOST` | — | Jellyfin server URL (e.g., `https://jellyfin.example.com` or `http://localhost:8096`). |
+| `JELLYFIN_HOST` | — | Jellyfin server address (e.g., `https://jellyfin.example.com` or `http://localhost:8096`). |
 | `JELLYFIN_API_KEY` | — | Jellyfin API key. Generated automatically when authenticating with Quick Connect. |
 | `JELLYFIN_USERNAME` | — | Jellyfin username whose playback sessions are displayed in Discord. |
 | `LIBRARY_FILTER_MODE` | `Denylist` | Filter behavior for selected libraries. Controls whether these libraries are allowed or blocked (`Allowlist` or `Denylist`). |
