@@ -547,7 +547,7 @@ async def get_season_poster(
             images_url = f'https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season}/images'
             async with session.get(images_url, params={'api_key': api_key}) as response:
                 if response.status == 404:
-                    logger.log(15, f'Season {season} Not Found on TMDB. Trying Series...')
+                    logger.log(15, f'Season {season} Poster Not Found on TMDB')
                     return await get_series_poster(session, api_key, tmdb_id, languages)
                 if response.status == 429:
                     logger.warning('TMDB API Rate Limit Exceeded (HTTP 429)')
@@ -669,10 +669,7 @@ async def get_release_cover(
     try:
         async with session.get(f'https://coverartarchive.org/release/{release_id}') as response:
             if response.status == 404:
-                logger.log(
-                    15,
-                    f'Release {release_id} Not Found on Cover Art Archive. Trying Release Group...',
-                )
+                logger.log(15, f'Release {release_id} Cover Not Found on Cover Art Archive')
                 return await get_release_group_cover(session, group_id)
             if response.status == 429:
                 logger.warning('Cover Art Archive API Rate Limit Exceeded (HTTP 429)')
@@ -1129,8 +1126,7 @@ async def sync_presence(
                 timestamp_elapsed = packet_timestamp - rpc_state.last_packet_time
                 expected_playback = rpc_state.last_playback_position + timestamp_elapsed
                 playback_delta = current_playback - expected_playback
-                position_delta = current_playback - rpc_state.last_playback_position
-                if abs(playback_delta) >= (seek_threshold - 0.5) or position_delta <= -0.5:
+                if abs(playback_delta) >= (seek_threshold - 0.5):
                     seek_detected, seek_delta = True, round(playback_delta)
 
             position_acquired = (
@@ -1236,7 +1232,7 @@ async def sync_presence(
                             if state_str:
                                 activity_str += f' \u2022 {state_str.split(" \u2022 ")[0]}'
                             activity_type = ActivityType.LISTENING
-                            if artist_in_status:
+                            if artist_in_status and not hide_media_title:
                                 status_display_type = StatusDisplayType.STATE
                         case 'TvChannel':
                             channel_name = (
