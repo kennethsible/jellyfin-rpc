@@ -34,7 +34,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Package Manager
-        uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: true
           python-version: "3.14"
@@ -53,6 +53,7 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         shell: bash
         run: |
+          VERSION=$(uv version --short)
           sudo apt-get update
           sudo apt-get install -y libxcb-cursor0
 
@@ -96,7 +97,11 @@ jobs:
           mv squashfs-root appimagetool.AppDir
 
           export ARCH="${ARCH_NAME}"
-          ./appimagetool.AppDir/AppRun dist/AppDir "dist/Jellyfin RPC.AppImage"
+          UPDATE_INFO="gh-releases-zsync|kennethsible|jellyfin-rpc|latest|*${{ matrix.platform }}*.AppImage.zsync"
+          APPIMAGE_NAME="jellyfin-rpc-${VERSION}-${{ matrix.platform }}.AppImage"
+          ./appimagetool.AppDir/AppRun -u "$UPDATE_INFO" dist/AppDir "$APPIMAGE_NAME"
+
+          mv "${APPIMAGE_NAME}"* dist/
           rm -rf dist/AppDir appimagetool.AppDir "appimagetool-${ARCH_NAME}.AppImage"
       - name: Build Disk Image (macOS Only)
         if: startsWith(matrix.os, 'macos')
@@ -112,21 +117,21 @@ jobs:
             --hide-extension "Jellyfin RPC.app" \
             --app-drop-link 300 100 \
             --no-internet-enable \
-            "dist/Jellyfin RPC v$VERSION.dmg" \
+            "dist/jellyfin-rpc-$VERSION-${{ matrix.platform }}.dmg" \
             "dist/Jellyfin RPC.app"
       - name: Build Inno Setup (Windows Only)
         if: startsWith(matrix.os, 'windows')
         shell: pwsh
         run: |
           $VERSION = uv version --short
-          iscc "/DMyAppVersion=$VERSION" jellyfin-rpc.iss
+          iscc "/DMyAppVersion=$VERSION" "/Fjellyfin-rpc-$VERSION-${{ matrix.platform }}" jellyfin-rpc.iss
       - name: Prepare Artifact Name
         shell: bash
         run: |
           VERSION=$(uv version --short)
           echo "ARTIFACT_NAME=jellyfin-rpc-$VERSION-${{ matrix.platform }}" >> $GITHUB_ENV
           if [[ "${{ matrix.os }}" == ubuntu* ]]; then
-            echo 'ARTIFACT_PATH=dist/*.AppImage' >> $GITHUB_ENV
+            echo 'ARTIFACT_PATH=dist/*.AppImage*' >> $GITHUB_ENV
           elif [[ "${{ matrix.os }}" == windows* ]]; then
             echo 'ARTIFACT_PATH=dist/installer/*.exe' >> $GITHUB_ENV
           else
