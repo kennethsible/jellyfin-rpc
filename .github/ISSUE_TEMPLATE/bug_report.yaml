@@ -1,0 +1,44 @@
+name: Bug Report
+description: Report an issue or unexpected behavior in Jellyfin RPC.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please fill out the details below so we can diagnose and resolve the issue quickly.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What OS are you running Jellyfin RPC on?
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Environment & Versions
+      description: Specify the relevant version numbers.
+      placeholder: "RPC: 1.14.0 | Server: 12.4 | Client: Jellyfin Media Player / Web"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem Description
+      description: What happened, and what did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug Logs
+      description: |
+        Paste relevant console or log file output here with log level set to DEBUG.
+        Logs default to %AppData%\Jellyfin RPC (Windows), ~/Library/Application Support/Jellyfin RPC (macOS), or ~/.config/jellyfin-rpc (Linux).
+      render: shell
+    validations:
+      required: false

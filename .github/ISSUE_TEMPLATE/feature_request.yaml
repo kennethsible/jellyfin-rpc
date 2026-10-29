@@ -1,0 +1,30 @@
+name: Feature Proposal
+description: Propose an enhancement or new feature for Jellyfin RPC.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please refer to our [Contributing Guidelines](../CONTRIBUTING.md) before opening a proposal. 
+        All features must be discussed and approved prior to pull requests being opened.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem & Motivation
+      description: What problem are you trying to solve, or what use case does this support?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature or improvement in detail.
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Planned Implementation (Optional)
+      description: If you plan to implement this yourself, share a rough, high-level idea of your approach.
+    validations:
+      required: false
