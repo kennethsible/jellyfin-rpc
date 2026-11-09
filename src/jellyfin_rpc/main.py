@@ -775,22 +775,16 @@ async def await_discord_connect(discord_rpc: AioPresence, polling_rate: int) -> 
         break
 
 
-async def clear_activity(
-    discord_rpc: AioPresence, polling_rate: int, stale_session: bool = False
-) -> bool:
+async def clear_activity(discord_rpc: AioPresence, polling_rate: int) -> bool:
     try:
         await discord_rpc.clear()
-        if stale_session:
-            logger.info('Activity Cleared (Stale Session)')
-        else:
-            logger.info('Activity Cleared')
-        return True
     except (PyPresenceException, OSError, KeyError) as e:
         logger.error(f'RPC Clear Error: {type(e).__name__}: {e}')
         logger.debug(type(e).__name__, exc_info=True)
         await await_discord_connect(discord_rpc, polling_rate)
         await asyncio.sleep(polling_rate)
         return False
+    return True
 
 
 async def websocket_listener(
@@ -862,6 +856,9 @@ class PresenceState:
     last_update_time: float = 0.0
     has_pending_update: bool = False
     pending_payload: tuple[str, Any] | None = None
+
+    def session_expired(self, timeout: float) -> bool:
+        return self.last_packet_time is None or time.time() >= (self.last_packet_time + timeout)
 
     def reset(self, paused_state: bool = False) -> None:
         self.last_activity_str = ''
@@ -1061,6 +1058,7 @@ async def sync_presence(
             if session_paused:
                 if rpc_state.last_paused_time is None:
                     rpc_state.last_paused_time = time.time()
+                    logger.log(15, 'PlayState Paused')
                 if paused_timeout >= 0:
                     time_paused = time.time() - rpc_state.last_paused_time
                     if time_paused >= paused_timeout:
@@ -1069,7 +1067,7 @@ async def sync_presence(
                                 continue
                             if not await clear_activity(discord_rpc, polling_rate):
                                 continue
-                            logger.log(15, 'PlayState Paused')
+                            logger.info('Activity Cleared (Paused Timeout)')
                             rpc_state.reset(paused_state=True)
                         continue
             else:
@@ -1122,8 +1120,9 @@ async def sync_presence(
                 if rpc_state.last_activity_str:
                     if (time.time() - rpc_state.last_update_time) < polling_rate:
                         continue
-                    if not await clear_activity(discord_rpc, polling_rate, stale_session=True):
+                    if not await clear_activity(discord_rpc, polling_rate):
                         continue
+                    logger.info('Activity Cleared (Stale Session)')
                     rpc_state.reset()
                     cached_media_id = None
                     cached_kwargs.clear()
@@ -1204,6 +1203,7 @@ async def sync_presence(
                             continue
                         if not await clear_activity(discord_rpc, polling_rate):
                             continue
+                        logger.info('Activity Cleared')
                         rpc_state.reset()
                     cached_media_id = media_id
                     continue
@@ -1609,17 +1609,15 @@ async def sync_presence(
                     await asyncio.sleep(polling_rate)
                     continue
 
-        elif rpc_state.last_activity_str:
-            if rpc_state.last_packet_time is None or time.time() >= (
-                rpc_state.last_packet_time + session_timeout
-            ):
-                if (time.time() - rpc_state.last_update_time) < polling_rate:
-                    continue
-                if not await clear_activity(discord_rpc, polling_rate):
-                    continue
-                rpc_state.reset()
-                cached_media_id = None
-                cached_kwargs.clear()
+        elif rpc_state.last_activity_str and rpc_state.session_expired(session_timeout):
+            if (time.time() - rpc_state.last_update_time) < polling_rate:
+                continue
+            if not await clear_activity(discord_rpc, polling_rate):
+                continue
+            logger.info('Activity Cleared')
+            rpc_state.reset()
+            cached_media_id = None
+            cached_kwargs.clear()
 
         if not ws_state.get('ws_connected'):
             await asyncio.sleep(polling_rate)

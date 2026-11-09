@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QCursor,
     QHideEvent,
     QIcon,
+    QIntValidator,
     QKeyEvent,
     QPalette,
     QShowEvent,
@@ -794,17 +795,17 @@ class RPCWindow(QWidget):
         col3.addLayout(advanced_wrapper)
 
         self.advanced_vars['POLLING_RATE'] = self.create_spinbox_row(
-            advanced_layout, 0, 'Polling Rate'
+            advanced_layout, 0, 'Polling Rate', default_value=5
         )
         self.advanced_vars['POLLING_RATE'].setToolTip(WRAPPED_TOOLTIPS['POLLING_RATE'])
 
         self.advanced_vars['SEEK_THRESHOLD'] = self.create_spinbox_row(
-            advanced_layout, 1, 'Seek Threshold'
+            advanced_layout, 1, 'Seek Threshold', default_value=10
         )
         self.advanced_vars['SEEK_THRESHOLD'].setToolTip(WRAPPED_TOOLTIPS['SEEK_THRESHOLD'])
 
         self.advanced_vars['PAUSED_TIMEOUT'] = self.create_spinbox_row(
-            advanced_layout, 2, 'Paused Timeout'
+            advanced_layout, 2, 'Paused Timeout', default_value=300, min_value=-1
         )
         self.advanced_vars['PAUSED_TIMEOUT'].setToolTip(WRAPPED_TOOLTIPS['PAUSED_TIMEOUT'])
 
@@ -915,7 +916,15 @@ class RPCWindow(QWidget):
         self.checkboxes[key] = checkbox
         return checkbox
 
-    def create_spinbox_row(self, layout: QGridLayout, row: int, text: str) -> QLineEdit:
+    def create_spinbox_row(
+        self,
+        layout: QGridLayout,
+        row: int,
+        text: str,
+        default_value: int,
+        min_value: int = 1,
+        max_value: int = 9999,
+    ) -> QLineEdit:
         layout.addWidget(QLabel(text), row, 0, Qt.AlignmentFlag.AlignRight)
 
         button_dec = QPushButton('-')
@@ -926,21 +935,33 @@ class RPCWindow(QWidget):
         entry = QLineEdit()
         entry.setFixedSize(50, 28)
         entry.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        entry.setReadOnly(True)
+        entry.setValidator(QIntValidator(min_value, max_value, self))
 
         button_inc = QPushButton('+')
         button_inc.setObjectName('spin_button')
         button_inc.setFixedSize(28, 28)
         button_inc.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        def adjust(offset: int) -> None:
-            old_value = int(entry.text().rstrip('s'))
-            new_value = max(1, old_value + offset)
+        def parse_value() -> int:
+            stripped_text = entry.text().rstrip('s').strip()
+            try:
+                return max(min_value, min(max_value, int(stripped_text)))
+            except ValueError:
+                return default_value
+
+        def adjust_value(offset: int) -> None:
+            new_value = max(min_value, min(max_value, parse_value() + offset))
             entry.setText(f'{new_value}s')
             self.on_setting_changed()
 
-        button_dec.clicked.connect(lambda: adjust(-1))
-        button_inc.clicked.connect(lambda: adjust(1))
+        def on_editing_finished() -> None:
+            value = parse_value()
+            entry.setText(f'{value}s')
+            self.on_setting_changed()
+
+        entry.editingFinished.connect(on_editing_finished)
+        button_dec.clicked.connect(lambda: adjust_value(-1))
+        button_inc.clicked.connect(lambda: adjust_value(1))
 
         layout.addWidget(button_dec, row, 1)
         layout.addWidget(entry, row, 2)
@@ -1005,7 +1026,7 @@ class RPCWindow(QWidget):
             f'{max(1, self.config.getint("SEEK_THRESHOLD", 10))}s'
         )
         self.advanced_vars['PAUSED_TIMEOUT'].setText(
-            f'{max(1, self.config.getint("PAUSED_TIMEOUT", 10))}s'
+            f'{max(-1, self.config.getint("PAUSED_TIMEOUT", 300))}s'
         )
 
         log_level = self.config.get('LOG_LEVEL', 'INFO').upper()
