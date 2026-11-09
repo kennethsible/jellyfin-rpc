@@ -86,7 +86,6 @@ TOOLTIPS = {
     'SEARCH_MUSICBRAINZ': 'Searches MusicBrainz by artist and album title when IDs are missing in Jellyfin.',
     'ALWAYS_USE_COVERART': 'Uses the Cover Art Archive as the primary source for album covers over local Jellyfin artwork.',
     'RELEASE_OVER_GROUP': 'Prioritizes release artwork over release group artwork for music.',
-    'SHOW_WHEN_PAUSED': 'Shows paused media with a small icon in the bottom right of the poster or album cover.',
     'SHOW_JELLYFIN_LOGO': 'Shows a small Jellyfin logo in the bottom right of the poster or album cover.',
     'SHOW_SERVER_NAME': 'Shows your Jellyfin server name as the activity name instead of "Jellyfin".',
     'HIDE_MEDIA_TITLE': 'Hides the media title from your Discord status using your server name or "Jellyfin".',
@@ -94,6 +93,7 @@ TOOLTIPS = {
     'IMDB_EXTERNAL_LINKS': 'Prioritizes IMDb for external links over other metadata providers.',
     'POLLING_RATE': 'Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events.',
     'SEEK_THRESHOLD': "Playback jump in seconds required to resync Discord's elapsed timer when seeking.",
+    'PAUSED_TIMEOUT': 'Delay in seconds before clearing the activity when paused (or -1 to disable).',
 }
 
 WRAPPED_TOOLTIPS = {key: '\n'.join(textwrap.wrap(desc, width=48)) for key, desc in TOOLTIPS.items()}
@@ -764,7 +764,6 @@ class RPCWindow(QWidget):
         col2.addStretch()
 
         col3.addWidget(self.create_header('Discord Settings'))
-        self.create_checkbox(col3, 'SHOW_WHEN_PAUSED', 'Show Activity While Paused')
         self.create_checkbox(col3, 'SHOW_JELLYFIN_LOGO', 'Show Small Jellyfin Logo')
         self.create_checkbox(col3, 'SHOW_SERVER_NAME', 'Show Jellyfin Server Name')
         self.create_checkbox(col3, 'HIDE_MEDIA_TITLE', 'Hide Media Title from Status')
@@ -804,9 +803,14 @@ class RPCWindow(QWidget):
         )
         self.advanced_vars['SEEK_THRESHOLD'].setToolTip(WRAPPED_TOOLTIPS['SEEK_THRESHOLD'])
 
+        self.advanced_vars['PAUSED_TIMEOUT'] = self.create_spinbox_row(
+            advanced_layout, 2, 'Paused Timeout'
+        )
+        self.advanced_vars['PAUSED_TIMEOUT'].setToolTip(WRAPPED_TOOLTIPS['PAUSED_TIMEOUT'])
+
         label_log_level = QLabel('Console Log Level')
         label_log_level.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        advanced_layout.addWidget(label_log_level, 2, 0)
+        advanced_layout.addWidget(label_log_level, 3, 0)
 
         self.checkbox_log_level = QComboBox()
         self.checkbox_log_level.setView(QListView())
@@ -816,7 +820,7 @@ class RPCWindow(QWidget):
             ['DEBUG', 'VERBOSE', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         )
         self.checkbox_log_level.currentTextChanged.connect(self.on_setting_changed)
-        advanced_layout.addWidget(self.checkbox_log_level, 2, 1, 1, 3)
+        advanced_layout.addWidget(self.checkbox_log_level, 3, 1, 1, 3)
 
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
@@ -971,7 +975,6 @@ class RPCWindow(QWidget):
         self.checkboxes['LIVETV'].setChecked('LiveTV' in media_types)
 
         checkbox_vars = [
-            ('SHOW_WHEN_PAUSED', True),
             ('SHOW_SERVER_NAME', False),
             ('SHOW_JELLYFIN_LOGO', True),
             ('HIDE_MEDIA_TITLE', False),
@@ -1001,6 +1004,9 @@ class RPCWindow(QWidget):
         self.advanced_vars['SEEK_THRESHOLD'].setText(
             f'{max(1, self.config.getint("SEEK_THRESHOLD", 10))}s'
         )
+        self.advanced_vars['PAUSED_TIMEOUT'].setText(
+            f'{max(1, self.config.getint("PAUSED_TIMEOUT", 10))}s'
+        )
 
         log_level = self.config.get('LOG_LEVEL', 'INFO').upper()
         self.checkbox_log_level.setCurrentText(log_level)
@@ -1027,6 +1033,9 @@ class RPCWindow(QWidget):
         )
         config_parser.set(
             'DEFAULT', 'SEEK_THRESHOLD', self.advanced_vars['SEEK_THRESHOLD'].text().rstrip('s')
+        )
+        config_parser.set(
+            'DEFAULT', 'PAUSED_TIMEOUT', self.advanced_vars['PAUSED_TIMEOUT'].text().rstrip('s')
         )
         config_parser.set('DEFAULT', 'LOG_LEVEL', self.checkbox_log_level.currentText())
 

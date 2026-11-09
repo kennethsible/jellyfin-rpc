@@ -1,6 +1,6 @@
 [project]
 name = "jellyfin-rpc"
-version = "1.14.0"
+version = "1.14.1"
 description = "Discord RPC for Jellyfin"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -19,7 +19,7 @@ dependencies = [
 gui = ["PySide6>=6.12.0", "pyinstaller>=6.22.3"]
 
 [dependency-groups]
-dev = ["ruff>=0.17.2", "mypy>=2.4.0", "types-requests"]
+dev = ["ruff>=0.17.4", "mypy>=2.4.1", "types-requests"]
 
 [project.urls]
 homepage = "https://github.com/kennethsible/jellyfin-rpc"
@@ -50,5 +50,5 @@ untyped_calls_exclude = ["pypresence"]
 allow-direct-references = true
 
 [build-system]
-requires = ["hatchling>=1.32.4"]
+requires = ["hatchling>=1.33.0"]
 build-backend = "hatchling.build"

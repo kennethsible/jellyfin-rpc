@@ -70,6 +70,13 @@ def load_config(ini_path: str) -> SectionProxy:
     migrate_key('FILE_HDLR_LEVEL', 'LOG_LEVEL_FILE')
     migrate_key('POSTER_LANGUAGES', 'TMDB_LANGUAGES')
 
+    if config_parser.has_option('DEFAULT', 'SHOW_WHEN_PAUSED'):
+        if not config_parser.has_option('DEFAULT', 'PAUSED_TIMEOUT'):
+            show_when_paused = config_parser.getboolean('DEFAULT', 'SHOW_WHEN_PAUSED')
+            config_parser.set('DEFAULT', 'PAUSED_TIMEOUT', '300' if show_when_paused else '0')
+        config_parser.remove_option('DEFAULT', 'SHOW_WHEN_PAUSED')
+        has_legacy_keys = True
+
     if has_legacy_keys:
         with open(ini_path, 'w', encoding='utf-8') as ini_file:
             config_parser.write(ini_file)
@@ -851,6 +858,7 @@ class PresenceState:
     last_paused_state: bool = False
     last_playback_position: float | None = None
     last_packet_time: float | None = None
+    last_paused_time: float | None = None
     last_update_time: float = 0.0
     has_pending_update: bool = False
     pending_payload: tuple[str, Any] | None = None
@@ -860,6 +868,7 @@ class PresenceState:
         self.last_paused_state = paused_state
         self.last_playback_position = None
         self.last_packet_time = None
+        self.last_paused_time = time.time() if paused_state else None
         self.last_update_time = time.time()
         self.has_pending_update = False
 
@@ -872,13 +881,13 @@ async def sync_presence(
     ini_path: str,
     polling_rate: int,
     seek_threshold: int,
+    paused_timeout: int,
     session_timeout: int,
     stale_grace_period: int,
     ws_state: dict[str, Any],
     wake_event: asyncio.Event,
 ) -> None:
     jf_host = config['JELLYFIN_HOST'].rstrip('/')
-    show_when_paused = config.getboolean('SHOW_WHEN_PAUSED', True)
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
     hide_media_title = config.getboolean('HIDE_MEDIA_TITLE', False)
@@ -1049,15 +1058,22 @@ async def sync_presence(
             session_paused = playstate.get('IsPaused', False)
             playstate_changed = rpc_state.last_paused_state != session_paused
 
-            if session_paused and not show_when_paused:
-                if rpc_state.last_activity_str:
-                    if (time.time() - rpc_state.last_update_time) < polling_rate:
+            if session_paused:
+                if rpc_state.last_paused_time is None:
+                    rpc_state.last_paused_time = time.time()
+                if paused_timeout >= 0:
+                    time_paused = time.time() - rpc_state.last_paused_time
+                    if time_paused >= paused_timeout:
+                        if rpc_state.last_activity_str:
+                            if (time.time() - rpc_state.last_update_time) < polling_rate:
+                                continue
+                            if not await clear_activity(discord_rpc, polling_rate):
+                                continue
+                            logger.log(15, 'PlayState Paused')
+                            rpc_state.reset(paused_state=True)
                         continue
-                    if not await clear_activity(discord_rpc, polling_rate):
-                        continue
-                    logger.log(15, 'PlayState Paused')
-                    rpc_state.reset(paused_state=True)
-                continue
+            else:
+                rpc_state.last_paused_time = None
 
             if media_type == 'TvChannel':
                 if media_changed:
@@ -1614,6 +1630,7 @@ async def monitor_activity(
     ini_path: str,
     polling_rate: int,
     seek_threshold: int,
+    paused_timeout: int,
     session_timeout: int,
     stale_grace_period: int,
 ) -> None:
@@ -1655,6 +1672,7 @@ async def monitor_activity(
                     ini_path,
                     polling_rate,
                     seek_threshold,
+                    paused_timeout,
                     session_timeout,
                     stale_grace_period,
                     ws_state,
@@ -1681,6 +1699,7 @@ def start_discord_rpc(
     config = load_config(ini_path)
     polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
+    paused_timeout = max(-1, config.getint('PAUSED_TIMEOUT', 300))
     session_timeout = max(1, config.getint('SESSION_TIMEOUT', 2))
     stale_grace_period = max(1, config.getint('STALE_GRACE_PERIOD', 5))
 
@@ -1713,7 +1732,13 @@ def start_discord_rpc(
     async def runner() -> None:
         main_task = asyncio.create_task(
             monitor_activity(
-                config, ini_path, polling_rate, seek_threshold, session_timeout, stale_grace_period
+                config,
+                ini_path,
+                polling_rate,
+                seek_threshold,
+                paused_timeout,
+                session_timeout,
+                stale_grace_period,
             )
         )
         watcher_task = None

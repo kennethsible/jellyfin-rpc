@@ -71,7 +71,6 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `ALWAYS_USE_COVERART` | `false` | Uses the Cover Art Archive as the primary source for album covers. Serves as a fallback for missing artwork in Jellyfin when disabled. |
 | `RELEASE_OVER_GROUP` | `false` | Prioritizes [release](https://musicbrainz.org/doc/Release) artwork over [release group](https://musicbrainz.org/doc/Release_Group) artwork for music. |
 | `MEDIA_TYPES` | `Movies, Shows, Music, LiveTV` | Comma-separated list of enabled media types. Ordered from highest to lowest display priority (`Movies`, `Shows`, `Music`, `LiveTV`). |
-| `SHOW_WHEN_PAUSED` | `true` | Shows paused activities with a small icon in the bottom right of the poster or album cover instead of a progress bar. Pausing clears the activity when disabled. |
 | `SHOW_JELLYFIN_LOGO` | `true` | Shows a small Jellyfin logo in the bottom right of the poster or album cover. |
 | `SHOW_SERVER_NAME` | `false` | Shows your Jellyfin server name as the activity name instead of "Jellyfin". |
 | `HIDE_MEDIA_TITLE` | `false` | Hides the media title from your Discord status using your server name or "Jellyfin". |
@@ -79,7 +78,8 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `IMDB_EXTERNAL_LINKS` | `false` | Prioritizes IMDb for external links over other metadata providers. |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events (if your Jellyfin server and reverse proxy support WebSockets). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
-| `SESSION_TIMEOUT` | `2` | Delay in seconds before clearing the activity. Smooths transitions between media items. |
+| `PAUSED_TIMEOUT` | `300` | Delay in seconds before clearing the activity when paused. Set to 0 to clear immediately or -1 to keep until resumed. |
+| `SESSION_TIMEOUT` | `2` | Delay in seconds before clearing the activity when the session stops. Smooths transitions between media items. |
 | `STALE_GRACE_PERIOD` | `5` | Buffer in seconds to wait after media finishes before clearing a stale session. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
 | `LOG_LEVEL_FILE` | `DEBUG` | Logging verbosity for the log file. Accepts the same levels as `LOG_LEVEL`. |
