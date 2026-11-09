@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parseaddr
 from importlib.metadata import metadata
+from ipaddress import ip_address
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from typing import Any, cast
@@ -701,6 +702,24 @@ async def get_release_cover(
     return await get_release_group_cover(session, group_id)
 
 
+def is_public_url(url: str | None) -> bool:
+    if not url:
+        return False
+    parsed_url = urlparse(url)
+    if parsed_url.scheme not in ('http', 'https'):
+        return False
+    hostname = (parsed_url.hostname or '').lower()
+    if not hostname or hostname == 'localhost':
+        return False
+    try:
+        ip = ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            return False
+    except ValueError:
+        pass
+    return True
+
+
 def resolve_series_provider_urls(
     series_external_urls: list[dict[str, str]],
     episode_external_urls: list[dict[str, str]],
@@ -712,14 +731,14 @@ def resolve_series_provider_urls(
     episode_urls = {
         entry['Name'].lower(): entry['Url']
         for entry in episode_external_urls
-        if entry.get('Name') and entry.get('Url')
+        if entry.get('Name') and is_public_url(entry.get('Url'))
     }
     for series_entry in series_external_urls:
         provider = series_entry.get('Name', '').lower()
         if provider == 'imdb' and not use_imdb:
             continue
-        series_url = series_entry.get('Url')
-        if not series_url:
+        series_url = series_entry.get('Url', '')
+        if not is_public_url(series_url):
             continue
         state_url = episode_urls.get(provider)
         if not state_url and season is not None:
@@ -746,7 +765,8 @@ def resolve_movie_provider_urls(
         provider = movie_entry.get('Name', '').lower()
         if provider == 'imdb' and not use_imdb:
             continue
-        if movie_url := movie_entry.get('Url'):
+        movie_url = movie_entry.get('Url', '')
+        if is_public_url(movie_url):
             return movie_url, None
     return None, None
 
