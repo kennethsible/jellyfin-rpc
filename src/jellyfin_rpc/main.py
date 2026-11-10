@@ -1078,18 +1078,15 @@ async def sync_presence(
             if session_paused:
                 if rpc_state.last_paused_time is None:
                     rpc_state.last_paused_time = time.time()
-                    logger.log(15, 'PlayState Paused')
-                if paused_timeout >= 0:
-                    time_paused = time.time() - rpc_state.last_paused_time
-                    if time_paused >= paused_timeout:
-                        if rpc_state.last_activity_str:
-                            if (time.time() - rpc_state.last_update_time) < polling_rate:
-                                continue
-                            if not await clear_activity(discord_rpc, polling_rate):
-                                continue
-                            logger.info('Activity Cleared (Paused Timeout)')
-                            rpc_state.reset(paused_state=True)
-                        continue
+                if (time.time() - rpc_state.last_paused_time) >= paused_timeout:
+                    if rpc_state.last_activity_str:
+                        if (time.time() - rpc_state.last_update_time) < polling_rate:
+                            continue
+                        if not await clear_activity(discord_rpc, polling_rate):
+                            continue
+                        logger.info('Activity Cleared (Paused Timeout)')
+                        rpc_state.reset(paused_state=True)
+                    continue
             else:
                 rpc_state.last_paused_time = None
 
@@ -1584,14 +1581,14 @@ async def sync_presence(
 
             if media_changed or position_acquired or seek_detected or playstate_changed:
                 rpc_state.has_pending_update = True
-                if media_changed or position_acquired:
-                    rpc_state.pending_payload = None
+                if playstate_changed:
+                    playstate = 'Paused' if session_paused else 'Resumed'
+                    rpc_state.pending_payload = ('playstate_changed', f'PlayState {playstate}')
                 elif seek_detected:
                     delta_str = f'+{seek_delta}s' if seek_delta > 0 else f'{seek_delta}s'
                     rpc_state.pending_payload = ('seek_detected', f'Seek Detected ({delta_str})')
-                elif playstate_changed:
-                    playstate = 'Paused' if session_paused else 'Resumed'
-                    rpc_state.pending_payload = ('playstate_changed', f'PlayState {playstate}')
+                elif media_changed or position_acquired:
+                    rpc_state.pending_payload = None
 
             remaining_cooldown = polling_rate - (time.time() - rpc_state.last_update_time)
             if rpc_state.has_pending_update and remaining_cooldown <= 0:

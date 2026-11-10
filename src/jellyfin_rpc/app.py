@@ -94,7 +94,7 @@ TOOLTIPS = {
     'IMDB_EXTERNAL_LINKS': 'Prioritizes IMDb for external links over other metadata providers.',
     'POLLING_RATE': 'Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events.',
     'SEEK_THRESHOLD': "Playback jump in seconds required to resync Discord's elapsed timer when seeking.",
-    'PAUSED_TIMEOUT': 'Delay in seconds before clearing the activity when paused (or -1 to disable).',
+    'PAUSED_TIMEOUT': 'Delay in seconds before clearing the activity when paused. Set to 0 to clear immediately.',
 }
 
 WRAPPED_TOOLTIPS = {key: '\n'.join(textwrap.wrap(desc, width=48)) for key, desc in TOOLTIPS.items()}
@@ -805,7 +805,7 @@ class RPCWindow(QWidget):
         self.advanced_vars['SEEK_THRESHOLD'].setToolTip(WRAPPED_TOOLTIPS['SEEK_THRESHOLD'])
 
         self.advanced_vars['PAUSED_TIMEOUT'] = self.create_spinbox_row(
-            advanced_layout, 2, 'Paused Timeout', default_value=300, min_value=-1
+            advanced_layout, 2, 'Paused Timeout', default_value=300, min_value=0
         )
         self.advanced_vars['PAUSED_TIMEOUT'].setToolTip(WRAPPED_TOOLTIPS['PAUSED_TIMEOUT'])
 
@@ -1026,7 +1026,7 @@ class RPCWindow(QWidget):
             f'{max(1, self.config.getint("SEEK_THRESHOLD", 10))}s'
         )
         self.advanced_vars['PAUSED_TIMEOUT'].setText(
-            f'{max(-1, self.config.getint("PAUSED_TIMEOUT", 300))}s'
+            f'{max(0, self.config.getint("PAUSED_TIMEOUT", 300))}s'
         )
 
         log_level = self.config.get('LOG_LEVEL', 'INFO').upper()

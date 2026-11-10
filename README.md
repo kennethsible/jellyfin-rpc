@@ -78,7 +78,7 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 | `IMDB_EXTERNAL_LINKS` | `false` | Prioritizes IMDb for external links over other metadata providers. |
 | `POLLING_RATE` | `5` | Interval in seconds to poll Jellyfin sessions, or the minimum delay between WebSocket events (if your Jellyfin server and reverse proxy support WebSockets). |
 | `SEEK_THRESHOLD` | `10` | Playback jump in seconds required to resync Discord's elapsed timer when seeking. |
-| `PAUSED_TIMEOUT` | `300` | Delay in seconds before clearing the activity when paused. Set to 0 to clear immediately or -1 to keep until resumed. |
+| `PAUSED_TIMEOUT` | `300` | Delay in seconds before clearing the activity when paused. Set to 0 to clear immediately. |
 | `SESSION_TIMEOUT` | `2` | Delay in seconds before clearing the activity when the session stops. Smooths transitions between media items. |
 | `STALE_GRACE_PERIOD` | `5` | Buffer in seconds to wait after media finishes before clearing a stale session. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity for the console (`DEBUG`, `VERBOSE`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). |
