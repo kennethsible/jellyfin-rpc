@@ -11,7 +11,7 @@ Closes #
 ### Verification & Testing
 <!-- Explain how you verified these changes and confirmed no regressions were introduced. -->
 - [ ] Tested locally with Jellyfin and Discord clients
+- [ ] Includes screenshots (if GUI changes were made)
 - [ ] Ran `uv run ruff format --check src/`
 - [ ] Ran `uv run ruff check src/`
 - [ ] Ran `uv run mypy src/`
-- [ ] Includes screenshots (if GUI changes were made)

@@ -99,9 +99,9 @@ options:
 
 If not specified, configuration and log files default to the following directories:
 
-- `%AppData%\Jellyfin RPC` (Windows)
-- `~/Library/Application Support/Jellyfin RPC` (macOS)
-- `~/.config/jellyfin-rpc` (Linux)
+- Windows: `%AppData%\Jellyfin RPC`
+- macOS: `~/Library/Application Support/Jellyfin RPC`
+- Linux: `~/.config/jellyfin-rpc`
 
 ## Building from Source
 

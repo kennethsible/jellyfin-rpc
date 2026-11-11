@@ -18,18 +18,34 @@ body:
     validations:
       required: true
   - type: input
-    id: versions
+    id: rpc-version
     attributes:
-      label: Environment & Versions
-      description: Specify the relevant version numbers.
-      placeholder: "RPC: 1.14.0 | Server: 12.4 | Client: Jellyfin Media Player / Web"
+      label: RPC Version
+      description: What version of Jellyfin RPC are you using?
+      placeholder: "e.g., 1.14.0"
+    validations:
+      required: true
+  - type: input
+    id: server-version
+    attributes:
+      label: Server Version
+      description: What version is your Jellyfin server running?
+      placeholder: "e.g., 12.4"
+    validations:
+      required: true
+  - type: input
+    id: client-info
+    attributes:
+      label: Client Information
+      description: Which Jellyfin client are you playing media from?
+      placeholder: "e.g., Jellyfin Media Player / Web"
     validations:
       required: true
   - type: textarea
     id: description
     attributes:
       label: Problem Description
-      description: What happened, and what did you expect to happen instead?
+      description: What happened? What did you expect would happen?
     validations:
       required: true
   - type: textarea
@@ -37,8 +53,14 @@ body:
     attributes:
       label: Debug Logs
       description: |
-        Paste relevant console or log file output here with log level set to DEBUG.
-        Logs default to %AppData%\Jellyfin RPC (Windows), ~/Library/Application Support/Jellyfin RPC (macOS), or ~/.config/jellyfin-rpc (Linux).
+        Paste the contents of your log file below.
+
+        *Please review and redact any sensitive information.*
+
+        Log files default to the following directories:
+        - Windows: `%AppData%\Jellyfin RPC`
+        - macOS: `~/Library/Application Support/Jellyfin RPC`
+        - Linux: `~/.config/jellyfin-rpc`
       render: shell
     validations:
       required: false

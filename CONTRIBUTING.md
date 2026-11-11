@@ -7,12 +7,12 @@ Thank you for your interest in contributing to Jellyfin RPC! Please review these
 To prevent wasted effort on unwanted features, architectural mismatches, or duplicate work:
 
 - **Open an Issue First:** Every pull request must be linked to an existing GitHub issue created for discussion.
-- **Wait for Approval:** Do not open a pull request until the issue has been discussed and explicitly approved by the repository owner (`@kennethsible`).
+- **Wait for Approval:** Do not open a pull request until the issue has been discussed and explicitly approved by a maintainer.
 - **Unsolicited PRs:** Pull requests opened without an approved, associated issue may be closed without review.
 
 ## 2. Policy on AI-Assisted Code
 
-We recognize that AI tools can enhance developer productivity, but we maintain strict standards regarding code quality and understanding:
+If you are using any kind of AI assistance to contribute to Jellyfin RPC, it must be disclosed in the pull request. We recognize that AI tools can enhance developer productivity, but we maintain strict standards regarding code quality and understanding:
 
 - **Permitted:** AI assistance is allowed **only** if you have a foundational programming background and have thoroughly read, understood, tested, and validated every line of code generated.
 - **Prohibited:**
