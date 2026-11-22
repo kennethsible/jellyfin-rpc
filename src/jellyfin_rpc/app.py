@@ -10,13 +10,14 @@ import subprocess
 import sys
 import textwrap
 import threading
-from collections.abc import Callable
 from configparser import ConfigParser, SectionProxy
+from contextlib import suppress
 from dataclasses import dataclass
 from json.decoder import JSONDecodeError
 from logging import LogRecord, handlers
 from queue import Queue
 from types import FrameType
+from typing import Protocol
 
 import certifi
 import requests
@@ -60,6 +61,7 @@ from requests.exceptions import RequestException
 from jellyfin_rpc import __version__
 
 from .main import (
+    RPCError,
     build_auth_header,
     get_device_id,
     get_valid_level,
@@ -276,22 +278,29 @@ def setup_logging(log_level: int | str, log_path: str | None = None) -> Queue[Lo
     return log_queue
 
 
-class RPCWorker:
-    def __init__(
+class RPCTarget(Protocol):
+    def __call__(
         self,
-        target: Callable[[Queue[LogRecord], threading.Event], None],
-        log_queue: Queue[LogRecord],
-    ) -> None:
+        *,
+        log_queue: Queue[LogRecord] | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> None: ...
+
+
+class RPCWorker:
+    def __init__(self, target: RPCTarget, log_queue: Queue[LogRecord]) -> None:
         self.target = target
         self.log_queue = log_queue
         self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
 
+    def _run_target(self) -> None:
+        with suppress(RPCError):
+            self.target(log_queue=self.log_queue, stop_event=self.stop_event)
+
     def start(self) -> None:
         self.stop_event.clear()
-        self.thread = threading.Thread(
-            target=self.target, args=(self.log_queue, self.stop_event), daemon=True
-        )
+        self.thread = threading.Thread(target=self._run_target, daemon=True)
         self.thread.start()
 
     def stop(self) -> None:

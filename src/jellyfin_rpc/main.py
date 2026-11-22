@@ -46,7 +46,21 @@ RPC_VERSION = pkg_metadata['Version']
 USER_AGENT = f'Jellyfin-RPC/{RPC_VERSION} ( {contact_info} )'
 
 
-def load_config(ini_path: str) -> SectionProxy:
+class RPCError(Exception):
+    pass
+
+
+def apply_override(config_parser: ConfigParser, override: str) -> None:
+    if '=' not in override:
+        raise ValueError(f"invalid override format '{override}'")
+
+    key, value = override.split('=', 1)
+    if not (stripped_key := key.upper().strip()):
+        raise ValueError(f"empty key in override '{override}'")
+    config_parser.set('DEFAULT', stripped_key, value.strip())
+
+
+def load_config(ini_path: str, overrides: list[str] | None = None) -> SectionProxy:
     config_parser = ConfigParser()
     config_parser.read(ini_path, encoding='utf-8')
     has_legacy_keys = False
@@ -82,6 +96,10 @@ def load_config(ini_path: str) -> SectionProxy:
         with open(ini_path, 'w', encoding='utf-8') as ini_file:
             config_parser.write(ini_file)
 
+    if overrides:
+        for override in overrides:
+            apply_override(config_parser, override)
+
     return config_parser['DEFAULT']
 
 
@@ -90,8 +108,8 @@ def save_config(config_parser: ConfigParser, ini_path: str) -> None:
         config_parser.write(ini_file)
 
 
-def parse_delimited_list(config: SectionProxy, option: str) -> list[str]:
-    option_split = re.split(r'[,;|]', config.get(option, ''))
+def parse_delimited_list(config: SectionProxy, option: str, fallback: str = '') -> list[str]:
+    option_split = re.split(r'[,;|]', config.get(option, fallback))
     return [x.strip() for x in option_split if x.strip()]
 
 
@@ -170,7 +188,7 @@ async def initiate_quick_connect(
     except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Initiate Quick Connect ({type(e).__name__})')
         logger.debug(type(e).__name__, exc_info=True)
-        sys.exit(1)
+        raise RPCError() from e
 
     while True:
         try:
@@ -199,7 +217,7 @@ async def initiate_quick_connect(
     except (aiohttp.ClientError, TimeoutError, JSONDecodeError, KeyError) as e:
         logger.error(f'Failed to Retrieve User Access Token ({type(e).__name__})')
         logger.debug(type(e).__name__, exc_info=True)
-        sys.exit(1)
+        raise RPCError() from e
 
 
 async def resolve_host_url(session: ClientSession, jf_host: str) -> str:
@@ -223,14 +241,15 @@ async def await_jellyfin_connect(
     show_server_name: bool,
     polling_rate: int,
 ) -> tuple[str, str | None]:
-    try:
-        jf_host = config['JELLYFIN_HOST'].rstrip('/')
-        jf_username = config['JELLYFIN_USERNAME']
-        jf_api_key = config['JELLYFIN_API_KEY']
-    except KeyError as e:
-        logger.error(f'Missing Key in INI Config: {e}')
-        logger.debug(type(e).__name__, exc_info=True)
-        sys.exit(1)
+    jf_host = config.get('JELLYFIN_HOST', '').rstrip('/')
+    if not jf_host:
+        logger.error('Missing Key in INI Config: JELLYFIN_HOST')
+        raise RPCError()
+    jf_username = config.get('JELLYFIN_USERNAME', '')
+    jf_api_key = config.get('JELLYFIN_API_KEY', '')
+    if not jf_username and jf_api_key:
+        logger.error('Missing Key in INI Config: JELLYFIN_USERNAME')
+        raise RPCError()
 
     device_id = get_device_id(config)
     if not jf_api_key:
@@ -265,7 +284,7 @@ async def await_jellyfin_connect(
 
             if user_id is None:
                 logger.error(f'Jellyfin User Not Found: {jf_username}')
-                sys.exit(1)
+                raise RPCError()
 
             server_name = None
             if show_server_name:
@@ -814,7 +833,9 @@ async def websocket_listener(
     ws_state: dict[str, Any],
     wake_event: asyncio.Event,
 ) -> None:
-    jf_host = config['JELLYFIN_HOST'].rstrip('/')
+    jf_host = config.get('JELLYFIN_HOST', '').rstrip('/')
+    if not jf_host:
+        return
     device_id = get_device_id(config)
     ws_protocol = 'wss://' if jf_host.startswith('https://') else 'ws://'
     ws_host = jf_host.split('://', 1)[-1]
@@ -904,7 +925,7 @@ async def sync_presence(
     ws_state: dict[str, Any],
     wake_event: asyncio.Event,
 ) -> None:
-    jf_host = config['JELLYFIN_HOST'].rstrip('/')
+    jf_host = config.get('JELLYFIN_HOST', '').rstrip('/')
     show_server_name = config.getboolean('SHOW_SERVER_NAME', False)
     show_jf_logo = config.getboolean('SHOW_JELLYFIN_LOGO', True)
     hide_media_title = config.getboolean('HIDE_MEDIA_TITLE', False)
@@ -949,7 +970,7 @@ async def sync_presence(
     tag_filter_mode = config.get('TAG_FILTER_MODE', 'DENYLIST').upper()
     selected_tags = {tag.lower() for tag in parse_delimited_list(config, 'SELECTED_TAGS')}
 
-    media_types = parse_delimited_list(config, 'MEDIA_TYPES')
+    media_types = parse_delimited_list(config, 'MEDIA_TYPES', 'Movies, Shows, Music, LiveTV')
     type_mapping = {'Movies': 'Movie', 'Shows': 'Episode', 'Music': 'Audio', 'LiveTV': 'TvChannel'}
 
     jf_media_types: dict[str, int] = {}
@@ -1016,11 +1037,11 @@ async def sync_presence(
 
         filtered_sessions: list[dict[str, Any]] = []
         for session in sessions:
-            if session.get('UserName') != jf_username:
+            if not session.get('Id') or session.get('UserName') != jf_username:
                 continue
             media_dict = session.get('NowPlayingItem', {})
             media_type = media_dict.get('Type')
-            if media_type not in jf_media_types:
+            if not media_dict.get('Id') or media_type not in jf_media_types:
                 continue
             filtered_sessions.append(session)
 
@@ -1035,14 +1056,14 @@ async def sync_presence(
 
                 is_playing = not playstate.get('IsPaused', False)
                 priority_level = jf_media_types.get(media_type, 0)
-                is_current = 1 if session['Id'] == session_id else 0
-                activity_date = session['LastActivityDate']
+                is_current = 1 if session.get('Id') == session_id else 0
+                activity_date = session.get('LastActivityDate') or ''
 
                 return (is_playing, priority_level, is_current, activity_date)
 
             filtered_sessions.sort(key=session_sort_key, reverse=True)
             session_dict = filtered_sessions[0]
-            current_session_id = session_dict['Id']
+            current_session_id = session_dict.get('Id')
         else:
             current_session_id = None
 
@@ -1056,7 +1077,7 @@ async def sync_presence(
         if session_dict:
             media_dict = session_dict['NowPlayingItem']
             media_type = media_dict['Type']
-            media_id = media_dict['Id']
+            media_id = media_dict.get('Id')
             media_changed = media_id != cached_media_id
 
             if (
@@ -1668,8 +1689,8 @@ async def monitor_activity(
                 cache=CacheBackend(), connector=cache_connector, timeout=timeout
             ) as cache_session,
         ):
-            jf_host = config['JELLYFIN_HOST'].rstrip('/')
-            if urlparse(jf_host).scheme not in ('http', 'https'):
+            jf_host = config.get('JELLYFIN_HOST', '').rstrip('/')
+            if jf_host and urlparse(jf_host).scheme not in ('http', 'https'):
                 jf_host = await resolve_host_url(jf_session, jf_host)
                 config['JELLYFIN_HOST'] = jf_host
                 logger.warning(f'Missing URL Protocol: {jf_host}')
@@ -1708,10 +1729,14 @@ async def monitor_activity(
 def start_discord_rpc(
     ini_path: str,
     log_path: str | None = None,
+    *,
     log_queue: queue.Queue[LogRecord] | None = None,
     stop_event: threading.Event | None = None,
+    overrides: list[str] | None = None,
 ) -> None:
-    config = load_config(ini_path)
+    os.makedirs(os.path.dirname(os.path.abspath(ini_path)), exist_ok=True)
+    config = load_config(ini_path, overrides)
+
     polling_rate = max(1, config.getint('POLLING_RATE', 5))
     seek_threshold = max(1, config.getint('SEEK_THRESHOLD', 10))
     paused_timeout = max(-1, config.getint('PAUSED_TIMEOUT', 300))
@@ -1779,30 +1804,54 @@ def start_discord_rpc(
     asyncio.run(runner())
 
 
+def get_default_paths() -> tuple[str, str]:
+    if sys.platform == 'win32':
+        root_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
+        data_dir = os.path.join(root_dir, 'Jellyfin RPC')
+    elif sys.platform == 'darwin':
+        root_dir = os.path.expanduser('~/Library/Application Support')
+        data_dir = os.path.join(root_dir, 'Jellyfin RPC')
+    else:
+        root_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
+        data_dir = os.path.join(root_dir, 'jellyfin-rpc')
+
+    ini_path = os.path.join(data_dir, 'jellyfin_rpc.ini')
+    log_path = os.path.join(data_dir, 'jellyfin_rpc.log')
+    return ini_path, log_path
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ini-path', type=str)
-    parser.add_argument('--log-path', type=str)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    ini_path, log_path = get_default_paths()
+    parser.add_argument(
+        '-i', '--ini-path', default=ini_path, metavar='PATH', help='path to ini file'
+    )
+    parser.add_argument(
+        '-l', '--log-path', default=log_path, metavar='PATH', help='path to log file'
+    )
+    parser.add_argument(
+        '-o',
+        '--override',
+        action='append',
+        default=argparse.SUPPRESS,
+        metavar='KEY=VALUE',
+        help='override configuration option (e.g., -o LOG_LEVEL=DEBUG)',
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {RPC_VERSION}',
+        help='show program version and exit',
+    )
     args = parser.parse_args()
 
-    ini_path, log_path = args.ini_path, args.log_path
-    if ini_path is None or log_path is None:
-        if sys.platform == 'win32':
-            root_dir = os.getenv('APPDATA') or os.path.expanduser('~\\AppData\\Roaming')
-            data_dir = os.path.join(root_dir, 'Jellyfin RPC')
-        elif sys.platform == 'darwin':
-            root_dir = os.path.expanduser('~/Library/Application Support')
-            data_dir = os.path.join(root_dir, 'Jellyfin RPC')
-        else:
-            root_dir = os.getenv('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
-            data_dir = os.path.join(root_dir, 'jellyfin-rpc')
-
-        if ini_path is None:
-            ini_path = os.path.join(data_dir, 'jellyfin_rpc.ini')
-        if log_path is None:
-            log_path = os.path.join(data_dir, 'jellyfin_rpc.log')
-
-    start_discord_rpc(ini_path, log_path)
+    try:
+        overrides = getattr(args, 'override', None)
+        start_discord_rpc(args.ini_path, args.log_path, overrides=overrides)
+    except ValueError as e:
+        parser.error(str(e))
+    except RPCError:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

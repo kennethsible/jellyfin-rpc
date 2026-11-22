@@ -1,20 +1,20 @@
 # Contributing
 
-Thank you for your interest in contributing to Jellyfin RPC! Please review these guidelines before starting work on the project.
+Thank you for your interest in contributing to Jellyfin RPC! Please review these guidelines before getting started.
 
 ## 1. Issue & Approval Process
 
 To prevent wasted effort on unwanted features, architectural mismatches, or duplicate work:
 
 - **Open an Issue First:** Every pull request must be linked to an existing GitHub issue created for discussion.
-- **Wait for Approval:** Do not open a pull request until the issue has been discussed and explicitly approved by a maintainer.
-- **Unsolicited PRs:** Pull requests opened without an approved, associated issue may be closed without review.
+- **Wait for Approval:** Do not open a pull request until the issue has been discussed and approved by a maintainer.
+- **Unapproved PRs**: Pull requests submitted without an approved issue may be closed or placed on hold.
 
 ## 2. Policy on AI-Assisted Code
 
 If you are using any kind of AI assistance to contribute to Jellyfin RPC, it must be disclosed in the pull request. We recognize that AI tools can enhance developer productivity, but we maintain strict standards regarding code quality and understanding:
 
-- **Permitted:** AI assistance is allowed **only** if you have a foundational programming background and have thoroughly read, understood, tested, and validated every line of code generated.
+- **Permitted:** AI assistance is allowed, provided that you fully understand and verify the intended functionality of each change you submit.
 - **Prohibited:**
   - **No "Vibe Coding":** Submitting unverified, untested, or poorly understood code generated purely through prompts is strictly forbidden.
   - **No Autonomous Agent Commits:** Direct commits or PRs generated end-to-end by automated AI coding agents will be rejected.

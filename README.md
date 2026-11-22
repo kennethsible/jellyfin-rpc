@@ -90,11 +90,15 @@ If running in headless/CLI mode, configuration is loaded from an INI file. If yo
 ## CLI Usage (Headless)
 
 ```bash
-jellyfin-rpc [-h] [--ini-path INI_PATH] [--log-path LOG_PATH]
+usage: jellyfin-rpc [-h] [-i PATH] [-l PATH] [-o KEY=VALUE] [--version]
 
 options:
-  --ini-path INI_PATH
-  --log-path LOG_PATH
+  -h, --help            show this help message and exit
+  -i, --ini-path PATH   path to ini file
+  -l, --log-path PATH   path to log file
+  -o, --override KEY=VALUE
+                        override configuration option (e.g., -o LOG_LEVEL=DEBUG)
+  --version             show program version and exit
 ```
 
 If not specified, configuration and log files default to the following directories:
